@@ -1,0 +1,3 @@
+[submodule "ext/analysis-net"]
+	path = ext/analysis-net
+	url = https://github.com/allisterb/analysis-net.git
