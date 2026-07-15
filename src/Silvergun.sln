@@ -39,8 +39,6 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Docs", "Docs", "{399AC24F-6
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Tests", "Tests", "{F3CA7A48-1B99-4555-84CA-54FFFB3762EF}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "TestAssemblies", "TestAssemblies", "{E55C6F93-3532-4790-8071-6DE609678FDD}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Silvergun.CodeAnalysis.IL.Tests", "..\tests\Silvergun.CodeAnalysis.IL.Tests\Silvergun.CodeAnalysis.IL.Tests.csproj", "{49D545E5-4EDB-E952-9701-69FA29BAEE0D}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Silvergun.CodeAnalysis.IL.Tests.Fixture", "..\tests\Silvergun.CodeAnalysis.IL.Tests.Fixture\Silvergun.CodeAnalysis.IL.Tests.Fixture.csproj", "{CFB2DF25-77FF-DEE2-23C4-6829D284AB09}"
