@@ -5,6 +5,18 @@ VisualStudioVersion = 17.14.37314.3
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Silvergun.Runtime", "Silvergun.Runtime\Silvergun.Runtime.csproj", "{2F3F68D5-C613-BDA8-AE05-99F11C10E993}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "External", "External", "{02EA681E-C7D8-13C7-8484-4AC65E1B71E8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Backend.NET6", "..\ext\analysis-net\Backend\Backend.NET6.csproj", "{9A5EABAB-7DC3-DFCA-4AEB-69738942DB39}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "analysis-net", "analysis-net", "{22AA2B45-B93B-46E9-A14B-E32C508D4B99}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Model.NET6", "..\ext\analysis-net\Model\Model.NET6.csproj", "{EFC96184-261D-16BA-0340-44B2EFC3E1DB}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Microsoft.Cci.NET6", "..\ext\analysis-net\cci\NET6\Microsoft.Cci\Microsoft.Cci.NET6.csproj", "{BBF20C4A-0671-0753-1F8E-15BA141859A6}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Microsoft.DiaSymReader.Converter", "..\ext\analysis-net\cci\NET6\ext\symreader-converter\src\Microsoft.DiaSymReader.Converter\Microsoft.DiaSymReader.Converter.csproj", "{8F28E54D-3B50-7A60-2D5D-D303E7181385}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -15,9 +27,32 @@ Global
 		{2F3F68D5-C613-BDA8-AE05-99F11C10E993}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{2F3F68D5-C613-BDA8-AE05-99F11C10E993}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{2F3F68D5-C613-BDA8-AE05-99F11C10E993}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9A5EABAB-7DC3-DFCA-4AEB-69738942DB39}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9A5EABAB-7DC3-DFCA-4AEB-69738942DB39}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9A5EABAB-7DC3-DFCA-4AEB-69738942DB39}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9A5EABAB-7DC3-DFCA-4AEB-69738942DB39}.Release|Any CPU.Build.0 = Release|Any CPU
+		{EFC96184-261D-16BA-0340-44B2EFC3E1DB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EFC96184-261D-16BA-0340-44B2EFC3E1DB}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EFC96184-261D-16BA-0340-44B2EFC3E1DB}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EFC96184-261D-16BA-0340-44B2EFC3E1DB}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BBF20C4A-0671-0753-1F8E-15BA141859A6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BBF20C4A-0671-0753-1F8E-15BA141859A6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BBF20C4A-0671-0753-1F8E-15BA141859A6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BBF20C4A-0671-0753-1F8E-15BA141859A6}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8F28E54D-3B50-7A60-2D5D-D303E7181385}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8F28E54D-3B50-7A60-2D5D-D303E7181385}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8F28E54D-3B50-7A60-2D5D-D303E7181385}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8F28E54D-3B50-7A60-2D5D-D303E7181385}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{9A5EABAB-7DC3-DFCA-4AEB-69738942DB39} = {22AA2B45-B93B-46E9-A14B-E32C508D4B99}
+		{22AA2B45-B93B-46E9-A14B-E32C508D4B99} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
+		{EFC96184-261D-16BA-0340-44B2EFC3E1DB} = {22AA2B45-B93B-46E9-A14B-E32C508D4B99}
+		{BBF20C4A-0671-0753-1F8E-15BA141859A6} = {22AA2B45-B93B-46E9-A14B-E32C508D4B99}
+		{8F28E54D-3B50-7A60-2D5D-D303E7181385} = {22AA2B45-B93B-46E9-A14B-E32C508D4B99}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {D41DB21F-26B4-4889-A4FD-B4E55A037165}
