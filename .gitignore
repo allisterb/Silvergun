@@ -430,5 +430,6 @@ FodyWeavers.xsd
 
 CLAUDE.md
 .claude/*
+.claude.bak/*
 docs/agent/*
 reference/*

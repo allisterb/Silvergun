@@ -1,0 +1,6 @@
+@echo off
+echo Building Silvergun...
+dotnet restore src\Jumbee.Console.sln
+echo Building  Silvergun CLI...
+dotnet build src\Silvergun.Cli\Silvergun.Cli.csproj /p:Configuration=Debug
+exit /b %ERRORLEVEL%

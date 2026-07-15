@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 
 using CCIProvider;
 using Model.Types;
@@ -16,7 +17,15 @@ using Backend.Transformations;
 /// the public API exposes Analysis.Net <c>Model</c>/<c>Backend.Model</c> types directly.
 /// Obtain an instance through the <see cref="Create"/> factory; the constructor is private.
 /// </summary>
-/// <remarks>Instances are not thread-safe; use a single instance from a single thread.</remarks>
+/// <remarks>
+/// <see cref="Create"/> is safe to call concurrently from multiple threads: the load sequence
+/// (host creation, platform-type resolution, and <c>LoadAssembly</c>) is serialized on a shared
+/// lock because Analysis.Net's loader mutates process-wide static state during traversal
+/// (notably <c>CCIProvider.TypeExtractor.attributesCache</c>, a non-concurrent <see cref="Dictionary{TKey,TValue}"/>,
+/// and the shared static platform-type instances resolved by <c>Model.Types.PlatformTypes.Resolve</c>).
+/// The returned instances are not thread-safe: use a single instance from a single thread, but
+/// distinct instances (each with its own host) may be used in parallel.
+/// </remarks>
 public sealed class AssemblyAnalyzer : Runtime, IDisposable
 {
     #region Constructors
@@ -64,12 +73,18 @@ public sealed class AssemblyAnalyzer : Runtime, IDisposable
         try
         {
             fullPath = Path.GetFullPath(assemblyPath);
-            var host = new Model.Host();
-            PlatformTypes.Resolve(host);
-            loader = new Loader(host);
-            var assembly = loader.LoadAssembly(fullPath);
-            op.Complete();
-            return Result.Success(new AssemblyAnalyzer(host, loader, assembly, fullPath));
+            // Serialize host creation through LoadAssembly: Analysis.Net mutates non-concurrent
+            // static state during the load (CCIProvider.TypeExtractor.attributesCache and the shared
+            // Model.Types.PlatformTypes instances), so concurrent loads corrupt those collections.
+            lock (loadLock)
+            {
+                var host = new Model.Host();
+                PlatformTypes.Resolve(host);
+                loader = new Loader(host);
+                var assembly = loader.LoadAssembly(fullPath);
+                op.Complete();
+                return Result.Success(new AssemblyAnalyzer(host, loader, assembly, fullPath));
+            }
         }
         catch (Exception ex)
         {
@@ -140,6 +155,10 @@ public sealed class AssemblyAnalyzer : Runtime, IDisposable
     #endregion
 
     #region Fields
+    // Guards the load sequence in Create against concurrent access to Analysis.Net's process-wide
+    // non-concurrent static state. Shared across all instances, hence static.
+    private static readonly Lock loadLock = new();
+
     private readonly Loader loader;
 
     // Reference-equality cache so distinct MethodDefinition instances never collide.
