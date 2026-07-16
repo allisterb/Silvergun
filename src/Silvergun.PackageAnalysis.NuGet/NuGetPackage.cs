@@ -79,7 +79,7 @@ public sealed class NuGetPackage : Runtime, IDisposable
 
             var scripts = files
                 .Where(IsScript)
-                .Select(entry => { TryExtract(reader, entry, extractionDir); return new PackageScript(entry, RoleOf(entry)); })
+                .Select(entry => { TryExtract(reader, entry, extractionDir); return new PackageScript(entry.Replace('\\', '/'), RoleOf(entry)); })
                 .ToArray();
 
             Info("Opened package {0}: {1} assemblies, {2} scripts.", identity.Id, assemblies.Length, scripts.Length);
@@ -123,7 +123,8 @@ public sealed class NuGetPackage : Runtime, IDisposable
     {
         try
         {
-            var target = Path.Combine(extractionDir, entry.Replace('/', Path.DirectorySeparatorChar));
+            var target = Path.Combine(extractionDir,
+                entry.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar));
 
             // Zip-slip defense: the entry name is untrusted; a crafted "../../evil.dll" would escape the
             // extraction dir. Reject any entry whose resolved path is not under the extraction directory.
@@ -150,7 +151,7 @@ public sealed class NuGetPackage : Runtime, IDisposable
         var role = RoleOf(entry);
         using var fs = File.OpenRead(fullPath);
         var sha = Convert.ToHexStringLower(SHA256.HashData(fs));
-        return new PackageAssembly(entry, fullPath, TargetFrameworkOf(entry, role), role, sha);
+        return new PackageAssembly(entry.Replace('\\', '/'), fullPath, TargetFrameworkOf(entry, role), role, sha);
     }
 
     private static bool IsAssembly(string entry) =>
@@ -190,7 +191,10 @@ public sealed class NuGetPackage : Runtime, IDisposable
         };
     }
 
-    private static string[] Segments(string entry) => entry.Split('/');
+    // Entry names may use '/' or '\' separators — some packing tools (Windows Compress-Archive) and malformed/
+    // malicious packages emit backslashes, which ZipArchive/PackageArchiveReader preserve verbatim. Treat both
+    // as separators everywhere entry paths are interpreted.
+    private static string[] Segments(string entry) => entry.Split('/', '\\');
 
     private static string? NullIfEmpty(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
 

@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Silvergun.CodeAnalysis.IL\Silvergun.CodeAnalysis.IL.csproj" />
+    <ProjectReference Include="..\Silvergun.PackageAnalysis.NuGet\Silvergun.PackageAnalysis.NuGet.csproj" />
   </ItemGroup>
 
 </Project>

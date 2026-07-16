@@ -20,19 +20,27 @@ public enum Capability
 /// </summary>
 public sealed record SensitiveApi(Capability Capability, string TypePrefix, string? Method = null);
 
+/// <summary>How the sensitive API was referenced at the bytecode call site.</summary>
+public enum ApiCallKind { Call, Construct, MethodPointerLoad }
+
 /// <summary>One detected sensitive-API call. Carries only strings/enums — no Analysis.Net types (ADR 0001/0002).</summary>
 public sealed record ApiCallFinding(
     Capability Capability,
+    ApiCallKind Kind,       // how the callee was referenced (call / newobj / ldftn)
     string CallerType,      // full name of the type containing the calling method
     string CallerMethod,    // calling method name
-    string CalledApi);      // "Namespace.TypeName.MethodName" of the callee
+    string CalledApi);      // "Namespace.TypeName.MethodName" of the callee (TypeName + "..ctor" for Construct)
 
 /// <summary>A serializable capability report for a single analyzed assembly.</summary>
 public sealed record CapabilityReport(
     string AssemblyName,
     string AssemblyPath,
     DateTimeOffset AnalyzedAt,
-    IReadOnlyList<ApiCallFinding> Findings)
+    IReadOnlyList<ApiCallFinding> Findings,
+    int MethodsTotal,
+    int MethodsAnalyzed,
+    int MethodsSkipped,
+    IReadOnlyList<string> SkippedMethods)   // "TypeName.MethodName: <reason>"
 {
     #region Methods
     /// <summary>Serializes this report to indented JSON with enums written as their names.</summary>

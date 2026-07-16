@@ -19,7 +19,7 @@ public sealed class PackageScanner : Runtime
     /// cleaned up) before returning. Never throws: an open failure propagates as a failure <see cref="Result{T}"/>;
     /// a per-assembly failure is captured as an <see cref="AssemblyScanResult"/> with a <c>SkipReason</c>.
     /// </summary>
-    public static Result<PackageCapabilityReport> Scan(string nupkgPath)
+    public static Result<PackageCapabilityReport> Scan(string nupkgPath, bool resolveReferences = true)
     {
         var opened = NuGetPackage.Open(nupkgPath);
         if (!opened.IsSuccess)
@@ -28,7 +28,7 @@ public sealed class PackageScanner : Runtime
         using var package = opened.Value;
         try
         {
-            var results = package.Assemblies.Select(ScanAssembly).ToArray();
+            var results = package.Assemblies.Select(a => ScanAssembly(a, resolveReferences)).ToArray();
             var report = new PackageCapabilityReport(
                 package.Identity,
                 DateTimeOffset.UtcNow,
@@ -43,17 +43,31 @@ public sealed class PackageScanner : Runtime
     }
 
     // Loads and analyzes one assembly; a Create/Analyze failure yields a skipped result carrying the Result message.
-    private static AssemblyScanResult ScanAssembly(PackageAssembly assembly)
+    // Metadata is read best-effort in every path — a metadata failure never sinks the assembly (null Metadata).
+    private static AssemblyScanResult ScanAssembly(PackageAssembly assembly, bool resolveReferences)
     {
+        var metadata = ReadMetadata(assembly.FullPath, resolveReferences);
+
         var created = AssemblyAnalyzer.Create(assembly.FullPath);
         if (!created.IsSuccess)
-            return new AssemblyScanResult(assembly, null, created.Message ?? "Failed to load assembly.");
+            return new AssemblyScanResult(assembly, null, created.Message ?? "Failed to load assembly.", metadata);
 
         using var analyzer = created.Value;
         var analysis = new CapabilityAnalysis(analyzer).Analyze();
         return analysis.IsSuccess
-            ? new AssemblyScanResult(assembly, analysis.Value, null)
-            : new AssemblyScanResult(assembly, null, analysis.Message ?? "Capability analysis failed.");
+            ? new AssemblyScanResult(assembly, analysis.Value, null, metadata)
+            : new AssemblyScanResult(assembly, null, analysis.Message ?? "Capability analysis failed.", metadata);
+    }
+
+    // Best-effort CCI metadata read; a failure logs a warning and yields null — never fatal.
+    private static AssemblyMetadataInfo? ReadMetadata(string path, bool resolveReferences)
+    {
+        var result = AssemblyMetadata.Read(path, resolveReferences);
+        if (result.IsSuccess)
+            return result.Value;
+
+        Warn("Could not read metadata for {0}: {1}", path, result.Message ?? "unknown error");
+        return null;
     }
     #endregion
 }

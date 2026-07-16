@@ -9,6 +9,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\ext\analysis-net\Backend\Backend.NET6.csproj" />
     <ProjectReference Include="..\..\ext\analysis-net\CCIProvider\CCIProvider.NET6.csproj" />
+    <ProjectReference Include="..\..\ext\analysis-net\cci\NET6\Microsoft.Cci\Microsoft.Cci.NET6.csproj" />
     <ProjectReference Include="..\..\ext\Nuclear.Assemblies\Nuclear.Assemblies.csproj" />
     <ProjectReference Include="..\Silvergun.Runtime\Silvergun.Runtime.csproj" />
   </ItemGroup>

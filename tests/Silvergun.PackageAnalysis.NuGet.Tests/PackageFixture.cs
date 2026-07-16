@@ -27,6 +27,7 @@ public sealed class PackageFixture : IDisposable
 
         FixtureDllPath = typeof(Shapes).Assembly.Location;
         FixtureDllName = Path.GetFileName(FixtureDllPath);
+        FixtureAssemblyName = typeof(Shapes).Assembly.GetName().Name!;
         var fixtureBytes = File.ReadAllBytes(FixtureDllPath);
         ExpectedFixtureSha256 = Convert.ToHexString(SHA256.HashData(fixtureBytes)).ToLowerInvariant();
 
@@ -87,6 +88,23 @@ public sealed class PackageFixture : IDisposable
                 (ZipSlipRelativeEntry, NupkgBuilder.NotManagedBytes),
             ]);
 
+        // PkgE: backslash-separator regression package. Its single lib assembly is written with a raw entry
+        // name using BACKSLASH separators — `lib\netstandard2.0\<fixture dll>` — as produced by some Windows
+        // packing tools. Role/TFM derivation must split on '\' as well as '/' (Role=Lib, TFM=netstandard2.0),
+        // the stored RelativePath must be canonicalized to forward slashes, and the entry must still extract
+        // and scan. The dll is a copy of the SensitiveOps-bearing fixture so its findings are known.
+        var pkgENuspec = NupkgBuilder.NuspecXml(
+            PkgEId, PkgEVersion, "Silvergun Tests", "Backslash-separator regression test package.", "netstandard2.0", []);
+        PkgEPath = Path.Combine(rootDir, $"{PkgEId}.{PkgEVersion}.nupkg");
+        NupkgBuilder.WriteNupkg(
+            PkgEPath,
+            [
+                ($"{PkgEId}.nuspec", Encoding.UTF8.GetBytes(pkgENuspec)),
+            ],
+            [
+                ($"lib\\netstandard2.0\\{FixtureDllName}", fixtureBytes),
+            ]);
+
         // Broken inputs: a text file renamed .nupkg, and a path that does not exist.
         FakeTextNupkgPath = Path.Combine(rootDir, "fake.nupkg");
         File.WriteAllText(FakeTextNupkgPath, "this is plain text, not a zip archive at all");
@@ -110,6 +128,9 @@ public sealed class PackageFixture : IDisposable
     public const string PkgDId = "PkgD";
     public const string PkgDVersion = "4.5.6";
 
+    public const string PkgEId = "PkgE";
+    public const string PkgEVersion = "5.6.7";
+
     /// <summary>Root-level dll in PkgC (no folder segment) — classifies as <c>Role=Other</c>.</summary>
     public const string HiddenDllName = "hidden.dll";
 
@@ -121,6 +142,7 @@ public sealed class PackageFixture : IDisposable
     public string PkgBPath { get; }
     public string PkgCPath { get; }
     public string PkgDPath { get; }
+    public string PkgEPath { get; }
     public string FakeTextNupkgPath { get; }
     public string MissingNupkgPath { get; }
 
@@ -132,6 +154,9 @@ public sealed class PackageFixture : IDisposable
 
     public string FixtureDllPath { get; }
     public string FixtureDllName { get; }
+
+    /// <summary>Simple assembly name of the fixture dll (no extension), e.g. <c>Silvergun.CodeAnalysis.IL.Tests.Fixture</c>.</summary>
+    public string FixtureAssemblyName { get; }
 
     /// <summary>Lowercase-hex SHA-256 of the fixture dll bytes as packaged into PkgA.</summary>
     public string ExpectedFixtureSha256 { get; }

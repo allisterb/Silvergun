@@ -37,7 +37,8 @@ public sealed record PackageScript(string RelativePath, PackageItemRole Role); /
 public sealed record AssemblyScanResult(
     PackageAssembly Assembly,
     CapabilityReport? Report,   // null when not analyzable
-    string? SkipReason);        // non-null when Report is null (e.g. "not a managed assembly")
+    string? SkipReason,         // non-null when Report is null (e.g. "not a managed assembly")
+    AssemblyMetadataInfo? Metadata);   // null if metadata read failed or assembly not analyzable
 
 /// <summary>Aggregate, serializable scan result for one package (ADR 0002 pattern — strings/records only).</summary>
 public sealed record PackageCapabilityReport(

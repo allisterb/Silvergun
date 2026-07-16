@@ -125,6 +125,48 @@ public sealed class NuGetPackageTests : IClassFixture<PackageFixture>
         Assert.False(string.IsNullOrWhiteSpace(contentResult.SkipReason));
     }
 
+    // Metadata (ADR 0007) — Scan populates AssemblyScanResult.Metadata for the managed lib (non-null,
+    // Name matches the fixture assembly), and leaves it null for the fake native content dll whose
+    // metadata read fails on a non-PE payload — consistent with its existing SkipReason.
+    [Fact]
+    public void Scan_PkgA_PopulatesMetadataForManagedLib_AndNullForNativeContent()
+    {
+        var scan = PackageScanner.Scan(fixture.PkgAPath);
+        Assert.True(scan.IsSuccess, scan.Message);
+        var report = scan.Value;
+
+        var libResult = report.Assemblies.Single(
+            a => Norm(a.Assembly.RelativePath).EndsWith($"/{fixture.FixtureDllName}", StringComparison.Ordinal));
+        Assert.NotNull(libResult.Metadata);
+        Assert.Equal(fixture.FixtureAssemblyName, libResult.Metadata!.Name);
+
+        var contentResult = report.Assemblies.Single(
+            a => Norm(a.Assembly.RelativePath).EndsWith("/notmanaged.dll", StringComparison.Ordinal));
+        Assert.Null(contentResult.Metadata);
+        Assert.False(string.IsNullOrWhiteSpace(contentResult.SkipReason));
+    }
+
+    // Metadata — with resolveReferences: false the managed assembly's metadata is still populated, but
+    // no reference is resolved (every AssemblyReferenceInfo.Resolved is false).
+    [Fact]
+    public void Scan_PkgA_WithoutResolution_ManagedMetadataHasUnresolvedReferences()
+    {
+        var scan = PackageScanner.Scan(fixture.PkgAPath, resolveReferences: false);
+        Assert.True(scan.IsSuccess, scan.Message);
+        var report = scan.Value;
+
+        var libResult = report.Assemblies.Single(
+            a => Norm(a.Assembly.RelativePath).EndsWith($"/{fixture.FixtureDllName}", StringComparison.Ordinal));
+
+        Assert.NotNull(libResult.Metadata);
+        Assert.NotEmpty(libResult.Metadata!.References);
+        Assert.All(libResult.Metadata.References, r =>
+        {
+            Assert.False(r.Resolved);
+            Assert.Null(r.ResolvedPath);
+        });
+    }
+
     // Case 6 — empty package scans clean.
     [Fact]
     public void Scan_PkgB_SucceedsWithNoAssembliesOrFindings()
@@ -173,6 +215,19 @@ public sealed class NuGetPackageTests : IClassFixture<PackageFixture>
                 Assert.NotNull(b.Report);
                 Assert.Equal(a.Report.AssemblyName, b.Report!.AssemblyName);
                 Assert.Equal(a.Report.Findings, b.Report.Findings);
+            }
+
+            // Metadata (ADR 0007) survives the round-trip element-wise on the managed assembly.
+            if (a.Metadata is null)
+            {
+                Assert.Null(b.Metadata);
+            }
+            else
+            {
+                Assert.NotNull(b.Metadata);
+                Assert.Equal(a.Metadata.Name, b.Metadata!.Name);
+                Assert.Equal(a.Metadata.Version, b.Metadata.Version);
+                Assert.Equal(a.Metadata.References, b.Metadata.References);
             }
         }
 
@@ -298,6 +353,44 @@ public sealed class NuGetPackageTests : IClassFixture<PackageFixture>
         Assert.StartsWith(root, Path.GetFullPath(lib.FullPath), StringComparison.Ordinal);
     }
 
+    // Backslash-separator regression — a lib assembly packed with '\' separators (`lib\netstandard2.0\<dll>`,
+    // as some Windows packing tools emit) must derive Role=Lib and TargetFramework="netstandard2.0" (NOT
+    // Other/null), expose a RelativePath canonicalized to forward slashes, and still extract + scan cleanly.
+    [Fact]
+    public void Open_PkgE_ParsesBackslashSeparatedLibEntry_AsLibWithForwardSlashPath()
+    {
+        using var pkg = OpenPkgE();
+
+        var lib = pkg.Assemblies.Single(
+            a => Norm(a.RelativePath).EndsWith($"/{fixture.FixtureDllName}", StringComparison.Ordinal));
+
+        Assert.Equal(PackageItemRole.Lib, lib.Role);
+        Assert.Equal("netstandard2.0", lib.TargetFramework);
+
+        // Stored RelativePath is canonicalized to forward slashes — no backslash survives.
+        Assert.DoesNotContain('\\', lib.RelativePath);
+        Assert.Contains("lib/netstandard2.0/", lib.RelativePath, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Scan_PkgE_AnalyzesBackslashSeparatedLib_WithSensitiveOpsFindings()
+    {
+        var scan = PackageScanner.Scan(fixture.PkgEPath);
+        Assert.True(scan.IsSuccess, scan.Message);
+        var report = scan.Value;
+
+        var lib = report.Assemblies.Single(
+            a => Norm(a.Assembly.RelativePath).EndsWith($"/{fixture.FixtureDllName}", StringComparison.Ordinal));
+
+        Assert.Equal(PackageItemRole.Lib, lib.Assembly.Role);
+        Assert.Equal("netstandard2.0", lib.Assembly.TargetFramework);
+        Assert.NotNull(lib.Report);
+        Assert.Null(lib.SkipReason);
+        Assert.Contains(
+            lib.Report!.Findings,
+            f => f.CallerType.EndsWith("SensitiveOps", StringComparison.Ordinal));
+    }
+
     private NuGetPackage OpenPkgA()
     {
         var open = NuGetPackage.Open(fixture.PkgAPath);
@@ -315,6 +408,13 @@ public sealed class NuGetPackageTests : IClassFixture<PackageFixture>
     private NuGetPackage OpenPkgD()
     {
         var open = NuGetPackage.Open(fixture.PkgDPath);
+        Assert.True(open.IsSuccess, open.Message);
+        return open.Value;
+    }
+
+    private NuGetPackage OpenPkgE()
+    {
+        var open = NuGetPackage.Open(fixture.PkgEPath);
         Assert.True(open.IsSuccess, open.Message);
         return open.Value;
     }
