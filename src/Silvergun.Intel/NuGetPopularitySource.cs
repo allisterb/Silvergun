@@ -1,4 +1,4 @@
-namespace Silvergun.PackageAnalysis.NuGet.Squats;
+namespace Silvergun.Intel;
 
 using System;
 using System.Linq;
@@ -12,8 +12,10 @@ using global::NuGet.Protocol.Core.Types;
 /// <summary>
 /// A best-effort <see cref="IPackagePopularitySource"/> over <c>NuGet.Protocol</c>. Total download counts come from
 /// the feed's search metadata (<see cref="IPackageSearchMetadata.DownloadCount"/>), queried with an exact
-/// <c>packageid:</c> term against <c>https://api.nuget.org/v3/index.json</c> (overridable). All network I/O is
-/// wrapped: any failure — or a package not present on the feed — is reported as <c>null</c> ("unknown"), never thrown.
+/// <c>packageid:</c> term against <c>https://api.nuget.org/v3/index.json</c> (overridable). Fills only the
+/// <see cref="PackagePopularity.DownloadCount"/> axis (SourceRank/dependents are unknown to nuget.org). All network
+/// I/O is wrapped: any failure — or a package not present on the feed — is reported as <c>null</c> ("unknown"),
+/// never thrown.
 /// </summary>
 public sealed class NuGetPopularitySource : IPackagePopularitySource
 {
@@ -27,10 +29,10 @@ public sealed class NuGetPopularitySource : IPackagePopularitySource
 
     #region Methods
     /// <summary>
-    /// Returns the total download count for <paramref name="packageId"/>, or <c>null</c> if it is not on the feed
-    /// or any lookup step fails. Never throws (except honoring cancellation).
+    /// Returns the download-axis <see cref="PackagePopularity"/> for <paramref name="packageId"/>, or <c>null</c> if
+    /// any lookup step fails. Never throws (except honoring cancellation).
     /// </summary>
-    public async Task<long?> GetDownloadCountAsync(string packageId, CancellationToken ct = default)
+    public async Task<PackagePopularity?> GetPopularityAsync(string packageId, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(packageId))
             return null;
@@ -52,7 +54,7 @@ public sealed class NuGetPopularitySource : IPackagePopularitySource
             var match = results.FirstOrDefault(r =>
                 string.Equals(r.Identity.Id, packageId, StringComparison.OrdinalIgnoreCase));
 
-            return match?.DownloadCount;
+            return new PackagePopularity(match?.DownloadCount);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

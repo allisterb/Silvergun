@@ -29,11 +29,17 @@ public sealed class PackageScanner : Runtime
         try
         {
             var results = package.Assemblies.Select(a => ScanAssembly(a, resolveReferences)).ToArray();
+
+            // Script content scanning runs while the package is still open (its extraction dir exists — ADR 0012).
+            // Best-effort: a scanner failure yields empty findings and never sinks the whole scan.
+            var scriptFindings = ScanScripts(package);
+
             var report = new PackageCapabilityReport(
                 package.Identity,
                 DateTimeOffset.UtcNow,
                 results,
-                package.Scripts);
+                package.Scripts,
+                scriptFindings);
             return Result.Success(report);
         }
         catch (Exception ex)
@@ -59,6 +65,21 @@ public sealed class PackageScanner : Runtime
         return analysis.IsSuccess
             ? new AssemblyScanResult(assembly, analysis.Value, null, metadata, obfuscation)
             : new AssemblyScanResult(assembly, null, analysis.Message ?? "Capability analysis failed.", metadata, obfuscation);
+    }
+
+    // Best-effort script/content rule scan over the open package (ADR 0012); ScriptRuleScanner already never throws,
+    // but a defensive guard here keeps an unexpected failure from sinking the whole package scan.
+    private static IReadOnlyList<ScriptFinding> ScanScripts(NuGetPackage package)
+    {
+        try
+        {
+            return new ScriptRuleScanner().Scan(package.Scripts);
+        }
+        catch (Exception ex)
+        {
+            Warn("Script rule scanning failed for {0}: {1}", package.Identity.Id, ex.Message);
+            return Array.Empty<ScriptFinding>();
+        }
     }
 
     // Best-effort CCI metadata read; a failure logs a warning and yields null — never fatal.

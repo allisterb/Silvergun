@@ -8,16 +8,23 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Silvergun.CodeAnalysis.IL\Silvergun.CodeAnalysis.IL.csproj" />
+    <ProjectReference Include="..\Silvergun.Intel\Silvergun.Intel.csproj" />
     <ProjectReference Include="..\Silvergun.Runtime\Silvergun.Runtime.csproj" />
   </ItemGroup>
 
   <ItemGroup>
+    <!-- OSSGadget MIT backdoor rulesets (see Resources/BackdoorRules/NOTICE.md), loaded at runtime by ScriptRuleScanner. -->
+    <EmbeddedResource Include="Resources\BackdoorRules\*.json" />
+    <EmbeddedResource Include="Resources\BackdoorRules\NOTICE.md" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CST.ApplicationInspector.RulesEngine" Version="1.9.55" />
     <PackageReference Include="NuGet.LibraryModel" Version="7.6.0" />
     <PackageReference Include="NuGet.Packaging" Version="7.6.0" />
     <PackageReference Include="NuGet.ProjectModel" Version="7.6.0" />
-    <PackageReference Include="NuGet.Protocol" Version="7.6.0" />
     <PackageReference Include="NuGet.Versioning" Version="7.6.0" />
-    <PackageReference Include="Microsoft.CST.RecursiveExtractor" Version="1.2.34" />
+    <PackageReference Include="Microsoft.CST.RecursiveExtractor" Version="1.2.61" />
     <PackageReference Include="SharpCompress" Version="0.50.0" />
   </ItemGroup>
 

@@ -3,6 +3,7 @@ namespace Silvergun.CLI;
 using System.CommandLine;
 
 using Silvergun.CodeAnalysis.IL;
+using Silvergun.Intel;
 using Silvergun.PackageAnalysis.NuGet;
 using Silvergun.PackageAnalysis.NuGet.Squats;
 
@@ -78,16 +79,22 @@ internal static class Program
 
         // check-squat hits nuget.org, so its handler is async; the sync action bridges via GetAwaiter().GetResult()
         // to keep System.CommandLine's synchronous Invoke path (stdout purity handled by ConfigureLogging).
+        var sourceOption = new Option<string?>("--source")
+        {
+            Description = "Popularity source: 'nuget', 'librariesio', or omit for auto " +
+                          "(libraries.io when SILVERGUN_LIBRARIESIO_API_KEY is set, else nuget.org)."
+        };
         var checkSquatCommand = new Command("check-squat", "Check a NuGet package id for likely typosquatting (network).")
         {
-            packageIdArgument, jsonOption, outputOption, strictOption, debugOption
+            packageIdArgument, jsonOption, outputOption, strictOption, debugOption, sourceOption
         };
         checkSquatCommand.SetAction(parse => RunCheckSquat(
             parse.GetValue(packageIdArgument)!,
             parse.GetValue(jsonOption),
             parse.GetValue(outputOption),
             parse.GetValue(strictOption),
-            parse.GetValue(debugOption)).GetAwaiter().GetResult());
+            parse.GetValue(debugOption),
+            parse.GetValue(sourceOption)).GetAwaiter().GetResult());
 
         var root = new RootCommand("Silvergun — static capability analysis for .NET assemblies.")
         {
@@ -151,15 +158,16 @@ internal static class Program
             return 1;
 
         var hasObfuscation = report.Assemblies.Any(a => (a.Obfuscation?.Findings.Count ?? 0) > 0);
-        return strict && (report.AllFindings.Any() || hasObfuscation) ? 2 : 0;
+        return strict && (report.AllFindings.Any() || hasObfuscation || report.ScriptFindings.Any()) ? 2 : 0;
     }
 
     // Runs the network squat check for one package id; logging is routed off stdout by ConfigureLogging.
-    private static async Task<int> RunCheckSquat(string packageId, bool json, string? output, bool strict, bool debug)
+    private static async Task<int> RunCheckSquat(string packageId, bool json, string? output, bool strict, bool debug, string? source)
     {
         ConfigureLogging(json, output, debug);
 
-        var result = await new SquatChecker(new NuGetPopularitySource()).CheckAsync(packageId);
+        var popularity = SelectPopularitySource(source);
+        var result = await new SquatChecker(popularity).CheckAsync(packageId);
         if (!result.IsSuccess)
         {
             Console.Error.WriteLine(result.Message);
@@ -174,6 +182,34 @@ internal static class Program
             return 1;
 
         return strict && findings.Count > 0 ? 2 : 0;
+    }
+
+    // Chooses the popularity source for check-squat. Auto (default): libraries.io when the API key env var is set,
+    // else keyless nuget.org. An explicit --source overrides. The selection (never the key) is logged to stderr so
+    // stdout stays machine-parseable. Env var: SILVERGUN_LIBRARIESIO_API_KEY.
+    private static IPackagePopularitySource SelectPopularitySource(string? source)
+    {
+        var apiKey = Environment.GetEnvironmentVariable(LibrariesIoApiKeyEnvVar);
+        var hasKey = !string.IsNullOrWhiteSpace(apiKey);
+
+        var useLibrariesIo = source?.Trim().ToLowerInvariant() switch
+        {
+            "librariesio" => true,
+            "nuget" => false,
+            _ => hasKey,   // auto
+        };
+
+        if (useLibrariesIo && hasKey)
+        {
+            Console.Error.WriteLine("check-squat: using libraries.io popularity source (SourceRank/dependents).");
+            return new LibrariesIoPopularitySource(apiKey!);
+        }
+
+        if (useLibrariesIo)   // requested but no key available
+            Console.Error.WriteLine($"check-squat: {LibrariesIoApiKeyEnvVar} not set; falling back to nuget.org.");
+
+        Console.Error.WriteLine("check-squat: using nuget.org popularity source (download counts).");
+        return new NuGetPopularitySource();
     }
 
     // Keep stdout machine-parseable: when JSON goes to stdout, log to file only.
@@ -294,6 +330,8 @@ internal static class Program
             lines.AddRange(report.Scripts.Select(s => $"  {s.Role}  {s.RelativePath}"));
         }
 
+        AppendScriptFindingsSection(lines, report.ScriptFindings);
+
         lines.Add(string.Empty);
         lines.Add("Assemblies:");
         foreach (var result in report.Assemblies)
@@ -315,6 +353,22 @@ internal static class Program
         lines.Add($"Total findings: {report.AllFindings.Count()}");
 
         return string.Join(Environment.NewLine, lines);
+    }
+
+    // Lists script/content rule findings (rule id, severity, file, line), or a "none" line. Always emitted so the
+    // section shape is stable whether or not a package ships scripts.
+    private static void AppendScriptFindingsSection(List<string> lines, IReadOnlyList<ScriptFinding> findings)
+    {
+        lines.Add(string.Empty);
+        if (findings.Count == 0)
+        {
+            lines.Add("Script findings:  (none)");
+            return;
+        }
+
+        lines.Add($"Script findings: {findings.Count}");
+        lines.AddRange(findings.Select(f =>
+            $"  {f.RuleId} [{f.Severity}/{f.Confidence}]  {f.RelativePath}:{f.StartLine}  {f.RuleName}"));
     }
 
     // One compact per-assembly metadata line for scan-package; "(unavailable)" when the read failed.
@@ -368,5 +422,10 @@ internal static class Program
             lines.Add(string.Empty);
         }
     }
+    #endregion
+
+    #region Fields
+    // Env var carrying the libraries.io API key; presence auto-selects the libraries.io source. Never emitted.
+    private const string LibrariesIoApiKeyEnvVar = "SILVERGUN_LIBRARIESIO_API_KEY";
     #endregion
 }

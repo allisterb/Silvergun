@@ -5,6 +5,8 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Silvergun.Intel;
+
 /// <summary>
 /// Scores a target package id for typosquatting. Direction (initial): mutate the <em>target</em> id into
 /// near-neighbors, then ask the <see cref="IPackagePopularitySource"/> whether any existing neighbor is far more
@@ -33,7 +35,8 @@ public sealed class SquatChecker(IPackagePopularitySource popularity)
             if (string.IsNullOrWhiteSpace(targetId))
                 return Result.Success<IReadOnlyList<SquatFinding>>(Array.Empty<SquatFinding>());
 
-            var targetDownloads = await TryGetDownloadsAsync(targetId, ct) ?? 0;
+            var targetPopularity = await TryGetPopularityAsync(targetId, ct);
+            var targetDownloads = targetPopularity?.DownloadCount ?? 0;
             var candidates = SquatCandidateGenerator.Generate(targetId);
             var findings = new List<SquatFinding>();
 
@@ -41,11 +44,24 @@ public sealed class SquatChecker(IPackagePopularitySource popularity)
             {
                 ct.ThrowIfCancellationRequested();
 
-                var candidateDownloads = await TryGetDownloadsAsync(candidate.Name, ct);
-                if (candidateDownloads is not long downloads)
-                    continue;   // candidate does not exist on the feed, or lookup failed — skip.
+                var candidatePopularity = await TryGetPopularityAsync(candidate.Name, ct);
+                if (candidatePopularity is null)
+                    continue;   // candidate does not exist on the source, or lookup failed — skip.
 
-                if (downloads >= MinCandidateDownloads && downloads >= PopularityRatioThreshold * targetDownloads)
+                var downloads = candidatePopularity.DownloadCount ?? 0;
+
+                // Download axis (fallback, keyless nuget.org): a far-more-downloaded, established near-neighbor.
+                var downloadAxis = downloads >= MinCandidateDownloads
+                    && downloads >= PopularityRatioThreshold * targetDownloads;
+
+                // Stronger axes (libraries.io): an established SourceRank/dependents count on the candidate while the
+                // target is absent/below the same floor — harder to game than raw downloads.
+                var sourceRankAxis = ClearsFloor(candidatePopularity.SourceRank, MinCandidateSourceRank)
+                    && !ClearsFloor(targetPopularity?.SourceRank, MinCandidateSourceRank);
+                var dependentsAxis = ClearsFloor(candidatePopularity.DependentsCount, MinCandidateDependents)
+                    && !ClearsFloor(targetPopularity?.DependentsCount, MinCandidateDependents);
+
+                if (downloadAxis || sourceRankAxis || dependentsAxis)
                 {
                     findings.Add(new SquatFinding(
                         TargetId: targetId,
@@ -53,7 +69,9 @@ public sealed class SquatChecker(IPackagePopularitySource popularity)
                         TargetDownloads: targetDownloads,
                         CandidateDownloads: downloads,
                         Reason: candidate.Reason,
-                        Mutator: candidate.Mutator));
+                        Mutator: candidate.Mutator,
+                        CandidateSourceRank: candidatePopularity.SourceRank,
+                        CandidateDependents: candidatePopularity.DependentsCount));
                 }
             }
 
@@ -70,11 +88,11 @@ public sealed class SquatChecker(IPackagePopularitySource popularity)
     }
 
     // Best-effort single lookup: a null result means "unknown/does not exist"; an exception is treated the same.
-    private async Task<long?> TryGetDownloadsAsync(string packageId, CancellationToken ct)
+    private async Task<PackagePopularity?> TryGetPopularityAsync(string packageId, CancellationToken ct)
     {
         try
         {
-            return await popularity.GetDownloadCountAsync(packageId, ct);
+            return await popularity.GetPopularityAsync(packageId, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -85,6 +103,9 @@ public sealed class SquatChecker(IPackagePopularitySource popularity)
             return null;
         }
     }
+
+    // True when an axis value is present and meets its established-package floor.
+    private static bool ClearsFloor(int? value, int floor) => value is int v && v >= floor;
     #endregion
 
     #region Properties
@@ -96,5 +117,17 @@ public sealed class SquatChecker(IPackagePopularitySource popularity)
     /// flagging. Gates out obscure neighbors when the target is absent/unknown (target downloads == 0).
     /// </summary>
     public static long MinCandidateDownloads { get; } = 10_000;
+
+    /// <summary>
+    /// libraries.io SourceRank floor (~0–30 scale): a candidate at or above this rank is treated as an established
+    /// package. Flags when the target is absent/below this floor — a stronger, harder-to-game signal than downloads.
+    /// </summary>
+    public static int MinCandidateSourceRank { get; } = 15;
+
+    /// <summary>
+    /// Reverse-dependency floor: a candidate with at least this many dependents is treated as established. Flags
+    /// when the target is absent/below this floor.
+    /// </summary>
+    public static int MinCandidateDependents { get; } = 50;
     #endregion
 }

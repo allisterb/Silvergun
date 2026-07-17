@@ -42,7 +42,14 @@ public sealed class CapabilityAnalysis(AssemblyAnalyzer assembly)
         new(Capability.DynamicCodeLoading, "System.Reflection.Assembly", "Load"),
         new(Capability.DynamicCodeLoading, "System.Reflection.Assembly", "LoadFrom"),
         new(Capability.DynamicCodeLoading, "System.Reflection.Assembly", "LoadFile"),
+        new(Capability.DynamicCodeLoading, "System.Reflection.Assembly", "UnsafeLoadFrom"),
         new(Capability.DynamicCodeLoading, "System.Activator", "CreateInstance"),
+        new(Capability.DynamicCodeLoading, "System.Activator", "CreateInstanceFrom"),
+        new(Capability.DynamicCodeLoading, "System.Reflection.Emit."),
+        new(Capability.DynamicCodeLoading, "System.Linq.Expressions.Expression", "Compile"),
+        new(Capability.ReflectionInvocation, "System.Reflection.MethodBase", "Invoke"),
+        new(Capability.ReflectionInvocation, "System.Reflection.MethodInfo", "Invoke"),
+        new(Capability.ReflectionInvocation, "System.Delegate", "DynamicInvoke"),
         new(Capability.NativeInterop, "System.Runtime.InteropServices.Marshal"),
         new(Capability.NativeInterop, "System.Runtime.InteropServices.NativeLibrary"),
         new(Capability.Cryptography, "System.Security.Cryptography."),
@@ -77,6 +84,13 @@ public sealed class CapabilityAnalysis(AssemblyAnalyzer assembly)
                 else
                     findings.AddRange(result.Findings);
             }
+
+            // P/Invoke declarations are external methods with no IL body, so they never appear in
+            // assembly.Methods (which requires a body) and the operation walk cannot see them. Scan the
+            // full type/method set separately for the metadata pinvokeimpl flag. This adds only NativeImport
+            // findings and does not touch the method-count bookkeeping, so it can never double-count a real
+            // call site (a bodied method is never a P/Invoke).
+            findings.AddRange(ScanPlatformInvokes());
 
             var ordered = findings
                 .Distinct()
@@ -144,6 +158,62 @@ public sealed class CapabilityAnalysis(AssemblyAnalyzer assembly)
             Runtime.Warn("Skipping operation in {0}.{1}: {2}", callerType, callerMethod, ex.Message);
             return Array.Empty<ApiCallFinding>();
         }
+    }
+
+    // Scans every method definition (including external ones excluded from assembly.Methods) for the metadata
+    // pinvokeimpl flag and emits one NativeImport finding per P/Invoke declaration — detection through the
+    // attribute/metadata seam, independent of any call site. Uses CCI's IMethodDefinition.IsPlatformInvoke /
+    // PlatformInvokeData (verified in ext/analysis-net/cci Members.cs:948,1011). Enumeration and per-method
+    // reads are guarded so a hostile/corrupt module drops individual entries without failing the pass.
+    private IReadOnlyList<ApiCallFinding> ScanPlatformInvokes()
+    {
+        IMethodDefinition[] all;
+        try
+        {
+            all = assembly.Module.GetAllTypes().SelectMany(t => t.Methods).ToArray();
+        }
+        catch (Exception ex)
+        {
+            Runtime.Warn("Could not enumerate methods for P/Invoke scan: {0}", ex.Message);
+            return Array.Empty<ApiCallFinding>();
+        }
+
+        return all.SelectMany(PlatformInvokeFinding).ToArray();
+    }
+
+    // A single NativeImport finding when the method is a P/Invoke declaration, or none otherwise. Any read
+    // failure is caught and the declaration dropped individually — the scan never throws.
+    private static IReadOnlyList<ApiCallFinding> PlatformInvokeFinding(IMethodDefinition method)
+    {
+        try
+        {
+            if (!method.IsPlatformInvoke)
+                return Array.Empty<ApiCallFinding>();
+
+            var callerType = AssemblyAnalyzer.TypeName(method.ContainingTypeDefinition);
+            var callerMethod = method.Name.Value;
+            return new[] { new ApiCallFinding(Capability.NativeInterop, ApiCallKind.NativeImport, callerType, callerMethod, NativeTarget(method)) };
+        }
+        catch (Exception ex)
+        {
+            Runtime.Warn("Skipping P/Invoke declaration {0}: {1}", method.Name.Value, ex.Message);
+            return Array.Empty<ApiCallFinding>();
+        }
+    }
+
+    // "module!entryPoint" native target from PlatformInvokeData (native module name + import name), falling
+    // back to the managed method name when either part is unavailable.
+    private static string NativeTarget(IMethodDefinition method)
+    {
+        var data = method.PlatformInvokeData;
+        if (data is null || data == Dummy.PlatformInvokeInformation)
+            return method.Name.Value;
+
+        var module = data.ImportModule?.Name?.Value;
+        var entry = data.ImportName?.Value;
+        if (string.IsNullOrEmpty(entry))
+            entry = method.Name.Value;
+        return string.IsNullOrEmpty(module) ? entry : $"{module}!{entry}";
     }
 
     private static (IReadOnlyList<ApiCallFinding> Findings, string? Skip) Skip(string qualifier, string reason)

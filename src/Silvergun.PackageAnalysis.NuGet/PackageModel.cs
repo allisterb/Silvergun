@@ -30,8 +30,25 @@ public sealed record PackageAssembly(
     PackageItemRole Role,
     string Sha256);             // content hash, lowercase hex
 
-/// <summary>A packaged script/build file recorded as intel — presence and path only (ADR 0004 §4).</summary>
-public sealed record PackageScript(string RelativePath, PackageItemRole Role); // .ps1/.targets/.props
+/// <summary>A packaged script/build file recorded as intel — presence and path (ADR 0004 §4).</summary>
+public sealed record PackageScript(
+    string RelativePath,        // path inside the package, e.g. "tools/install.ps1"
+    string FullPath,            // extracted absolute path on disk (mirrors PackageAssembly.FullPath)
+    PackageItemRole Role);      // .ps1/.psm1/.targets/.props
+
+/// <summary>
+/// One text-rule match found in a packaged script/build file by the AppInspector RulesEngine (ADR 0012).
+/// Strings only (ADR 0002) so the report stays serialization-stable across engine/enum versions.
+/// </summary>
+public sealed record ScriptFinding(
+    string RuleId,
+    string RuleName,
+    string Severity,            // RulesEngine Severity name (e.g. "Moderate", "Important", "Critical")
+    string Confidence,          // RulesEngine Confidence name (e.g. "Low", "Medium", "High")
+    string RelativePath,        // package-relative path of the matched script
+    int StartLine,
+    string? Excerpt,            // matched snippet, when available
+    IReadOnlyList<string> Tags);
 
 /// <summary>The outcome of scanning a single <see cref="PackageAssembly"/>.</summary>
 public sealed record AssemblyScanResult(
@@ -46,7 +63,8 @@ public sealed record PackageCapabilityReport(
     PackageIdentityInfo Package,
     DateTimeOffset AnalyzedAt,
     IReadOnlyList<AssemblyScanResult> Assemblies,
-    IReadOnlyList<PackageScript> Scripts)
+    IReadOnlyList<PackageScript> Scripts,
+    IReadOnlyList<ScriptFinding> ScriptFindings)
 {
     #region Properties
     /// <summary>Every finding across all analyzed assemblies, flattened in stored order.</summary>

@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Silvergun;
+using Silvergun.Intel;
 using Silvergun.PackageAnalysis.NuGet.Squats;
 
 using Xunit;
@@ -267,6 +268,85 @@ public sealed class SquatDetectionTests
         Assert.DoesNotMatch(new Regex("\"Mutator\"\\s*:\\s*\\d"), json);
     }
 
+    // Multi-axis (ADR 0011) — SourceRank axis: the candidate "Newtonsoft.Json" carries an established libraries.io
+    // SourceRank (25 >= MinCandidateSourceRank) while the target is absent from the feed. Its download count (500) is
+    // below MinCandidateDownloads, so the download axis alone would NOT flag it — the flag is driven purely by the
+    // stronger SourceRank signal, and the finding surfaces it in CandidateSourceRank.
+    [Fact]
+    public async Task CheckAsync_CandidateWithEstablishedSourceRank_FlagsOnSourceRankAxisWhenDownloadsWouldNot()
+    {
+        const string target = "Newtonsft.Json";
+        const string popular = "Newtonsoft.Json";
+        const int candidateRank = 25;
+
+        Assert.True(candidateRank >= SquatChecker.MinCandidateSourceRank);
+        Assert.True(500L < SquatChecker.MinCandidateDownloads);   // download axis cannot fire on its own
+
+        // Target intentionally absent (null => unknown/below floor on every axis).
+        var source = new RichFakePopularitySource(new Dictionary<string, PackagePopularity>(StringComparer.OrdinalIgnoreCase)
+        {
+            [popular] = new PackagePopularity(DownloadCount: 500L, SourceRank: candidateRank, DependentsCount: null),
+        });
+        var checker = new SquatChecker(source);
+
+        var result = await checker.CheckAsync(target);
+
+        Assert.True(result.IsSuccess, result.Message);
+        var finding = Assert.Single(result.Value);
+        Assert.Equal(popular, finding.SquattedCandidate, ignoreCase: true);
+        Assert.Equal(candidateRank, finding.CandidateSourceRank);
+    }
+
+    // Multi-axis (ADR 0011) — DependentsCount axis: the candidate has an established reverse-dependency count
+    // (120 >= MinCandidateDependents) while the target is absent, and its download count (500) is below the download
+    // floor. The flag is driven by the dependents axis and surfaced in CandidateDependents.
+    [Fact]
+    public async Task CheckAsync_CandidateWithEstablishedDependents_FlagsOnDependentsAxisWhenDownloadsWouldNot()
+    {
+        const string target = "Newtonsft.Json";
+        const string popular = "Newtonsoft.Json";
+        const int candidateDependents = 120;
+
+        Assert.True(candidateDependents >= SquatChecker.MinCandidateDependents);
+        Assert.True(500L < SquatChecker.MinCandidateDownloads);
+
+        var source = new RichFakePopularitySource(new Dictionary<string, PackagePopularity>(StringComparer.OrdinalIgnoreCase)
+        {
+            [popular] = new PackagePopularity(DownloadCount: 500L, SourceRank: null, DependentsCount: candidateDependents),
+        });
+        var checker = new SquatChecker(source);
+
+        var result = await checker.CheckAsync(target);
+
+        Assert.True(result.IsSuccess, result.Message);
+        var finding = Assert.Single(result.Value);
+        Assert.Equal(popular, finding.SquattedCandidate, ignoreCase: true);
+        Assert.Equal(candidateDependents, finding.CandidateDependents);
+    }
+
+    // Multi-axis (ADR 0011) — no flag when the target itself is an established package on the SAME axis: both the
+    // candidate and the (present) target clear the SourceRank floor, so the stronger axis does not fire, and with
+    // downloads below the floor there is nothing to flag. Guards against flagging one popular package as a squat of
+    // another equally-established one.
+    [Fact]
+    public async Task CheckAsync_WhenTargetAlsoClearsSourceRankFloor_ReturnsNoFindings()
+    {
+        const string target = "Newtonsft.Json";
+        const string popular = "Newtonsoft.Json";
+
+        var source = new RichFakePopularitySource(new Dictionary<string, PackagePopularity>(StringComparer.OrdinalIgnoreCase)
+        {
+            [target] = new PackagePopularity(DownloadCount: 500L, SourceRank: 20, DependentsCount: null),
+            [popular] = new PackagePopularity(DownloadCount: 500L, SourceRank: 25, DependentsCount: null),
+        });
+        var checker = new SquatChecker(source);
+
+        var result = await checker.CheckAsync(target);
+
+        Assert.True(result.IsSuccess, result.Message);
+        Assert.Empty(result.Value);
+    }
+
     #endregion
 
     #region Types
@@ -286,13 +366,14 @@ public sealed class SquatDetectionTests
         #endregion
 
         #region Methods
-        public Task<long?> GetDownloadCountAsync(string packageId, CancellationToken ct = default)
+        public Task<PackagePopularity?> GetPopularityAsync(string packageId, CancellationToken ct = default)
         {
             queried.Add(packageId);
             if (throwFor.Contains(packageId))
                 throw new InvalidOperationException($"Simulated lookup failure for '{packageId}'.");
 
-            return Task.FromResult(downloads.TryGetValue(packageId, out var count) ? count : (long?)null);
+            return Task.FromResult(
+                downloads.TryGetValue(packageId, out var count) ? new PackagePopularity(count) : (PackagePopularity?)null);
         }
 
         public bool WasQueried(string packageId) => queried.Contains(packageId);
@@ -302,6 +383,28 @@ public sealed class SquatDetectionTests
         private readonly IReadOnlyDictionary<string, long> downloads;
         private readonly HashSet<string> throwFor;
         private readonly HashSet<string> queried = new(StringComparer.OrdinalIgnoreCase);
+        #endregion
+    }
+
+    /// <summary>
+    /// In-memory <see cref="IPackagePopularitySource"/> test double carrying the full multi-axis
+    /// <see cref="PackagePopularity"/> (DownloadCount/SourceRank/DependentsCount) for known ids, and <c>null</c>
+    /// ("unknown") for the rest. Used to exercise the SourceRank/dependents axes of <see cref="SquatChecker"/>.
+    /// Case-insensitive on package id.
+    /// </summary>
+    private sealed class RichFakePopularitySource : IPackagePopularitySource
+    {
+        #region Constructors
+        public RichFakePopularitySource(IReadOnlyDictionary<string, PackagePopularity> popularity) => this.popularity = popularity;
+        #endregion
+
+        #region Methods
+        public Task<PackagePopularity?> GetPopularityAsync(string packageId, CancellationToken ct = default) =>
+            Task.FromResult(popularity.TryGetValue(packageId, out var value) ? value : (PackagePopularity?)null);
+        #endregion
+
+        #region Fields
+        private readonly IReadOnlyDictionary<string, PackagePopularity> popularity;
         #endregion
     }
     #endregion

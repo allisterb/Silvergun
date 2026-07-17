@@ -5,7 +5,10 @@ public sealed record SquatCandidate(string Name, string Reason, MutatorType Muta
 
 /// <summary>
 /// A detected likely typosquat: <paramref name="TargetId"/> looks like a low-reputation look-alike of the
-/// established <paramref name="SquattedCandidate"/>, which is far more downloaded on the feed.
+/// established <paramref name="SquattedCandidate"/>, which is far more popular on the feed. The optional
+/// <paramref name="CandidateSourceRank"/>/<paramref name="CandidateDependents"/> axes (libraries.io) explain a
+/// flag driven by the stronger reputation signals rather than raw downloads; they are <c>null</c> when the source
+/// does not supply them (e.g. keyless nuget.org).
 /// </summary>
 public sealed record SquatFinding(
     string TargetId,
@@ -13,4 +16,6 @@ public sealed record SquatFinding(
     long TargetDownloads,
     long CandidateDownloads,
     string Reason,
-    MutatorType Mutator);
+    MutatorType Mutator,
+    int? CandidateSourceRank = null,
+    int? CandidateDependents = null);

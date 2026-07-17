@@ -15,6 +15,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\Silvergun.Intel\Silvergun.Intel.csproj" />
     <ProjectReference Include="..\..\src\Silvergun.PackageAnalysis.NuGet\Silvergun.PackageAnalysis.NuGet.csproj" />
     <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.Fixture\Silvergun.CodeAnalysis.IL.Tests.Fixture.csproj" />
   </ItemGroup>

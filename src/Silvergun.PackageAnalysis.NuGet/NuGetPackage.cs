@@ -44,7 +44,7 @@ public sealed class NuGetPackage : Runtime, IDisposable
     /// <summary>Inventoried binaries: all <c>.dll</c>/<c>.exe</c> anywhere in the package (incl. <see cref="PackageItemRole.Other"/>), extracted to disk.</summary>
     public IReadOnlyList<PackageAssembly> Assemblies { get; }
 
-    /// <summary>Inventoried scripts/build files (<c>.ps1</c>/<c>.targets</c>/<c>.props</c>) anywhere in the package.</summary>
+    /// <summary>Inventoried scripts/build files (<c>.ps1</c>/<c>.psm1</c>/<c>.targets</c>/<c>.props</c>) anywhere in the package.</summary>
     public IReadOnlyList<PackageScript> Scripts { get; }
 
     /// <summary>The unique temp directory this package's files were extracted into.</summary>
@@ -121,7 +121,7 @@ public sealed class NuGetPackage : Runtime, IDisposable
 
             var scripts = files
                 .Where(x => IsScript(x.rel))
-                .Select(x => new PackageScript(x.rel, RoleOf(x.rel)))
+                .Select(x => new PackageScript(x.rel, x.full, RoleOf(x.rel)))
                 .ToArray();
 
             Info("Opened package {0}: {1} assemblies, {2} scripts.", identity.Id, assemblies.Length, scripts.Length);
@@ -220,7 +220,8 @@ public sealed class NuGetPackage : Runtime, IDisposable
         HasExtension(entry, ".dll") || HasExtension(entry, ".exe");
 
     private static bool IsScript(string entry) =>
-        HasExtension(entry, ".ps1") || HasExtension(entry, ".targets") || HasExtension(entry, ".props");
+        HasExtension(entry, ".ps1") || HasExtension(entry, ".psm1") ||
+        HasExtension(entry, ".targets") || HasExtension(entry, ".props");
 
     private static bool HasExtension(string entry, string ext) =>
         entry.EndsWith(ext, StringComparison.OrdinalIgnoreCase);

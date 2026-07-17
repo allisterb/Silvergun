@@ -9,7 +9,7 @@ using System.Text.Json.Serialization;
 public enum Capability
 {
     FileSystem, Network, ProcessExecution, Registry, EnvironmentProbe,
-    DynamicCodeLoading, NativeInterop, Cryptography
+    DynamicCodeLoading, ReflectionInvocation, NativeInterop, Cryptography
 }
 
 /// <summary>
@@ -20,8 +20,11 @@ public enum Capability
 /// </summary>
 public sealed record SensitiveApi(Capability Capability, string TypePrefix, string? Method = null);
 
-/// <summary>How the sensitive API was referenced at the bytecode call site.</summary>
-public enum ApiCallKind { Call, Construct, MethodPointerLoad }
+/// <summary>
+/// How the sensitive API was referenced. The first three are bytecode call sites; <see cref="NativeImport"/>
+/// is a metadata seam — a <c>[DllImport]</c>/pinvokeimpl declaration, which has no call instruction.
+/// </summary>
+public enum ApiCallKind { Call, Construct, MethodPointerLoad, NativeImport }
 
 /// <summary>One detected sensitive-API call. Carries only strings/enums — no Analysis.Net types (ADR 0001/0002).</summary>
 public sealed record ApiCallFinding(
@@ -29,7 +32,8 @@ public sealed record ApiCallFinding(
     ApiCallKind Kind,       // how the callee was referenced (call / newobj / ldftn)
     string CallerType,      // full name of the type containing the calling method
     string CallerMethod,    // calling method name
-    string CalledApi);      // "Namespace.TypeName.MethodName" of the callee (TypeName + "..ctor" for Construct)
+    string CalledApi);      // "Namespace.TypeName.MethodName" of the callee (TypeName + "..ctor" for Construct;
+                            // "module!entryPoint" native target for NativeImport)
 
 /// <summary>A serializable capability report for a single analyzed assembly.</summary>
 public sealed record CapabilityReport(
