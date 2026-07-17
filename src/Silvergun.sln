@@ -53,6 +53,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Silvergun.PackageAnalysis.N
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Silvergun.Intel", "Silvergun.Intel\Silvergun.Intel.csproj", "{35FC26FE-E51D-4F25-AAFD-20D70F3C7263}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Silvergun.CLI.Tests", "..\tests\Silvergun.CLI.Tests\Silvergun.CLI.Tests.csproj", "{1E2481DB-F5EF-4DE7-A361-F5ACBD1C1247}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -111,6 +113,10 @@ Global
 		{35FC26FE-E51D-4F25-AAFD-20D70F3C7263}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{35FC26FE-E51D-4F25-AAFD-20D70F3C7263}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{35FC26FE-E51D-4F25-AAFD-20D70F3C7263}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1E2481DB-F5EF-4DE7-A361-F5ACBD1C1247}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1E2481DB-F5EF-4DE7-A361-F5ACBD1C1247}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1E2481DB-F5EF-4DE7-A361-F5ACBD1C1247}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1E2481DB-F5EF-4DE7-A361-F5ACBD1C1247}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -130,6 +136,7 @@ Global
 		{CFB2DF25-77FF-DEE2-23C4-6829D284AB09} = {F3CA7A48-1B99-4555-84CA-54FFFB3762EF}
 		{7060270C-7EE8-446E-97BE-E1EFA082EAF7} = {CE38ABE8-8369-4C59-96A2-12ECD2BCCCC1}
 		{35FC26FE-E51D-4F25-AAFD-20D70F3C7263} = {CE38ABE8-8369-4C59-96A2-12ECD2BCCCC1}
+		{1E2481DB-F5EF-4DE7-A361-F5ACBD1C1247} = {F3CA7A48-1B99-4555-84CA-54FFFB3762EF}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {D41DB21F-26B4-4889-A4FD-B4E55A037165}

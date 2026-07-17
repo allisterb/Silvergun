@@ -9,7 +9,7 @@ using System.Text.Json.Serialization;
 public enum Capability
 {
     FileSystem, Network, ProcessExecution, Registry, EnvironmentProbe,
-    DynamicCodeLoading, ReflectionInvocation, NativeInterop, Cryptography
+    DynamicCodeLoading, NativeInterop, Cryptography, ReflectionInvocation
 }
 
 /// <summary>

@@ -28,11 +28,13 @@ public sealed class NuGetPackage : Runtime, IDisposable
         PackageIdentityInfo identity,
         IReadOnlyList<PackageAssembly> assemblies,
         IReadOnlyList<PackageScript> scripts,
+        string? nuspecPath,
         string extractionDir)
     {
         Identity = identity;
         Assemblies = assemblies;
         Scripts = scripts;
+        NuspecPath = nuspecPath;
         ExtractionDir = extractionDir;
     }
     #endregion
@@ -46,6 +48,13 @@ public sealed class NuGetPackage : Runtime, IDisposable
 
     /// <summary>Inventoried scripts/build files (<c>.ps1</c>/<c>.psm1</c>/<c>.targets</c>/<c>.props</c>) anywhere in the package.</summary>
     public IReadOnlyList<PackageScript> Scripts { get; }
+
+    /// <summary>
+    /// Extracted absolute path of the package manifest (top-level <c>*.nuspec</c>) when present and contained,
+    /// else <c>null</c>. Deliberately kept out of <see cref="Scripts"/> (avoids inventory noise per ADR 0012);
+    /// exposed only so the content scanner can rule-scan the manifest (ADR 0012 follow-up). Not serialized.
+    /// </summary>
+    public string? NuspecPath { get; }
 
     /// <summary>The unique temp directory this package's files were extracted into.</summary>
     public string ExtractionDir { get; }
@@ -124,9 +133,16 @@ public sealed class NuGetPackage : Runtime, IDisposable
                 .Select(x => new PackageScript(x.rel, x.full, RoleOf(x.rel)))
                 .ToArray();
 
+            // Manifest for content scanning only — the top-level *.nuspec, already validated by the same
+            // containment gate as every other file. Kept out of the script inventory (ADR 0012). Null when absent.
+            var nuspecPath = files
+                .Where(x => IsNuspec(x.rel))
+                .Select(x => x.full)
+                .FirstOrDefault();
+
             Info("Opened package {0}: {1} assemblies, {2} scripts.", identity.Id, assemblies.Length, scripts.Length);
             op.Complete();
-            return Result.Success(new NuGetPackage(identity, assemblies, scripts, extractionDir));
+            return Result.Success(new NuGetPackage(identity, assemblies, scripts, nuspecPath, extractionDir));
         }
         catch (Exception ex)
         {
@@ -222,6 +238,10 @@ public sealed class NuGetPackage : Runtime, IDisposable
     private static bool IsScript(string entry) =>
         HasExtension(entry, ".ps1") || HasExtension(entry, ".psm1") ||
         HasExtension(entry, ".targets") || HasExtension(entry, ".props");
+
+    // The package manifest lives at the archive root (no path segments), e.g. "Foo.nuspec".
+    private static bool IsNuspec(string entry) =>
+        HasExtension(entry, ".nuspec") && Segments(entry).Length == 1;
 
     private static bool HasExtension(string entry, string ext) =>
         entry.EndsWith(ext, StringComparison.OrdinalIgnoreCase);

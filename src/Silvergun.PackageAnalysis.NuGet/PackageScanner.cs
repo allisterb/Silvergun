@@ -1,6 +1,7 @@
 namespace Silvergun.PackageAnalysis.NuGet;
 
 using System;
+using System.IO;
 using System.Linq;
 
 using Silvergun.CodeAnalysis.IL;
@@ -68,12 +69,19 @@ public sealed class PackageScanner : Runtime
     }
 
     // Best-effort script/content rule scan over the open package (ADR 0012); ScriptRuleScanner already never throws,
-    // but a defensive guard here keeps an unexpected failure from sinking the whole package scan.
+    // but a defensive guard here keeps an unexpected failure from sinking the whole package scan. The manifest
+    // (.nuspec) is scanned too — it is kept out of the script inventory but rule-scanned for content (ADR 0012 follow-up).
     private static IReadOnlyList<ScriptFinding> ScanScripts(NuGetPackage package)
     {
         try
         {
-            return new ScriptRuleScanner().Scan(package.Scripts);
+            var scanner = new ScriptRuleScanner();
+            var findings = scanner.Scan(package.Scripts);
+            if (package.NuspecPath is null)
+                return findings;
+
+            var nuspecFindings = scanner.ScanFile(package.NuspecPath, Path.GetFileName(package.NuspecPath));
+            return findings.Concat(nuspecFindings).ToArray();
         }
         catch (Exception ex)
         {

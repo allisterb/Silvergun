@@ -1,7 +1,14 @@
+using System.Runtime.CompilerServices;
+
+[assembly: InternalsVisibleTo("Silvergun.CLI.Tests")]
+
 namespace Silvergun.CLI;
 
 using System.CommandLine;
 
+using Spectre.Console;
+
+using Silvergun.CLI.Reports;
 using Silvergun.CodeAnalysis.IL;
 using Silvergun.Intel;
 using Silvergun.PackageAnalysis.NuGet;
@@ -36,6 +43,10 @@ internal static class Program
         {
             Description = "Emit the capability report as JSON instead of the human summary."
         };
+        var richOption = new Option<bool>("--rich")
+        {
+            Description = "Render the rich report (ANSI color + Unicode); default is plain ASCII."
+        };
         var outputOption = new Option<string?>("--output")
         {
             Description = "Write the report to a file instead of stdout."
@@ -53,13 +64,23 @@ internal static class Program
             Description = "Skip best-effort assembly-reference resolution when reading metadata."
         };
 
+        // --json (machine) and --rich (rich) are two mutually-exclusive format selectors; reject both at parse
+        // time (non-zero exit, message on stderr) before any handler runs, mirroring the --source validation posture.
+        void RejectJsonWithRich(System.CommandLine.Parsing.CommandResult result)
+        {
+            if (result.GetValue(jsonOption) && result.GetValue(richOption))
+                result.AddError("--json and --rich are mutually exclusive; specify at most one output format.");
+        }
+
         var analyzeCommand = new Command("analyze", "Analyze a .NET assembly for sensitive-API capabilities.")
         {
-            assemblyPathArgument, jsonOption, outputOption, strictOption, debugOption, noResolveOption
+            assemblyPathArgument, jsonOption, richOption, outputOption, strictOption, debugOption, noResolveOption
         };
+        analyzeCommand.Validators.Add(RejectJsonWithRich);
         analyzeCommand.SetAction(parse => RunAnalyze(
             parse.GetValue(assemblyPathArgument)!,
             parse.GetValue(jsonOption),
+            parse.GetValue(richOption),
             parse.GetValue(outputOption),
             parse.GetValue(strictOption),
             parse.GetValue(debugOption),
@@ -67,11 +88,13 @@ internal static class Program
 
         var scanPackageCommand = new Command("scan-package", "Scan a .nupkg for sensitive-API capabilities.")
         {
-            nupkgPathArgument, jsonOption, outputOption, strictOption, debugOption, noResolveOption
+            nupkgPathArgument, jsonOption, richOption, outputOption, strictOption, debugOption, noResolveOption
         };
+        scanPackageCommand.Validators.Add(RejectJsonWithRich);
         scanPackageCommand.SetAction(parse => RunScanPackage(
             parse.GetValue(nupkgPathArgument)!,
             parse.GetValue(jsonOption),
+            parse.GetValue(richOption),
             parse.GetValue(outputOption),
             parse.GetValue(strictOption),
             parse.GetValue(debugOption),
@@ -84,13 +107,23 @@ internal static class Program
             Description = "Popularity source: 'nuget', 'librariesio', or omit for auto " +
                           "(libraries.io when SILVERGUN_LIBRARIESIO_API_KEY is set, else nuget.org)."
         };
+        // Reject an explicit but unrecognized --source at parse time (non-zero exit, message on stderr);
+        // null/absent stays valid (= auto). Absent options never trigger this validator.
+        sourceOption.Validators.Add(result =>
+        {
+            var value = result.GetValueOrDefault<string?>();
+            if (!IsValidSource(value))
+                result.AddError($"Invalid --source value '{value}'. Valid values: nuget, librariesio (or omit for auto).");
+        });
         var checkSquatCommand = new Command("check-squat", "Check a NuGet package id for likely typosquatting (network).")
         {
-            packageIdArgument, jsonOption, outputOption, strictOption, debugOption, sourceOption
+            packageIdArgument, jsonOption, richOption, outputOption, strictOption, debugOption, sourceOption
         };
+        checkSquatCommand.Validators.Add(RejectJsonWithRich);
         checkSquatCommand.SetAction(parse => RunCheckSquat(
             parse.GetValue(packageIdArgument)!,
             parse.GetValue(jsonOption),
+            parse.GetValue(richOption),
             parse.GetValue(outputOption),
             parse.GetValue(strictOption),
             parse.GetValue(debugOption),
@@ -104,7 +137,7 @@ internal static class Program
         return root.Parse(args).Invoke();
     }
 
-    private static int RunAnalyze(string assemblyPath, bool json, string? output, bool strict, bool debug, bool noResolve)
+    private static int RunAnalyze(string assemblyPath, bool json, bool rich, string? output, bool strict, bool debug, bool noResolve)
     {
         ConfigureLogging(json, output, debug);
 
@@ -132,15 +165,21 @@ internal static class Program
         var metadataResult = AssemblyMetadata.Read(assemblyPath, !noResolve);
         var report = new AssemblyAnalysisReport(
             metadataResult.IsSuccess ? metadataResult.Value : null, reportResult.Value, obfuscation);
-        var text = json ? report.ToJson() : AssemblySummary(report);
 
-        if (!TryEmit(text, output))
+        var emitted = json
+            ? TryEmit(report.ToJson(), output)
+            : EmitHumanReport(c => AssemblyReportRenderer.Render(c, report), output, rich);
+        if (!emitted)
             return 1;
 
-        return strict && (report.Capabilities.Findings.Count > 0 || (report.Obfuscation?.Findings.Count ?? 0) > 0) ? 2 : 0;
+        return ScanExitCode(
+            strict,
+            report.Capabilities.Findings.Count > 0,
+            (report.Obfuscation?.Findings.Count ?? 0) > 0,
+            hasScriptFindings: false);
     }
 
-    private static int RunScanPackage(string nupkgPath, bool json, string? output, bool strict, bool debug, bool noResolve)
+    private static int RunScanPackage(string nupkgPath, bool json, bool rich, string? output, bool strict, bool debug, bool noResolve)
     {
         ConfigureLogging(json, output, debug);
 
@@ -152,17 +191,19 @@ internal static class Program
         }
 
         var report = scanResult.Value;
-        var text = json ? report.ToJson() : PackageSummary(report, nupkgPath);
 
-        if (!TryEmit(text, output))
+        var emitted = json
+            ? TryEmit(report.ToJson(), output)
+            : EmitHumanReport(c => PackageReportRenderer.Render(c, report, nupkgPath), output, rich);
+        if (!emitted)
             return 1;
 
         var hasObfuscation = report.Assemblies.Any(a => (a.Obfuscation?.Findings.Count ?? 0) > 0);
-        return strict && (report.AllFindings.Any() || hasObfuscation || report.ScriptFindings.Any()) ? 2 : 0;
+        return ScanExitCode(strict, report.AllFindings.Any(), hasObfuscation, report.ScriptFindings.Any());
     }
 
     // Runs the network squat check for one package id; logging is routed off stdout by ConfigureLogging.
-    private static async Task<int> RunCheckSquat(string packageId, bool json, string? output, bool strict, bool debug, string? source)
+    private static async Task<int> RunCheckSquat(string packageId, bool json, bool rich, string? output, bool strict, bool debug, string? source)
     {
         ConfigureLogging(json, output, debug);
 
@@ -176,18 +217,20 @@ internal static class Program
 
         var findings = result.Value;
         var report = new SquatCheckReport(packageId, DateTimeOffset.UtcNow, findings);
-        var text = json ? report.ToJson() : SquatSummary(report);
 
-        if (!TryEmit(text, output))
+        var emitted = json
+            ? TryEmit(report.ToJson(), output)
+            : EmitHumanReport(c => SquatReportRenderer.Render(c, report), output, rich);
+        if (!emitted)
             return 1;
 
-        return strict && findings.Count > 0 ? 2 : 0;
+        return ScanExitCode(strict, findings.Count > 0, hasObfuscation: false, hasScriptFindings: false);
     }
 
     // Chooses the popularity source for check-squat. Auto (default): libraries.io when the API key env var is set,
     // else keyless nuget.org. An explicit --source overrides. The selection (never the key) is logged to stderr so
     // stdout stays machine-parseable. Env var: SILVERGUN_LIBRARIESIO_API_KEY.
-    private static IPackagePopularitySource SelectPopularitySource(string? source)
+    internal static IPackagePopularitySource SelectPopularitySource(string? source)
     {
         var apiKey = Environment.GetEnvironmentVariable(LibrariesIoApiKeyEnvVar);
         var hasKey = !string.IsNullOrWhiteSpace(apiKey);
@@ -211,6 +254,16 @@ internal static class Program
         Console.Error.WriteLine("check-squat: using nuget.org popularity source (download counts).");
         return new NuGetPopularitySource();
     }
+
+    // Whether an explicit --source value is recognized. null/absent = auto and is always valid; comparison is
+    // case-insensitive and trims surrounding whitespace (mirrors SelectPopularitySource's parsing).
+    internal static bool IsValidSource(string? source) =>
+        source is null || source.Trim().ToLowerInvariant() is "nuget" or "librariesio";
+
+    // The --strict CI gate exit-code decision (ADR 0003): 2 when strict and any finding gate trips, else 0.
+    // Pure — the run methods pass the concrete gate inputs so this stays independently testable.
+    internal static int ScanExitCode(bool strict, bool hasCapabilityFindings, bool hasObfuscation, bool hasScriptFindings) =>
+        strict && (hasCapabilityFindings || hasObfuscation || hasScriptFindings) ? 2 : 0;
 
     // Keep stdout machine-parseable: when JSON goes to stdout, log to file only.
     private static void ConfigureLogging(bool json, string? output, bool debug)
@@ -242,190 +295,50 @@ internal static class Program
         }
     }
 
-    private static string AssemblySummary(AssemblyAnalysisReport report)
+    // Renders a human (Spectre) report with explicit, flag-driven richness (ADR 0014). Default (rich=false):
+    // plain ASCII-only, no-ANSI/no-color, forced regardless of TTY. --rich (rich=true): rich ANSI+color+Unicode,
+    // forced regardless of redirection (NO_COLOR still strips color). To --output the same mode is written to a
+    // buffer then persisted via TryEmit. Never uses interactive/live widgets.
+    private static bool EmitHumanReport(Action<IAnsiConsole> render, string? output, bool rich)
     {
-        var capabilities = report.Capabilities;
-        var lines = new List<string>
+        if (output is null)
         {
-            $"Assembly: {capabilities.AssemblyName}",
-            $"Path:     {capabilities.AssemblyPath}",
-            $"Findings: {capabilities.Findings.Count}",
-            string.Empty
-        };
-
-        AppendMetadataSection(lines, report.Metadata);
-        lines.Add(string.Empty);
-
-        if (capabilities.Findings.Count == 0)
-            lines.Add("No sensitive-API findings.");
-        else
-            AppendFindingsGrouped(lines, capabilities.Findings);
-
-        lines.Add(string.Empty);
-        AppendObfuscationSection(lines, report.Obfuscation);
-        return string.Join(Environment.NewLine, lines);
-    }
-
-    // Lists each obfuscation finding, or "Obfuscation:  (none)" when the report is null/empty.
-    private static void AppendObfuscationSection(List<string> lines, ObfuscationReport? obfuscation)
-    {
-        var findings = obfuscation?.Findings;
-        if (findings is null || findings.Count == 0)
-        {
-            lines.Add("Obfuscation:  (none)");
-            return;
+            render(CreateConsole(Console.Out, rich, tty: !Console.IsOutputRedirected));
+            return true;
         }
 
-        lines.Add("Obfuscation:");
-        lines.AddRange(findings.Select(f =>
-            $"  {f.Kind}  {f.DetectedAs}  {f.CallerType}.{f.CallerMethod}  (len {f.EncodedLength}, entropy {f.Entropy:F2})"));
+        var buffer = new StringWriter();
+        render(CreateConsole(buffer, rich, tty: false));
+        return TryEmit(buffer.ToString(), output);
     }
 
-    // Compact, security-relevant-first metadata block; "(unavailable)" when the read failed.
-    private static void AppendMetadataSection(List<string> lines, AssemblyMetadataInfo? m)
+    // Builds the report console for a given richness. Rich: ANSI + a color system (stripped to NoColors under
+    // NO_COLOR) + Unicode borders/glyphs. Plain: no ANSI, no color, ASCII-only. Off a TTY the width is pinned so
+    // default output is deterministic regardless of redirection; on a TTY Spectre may detect it for wrapping.
+    private static IAnsiConsole CreateConsole(TextWriter writer, bool rich, bool tty)
     {
-        if (m is null)
+        var console = AnsiConsole.Create(new AnsiConsoleSettings
         {
-            lines.Add("Metadata:  (unavailable)");
-            return;
-        }
-
-        var resolved = m.References.Count(r => r.Resolved);
-        lines.Add("Metadata:");
-        lines.Add($"  Name/Version:   {m.Name} {m.Version ?? "?"}");
-        lines.Add($"  Strong-named:   {YesNo(m.IsStrongNameSigned)}   (PKT {m.PublicKeyToken ?? "none"})");
-        lines.Add($"  IL-only:        {YesNo(m.IsILOnly)}   (32-bit {YN(m.Requires32Bit)}  64-bit {YN(m.Requires64Bit)}  AMD {YN(m.RequiresAmdInstructionSet)}  foreign-types {YN(m.ContainsForeignTypes)})");
-        lines.Add($"  Module kind:    {m.ModuleKind}");
-        lines.Add($"  Target runtime: {m.TargetRuntimeVersion ?? "?"}");
-        lines.Add($"  Entry point:    {YesNo(m.HasEntryPoint)}");
-        lines.Add($"  Attributes:     {m.CustomAttributes.Count}");
-        lines.Add($"  References:     {m.References.Count} ({resolved} resolved)");
+            Ansi = rich ? AnsiSupport.Yes : AnsiSupport.No,
+            ColorSystem = rich && !NoColorRequested() ? ColorSystemSupport.Standard : ColorSystemSupport.NoColors,
+            Out = new AnsiConsoleOutput(writer)
+        });
+        console.Profile.Capabilities.Unicode = rich;
+        if (!tty)
+            console.Profile.Width = DefaultReportWidth;
+        return console;
     }
 
-    private static string YesNo(bool b) => b ? "yes" : "no";
-
-    private static string YN(bool b) => b ? "y" : "n";
-
-    private static string PackageSummary(PackageCapabilityReport report, string nupkgPath)
-    {
-        var pkg = report.Package;
-        var lines = new List<string>
-        {
-            $"Package: {pkg.Id} {pkg.Version}",
-            $"Authors: {pkg.Authors ?? "(unknown)"}",
-            $"Path:    {nupkgPath}",
-            string.Empty,
-            "Declared dependencies:"
-        };
-
-        if (pkg.Dependencies.Count == 0)
-            lines.Add("  (none)");
-        else
-            lines.AddRange(pkg.Dependencies.Select(d => $"  {d.Id} {d.VersionRange} ({d.TargetFramework})"));
-
-        if (report.Scripts.Count > 0)
-        {
-            lines.Add(string.Empty);
-            lines.Add("Scripts:");
-            lines.AddRange(report.Scripts.Select(s => $"  {s.Role}  {s.RelativePath}"));
-        }
-
-        AppendScriptFindingsSection(lines, report.ScriptFindings);
-
-        lines.Add(string.Empty);
-        lines.Add("Assemblies:");
-        foreach (var result in report.Assemblies)
-        {
-            var asm = result.Assembly;
-            lines.Add($"{asm.RelativePath} [{asm.Role}/{asm.TargetFramework ?? "?"}]");
-            AppendMetaLine(lines, result.Metadata);
-            if (result.SkipReason is not null)
-                lines.Add($"  (skipped: {result.SkipReason})");
-            else if (result.Report is null || result.Report.Findings.Count == 0)
-                lines.Add("  (no findings)");
-            else
-                AppendFindingsGrouped(lines, result.Report.Findings);
-
-            AppendObfuscationLine(lines, result.Obfuscation);
-        }
-
-        lines.Add(string.Empty);
-        lines.Add($"Total findings: {report.AllFindings.Count()}");
-
-        return string.Join(Environment.NewLine, lines);
-    }
-
-    // Lists script/content rule findings (rule id, severity, file, line), or a "none" line. Always emitted so the
-    // section shape is stable whether or not a package ships scripts.
-    private static void AppendScriptFindingsSection(List<string> lines, IReadOnlyList<ScriptFinding> findings)
-    {
-        lines.Add(string.Empty);
-        if (findings.Count == 0)
-        {
-            lines.Add("Script findings:  (none)");
-            return;
-        }
-
-        lines.Add($"Script findings: {findings.Count}");
-        lines.AddRange(findings.Select(f =>
-            $"  {f.RuleId} [{f.Severity}/{f.Confidence}]  {f.RelativePath}:{f.StartLine}  {f.RuleName}"));
-    }
-
-    // One compact per-assembly metadata line for scan-package; "(unavailable)" when the read failed.
-    private static void AppendMetaLine(List<string> lines, AssemblyMetadataInfo? m)
-    {
-        if (m is null)
-        {
-            lines.Add("  meta: (unavailable)");
-            return;
-        }
-
-        var resolved = m.References.Count(r => r.Resolved);
-        lines.Add($"  meta: {m.Name} {m.Version ?? "?"}  signed={YN(m.IsStrongNameSigned)} ilonly={YN(m.IsILOnly)} kind={m.ModuleKind} refs={m.References.Count}({resolved} resolved)");
-    }
-
-    // Per-assembly obfuscation sub-section for scan-package; omitted entirely when null/empty.
-    private static void AppendObfuscationLine(List<string> lines, ObfuscationReport? obfuscation)
-    {
-        var findings = obfuscation?.Findings;
-        if (findings is null || findings.Count == 0)
-            return;
-
-        lines.Add($"  obfuscation: {findings.Count} finding(s)");
-        lines.AddRange(findings.Select(f => $"    {f.Kind} {f.DetectedAs}  {f.CallerType}.{f.CallerMethod}"));
-    }
-
-    // Human summary for check-squat: a header and one line per finding, or a "none found" line.
-    private static string SquatSummary(SquatCheckReport report)
-    {
-        var lines = new List<string> { $"Package: {report.PackageId}", string.Empty };
-
-        if (report.Findings.Count == 0)
-        {
-            lines.Add("No likely typosquat targets found.");
-            return string.Join(Environment.NewLine, lines);
-        }
-
-        lines.AddRange(report.Findings.Select(f =>
-            $"  {f.SquattedCandidate}  (candidate {f.CandidateDownloads} dl vs target {f.TargetDownloads} dl)  [{f.Mutator}: {f.Reason}]"));
-        return string.Join(Environment.NewLine, lines);
-    }
-
-    // Groups findings by Capability and appends the formatted lines (shared by both verbs).
-    private static void AppendFindingsGrouped(List<string> lines, IEnumerable<ApiCallFinding> findings)
-    {
-        foreach (var group in findings.GroupBy(f => f.Capability).OrderBy(g => g.Key.ToString()))
-        {
-            lines.Add($"{group.Key} ({group.Count()})");
-            lines.AddRange(group.Select(f =>
-                $"  {f.Capability}  {f.CallerType}.{f.CallerMethod}  ->  {f.CalledApi}"));
-            lines.Add(string.Empty);
-        }
-    }
+    private static bool NoColorRequested() =>
+        !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("NO_COLOR"));
     #endregion
 
     #region Fields
     // Env var carrying the libraries.io API key; presence auto-selects the libraries.io source. Never emitted.
     private const string LibrariesIoApiKeyEnvVar = "SILVERGUN_LIBRARIESIO_API_KEY";
+
+    // Deterministic report width used when not attached to a TTY (redirected stdout or a file), so default
+    // (ASCII) output doesn't vary with the ambient terminal. A TTY may still be measured for wrapping.
+    private const int DefaultReportWidth = 100;
     #endregion
 }

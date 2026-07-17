@@ -28,43 +28,58 @@ public sealed class ScriptRuleScanner : Runtime
         if (processor is null)
             return Array.Empty<ScriptFinding>();
 
-        return scripts.SelectMany(s => AnalyzeScript(processor, s)).ToArray();
+        return scripts.SelectMany(s => AnalyzeFile(processor, s.FullPath, s.RelativePath)).ToArray();
     }
 
-    // Reads and analyzes one script; any failure (missing/oversized/unreadable file, engine error) warns and
+    /// <summary>
+    /// Analyzes a single arbitrary file on disk (e.g. the package manifest <c>.nuspec</c>, which is intentionally
+    /// not part of the script inventory — ADR 0012) with the shared, already-compiled ruleset. <paramref name="relativePath"/>
+    /// is the package-relative path recorded on each resulting <see cref="ScriptFinding.RelativePath"/>. Never throws.
+    /// </summary>
+    public IReadOnlyList<ScriptFinding> ScanFile(string fullPath, string relativePath)
+    {
+        var processor = sharedProcessor.Value;
+        if (processor is null)
+            return Array.Empty<ScriptFinding>();
+
+        return AnalyzeFile(processor, fullPath, relativePath);
+    }
+
+    // Reads and analyzes one file; any failure (missing/oversized/unreadable file, engine error) warns and
     // yields no findings for that file. The content is passed both as text and wrapped in a FileEntry, as the API
-    // requires. Unknown file languages fall back to a default LanguageInfo so build files are still analyzed.
-    private static IReadOnlyList<ScriptFinding> AnalyzeScript(RuleProcessor processor, PackageScript script)
+    // requires. Unknown file languages (e.g. XML/.nuspec) fall back to a default LanguageInfo so the file is still
+    // analyzed by the language-agnostic backdoor patterns.
+    private static IReadOnlyList<ScriptFinding> AnalyzeFile(RuleProcessor processor, string fullPath, string relativePath)
     {
         try
         {
-            if (string.IsNullOrEmpty(script.FullPath) || !File.Exists(script.FullPath))
+            if (string.IsNullOrEmpty(fullPath) || !File.Exists(fullPath))
             {
-                Warn("Skipping script rule scan for {0}: file not found on disk.", script.RelativePath);
+                Warn("Skipping rule scan for {0}: file not found on disk.", relativePath);
                 return Array.Empty<ScriptFinding>();
             }
 
-            var length = new FileInfo(script.FullPath).Length;
+            var length = new FileInfo(fullPath).Length;
             if (length > MaxScriptBytes)
             {
-                Warn("Skipping script rule scan for {0}: {1} bytes exceeds the {2}-byte cap.",
-                    script.RelativePath, length, MaxScriptBytes);
+                Warn("Skipping rule scan for {0}: {1} bytes exceeds the {2}-byte cap.",
+                    relativePath, length, MaxScriptBytes);
                 return Array.Empty<ScriptFinding>();
             }
 
-            var content = File.ReadAllText(script.FullPath);
-            var name = Path.GetFileName(script.FullPath);
+            var content = File.ReadAllText(fullPath);
+            var name = Path.GetFileName(fullPath);
             if (!languages.FromFileNameOut(name, out var language))
                 language = new LanguageInfo();   // language-agnostic backdoor patterns still apply
 
             using var stream = new MemoryStream(Encoding.UTF8.GetBytes(content));
             var entry = new FileEntry(name, stream);
             var matches = processor.AnalyzeFile(content, entry, language);
-            return matches.Select(m => MapFinding(m, script.RelativePath)).ToArray();
+            return matches.Select(m => MapFinding(m, relativePath)).ToArray();
         }
         catch (Exception ex)
         {
-            Warn("Script rule scan failed for {0}: {1}", script.RelativePath, ex.Message);
+            Warn("Rule scan failed for {0}: {1}", relativePath, ex.Message);
             return Array.Empty<ScriptFinding>();
         }
     }
