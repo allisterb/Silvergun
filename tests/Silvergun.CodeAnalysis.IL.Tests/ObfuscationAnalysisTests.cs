@@ -15,9 +15,9 @@ using Xunit;
 /// encoded executable/archive detection, false-positive guards, entropy/length population, JSON
 /// round-trip, and a real-assembly robustness smoke.
 /// </summary>
-public sealed class ObfuscationAnalysisTests : IClassFixture<AssemblyDisassemblerFixture>
+public sealed class ObfuscationAnalysisTests : IClassFixture<AssemblyAnalyzerFixture>
 {
-    public ObfuscationAnalysisTests(AssemblyDisassemblerFixture fixture) => this.fixture = fixture;
+    public ObfuscationAnalysisTests(AssemblyAnalyzerFixture fixture) => this.fixture = fixture;
 
     // Case 1 — a base64 constant that decodes to bytes starting with "MZ" is flagged as an
     // EncodedExecutable, described as a Windows PE.
@@ -158,7 +158,7 @@ public sealed class ObfuscationAnalysisTests : IClassFixture<AssemblyDisassemble
     {
         var runtimePath = typeof(Silvergun.Runtime).Assembly.Location;
 
-        var create = AssemblyDisassembler.Create(runtimePath);
+        var create = AssemblyAnalyzer.Load(runtimePath);
         Assert.True(create.IsSuccess, create.Message);
         using var analyzer = create.Value;
 
@@ -172,10 +172,10 @@ public sealed class ObfuscationAnalysisTests : IClassFixture<AssemblyDisassemble
 
     private ObfuscationReport Analyze()
     {
-        var result = new ObfuscationAnalysis(fixture.Analyzer).Analyze();
+        var result = new ObfuscationAnalysis(fixture.Assembly).Analyze();
         Assert.True(result.IsSuccess, result.Message);
         return result.Value;
     }
 
-    private readonly AssemblyDisassemblerFixture fixture;
+    private readonly AssemblyAnalyzerFixture fixture;
 }

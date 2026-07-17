@@ -9,25 +9,23 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 
-using Model;
-using Model.Types;
-using Model.ThreeAddressCode.Values;
-using Bytecode = Model.Bytecode;
+using Microsoft.Cci;
 
 /// <summary>
 /// Scans an assembly's IL string constants for hidden/encoded payloads — the "encode a payload so
-/// scanners miss it, then decode and run it" pattern. It enumerates every method's <em>bytecode</em>
-/// body for <c>ldstr</c> operands (a <see cref="Bytecode.LoadInstruction"/> with a string
-/// <see cref="Constant"/> operand), and for each sufficiently long constant that looks base64/hex it
-/// decodes, round-trip verifies, and classifies the decoded bytes via magic numbers (adapted from
-/// OSSGadget's Defogger): Windows PE / ELF / Mach-O / Java (<see cref="HiddenContentKind.EncodedExecutable"/>),
+/// scanners miss it, then decode and run it" pattern. It reads CCI directly from an
+/// <see cref="AssemblyAnalyzer"/> (ADR 0009), enumerating every method's <see cref="IMethodBody.Operations"/>
+/// for <c>ldstr</c> operands (an <see cref="OperationCode.Ldstr"/> whose <see cref="IOperation.Value"/> is the
+/// loaded string), and for each sufficiently long constant that looks base64/hex it decodes, round-trip
+/// verifies, and classifies the decoded bytes via magic numbers (adapted from OSSGadget's Defogger):
+/// Windows PE / ELF / Mach-O / Java (<see cref="HiddenContentKind.EncodedExecutable"/>),
 /// zip / gzip (<see cref="HiddenContentKind.EncodedArchive"/>). Long high-entropy encoded constants that
 /// decode cleanly but match no signature are reported as <see cref="HiddenContentKind.HighEntropyBlob"/>.
 /// Shannon entropy of the raw encoded constant is recorded on every finding as a secondary signal.
 /// Detection classifies only — decoded archives are never extracted (RecursiveExtractor is out of scope).
 /// Never throws: per-method / per-constant failures are skipped, not fatal (ADR 0005 threat model).
 /// </summary>
-public sealed class ObfuscationAnalysis(AssemblyDisassembler analyzer)
+public sealed class ObfuscationAnalysis(AssemblyAnalyzer assembly)
 {
     #region Properties
     /// <summary>Minimum Shannon entropy (bits/char) for an encoded constant to count as a high-entropy blob.</summary>
@@ -46,7 +44,7 @@ public sealed class ObfuscationAnalysis(AssemblyDisassembler analyzer)
     /// </summary>
     public Result<ObfuscationReport> Analyze()
     {
-        var findings = analyzer.Methods
+        var findings = assembly.Methods
             .SelectMany(ScanMethod)
             .Distinct()
             .OrderBy(f => f.CallerType, StringComparer.Ordinal)
@@ -56,8 +54,8 @@ public sealed class ObfuscationAnalysis(AssemblyDisassembler analyzer)
             .ToArray();
 
         var report = new ObfuscationReport(
-            analyzer.Assembly.Name,
-            analyzer.AssemblyPath,
+            assembly.AssemblyName,
+            assembly.AssemblyPath,
             DateTimeOffset.UtcNow,
             findings);
 
@@ -69,29 +67,36 @@ public sealed class ObfuscationAnalysis(AssemblyDisassembler analyzer)
         // String constants deliver the core value; blob scanning can be added as a follow-up.
     }
 
-    // Scans one method's bytecode body for ldstr constants and classifies each. Skips (never throws) any
-    // method with no bytecode body or whose scan throws; per-constant failures are isolated in Classify.
-    private IReadOnlyList<ObfuscationFinding> ScanMethod(MethodDefinition method)
+    // Scans one method's CCI operations for ldstr constants and classifies each. Skips (never throws) any
+    // method whose scan throws; per-constant failures are isolated in Classify. The caller type is best-effort
+    // ("<unknown>" if unresolvable), matching the prior analysis-net semantics.
+    private IReadOnlyList<ObfuscationFinding> ScanMethod(IMethodDefinition method)
     {
         try
         {
-            var callerType = method.ContainingType is IBasicType type ? FullName(type) : "<unknown>";
-            var body = method.Body;
-            if (body is null || body.Kind != MethodBodyKind.Bytecode)
-                return [];
+            var callerType = CallerType(method);
+            var callerMethod = method.Name.Value;
 
-            return body.Instructions
-                .OfType<Bytecode.LoadInstruction>()
-                .Where(load => load.Operation == Bytecode.LoadOperation.Value && load.Operand is Constant { Value: string })
-                .Select(load => (string)((Constant)load.Operand).Value)
-                .SelectMany(text => Classify(text, callerType, method.Name))
+            return method.Body.Operations
+                .Where(op => op.OperationCode == OperationCode.Ldstr)
+                .Select(op => op.Value as string)
+                .Where(text => text is not null)
+                .SelectMany(text => Classify(text!, callerType, callerMethod))
                 .ToArray();
         }
         catch (Exception ex)
         {
-            Runtime.Warn("Skipping obfuscation scan of method {0}: {1}", method.Name, ex.Message);
+            Runtime.Warn("Skipping obfuscation scan of method {0}: {1}", method.Name.Value, ex.Message);
             return [];
         }
+    }
+
+    // Best-effort namespace-qualified type name of the method's containing type ("<unknown>" if CCI cannot
+    // resolve it), using the same TypeName helper CapabilityAnalysis uses.
+    private static string CallerType(IMethodDefinition method)
+    {
+        try { return AssemblyAnalyzer.TypeName(method.ContainingTypeDefinition); }
+        catch { return "<unknown>"; }
     }
 
     // Decode-and-classify a single string constant. A constant can be a valid encoding under more than one
@@ -190,9 +195,6 @@ public sealed class ObfuscationAnalysis(AssemblyDisassembler analyzer)
         text.GroupBy(c => c)
             .Select(g => (double)g.Count() / text.Length)
             .Sum(p => -p * Math.Log2(p));
-
-    private static string FullName(IBasicType type) =>
-        string.IsNullOrEmpty(type.ContainingNamespace) ? type.Name : $"{type.ContainingNamespace}.{type.Name}";
     #endregion
 
     #region Fields
