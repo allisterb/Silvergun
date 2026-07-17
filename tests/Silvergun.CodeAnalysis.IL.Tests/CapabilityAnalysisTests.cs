@@ -13,15 +13,15 @@ using Xunit;
 /// Capability (sensitive-API) analysis over the shared fixture assembly, plus the serializable
 /// <see cref="CapabilityReport"/> round-trip. Covers the seven cases in the capability-analysis spec.
 /// </summary>
-public sealed class CapabilityAnalysisTests : IClassFixture<AnalyzerFixture>
+public sealed class CapabilityAnalysisTests : IClassFixture<AssemblyAnalyzerFixture>
 {
-    public CapabilityAnalysisTests(AnalyzerFixture fixture) => this.fixture = fixture;
+    public CapabilityAnalysisTests(AssemblyAnalyzerFixture fixture) => this.fixture = fixture;
 
     // Case 1
     [Fact]
     public void Analyze_OnFixtureAssembly_SucceedsWithPopulatedReport()
     {
-        var result = new CapabilityAnalysis(fixture.Analyzer).Analyze();
+        var result = new CapabilityAnalysis(fixture.Assembly).Analyze();
 
         Assert.True(result.IsSuccess, result.Message);
 
@@ -256,11 +256,11 @@ public sealed class CapabilityAnalysisTests : IClassFixture<AnalyzerFixture>
     {
         var runtimePath = typeof(Silvergun.Runtime).Assembly.Location;
 
-        var create = AssemblyAnalyzer.Create(runtimePath);
+        var create = AssemblyAnalyzer.Load(runtimePath);
         Assert.True(create.IsSuccess, create.Message);
-        using var analyzer = create.Value;
+        using var cci = create.Value;
 
-        var result = new CapabilityAnalysis(analyzer).Analyze();
+        var result = new CapabilityAnalysis(cci).Analyze();
         Assert.True(result.IsSuccess, result.Message);
 
         var report = result.Value;
@@ -277,10 +277,10 @@ public sealed class CapabilityAnalysisTests : IClassFixture<AnalyzerFixture>
 
     private CapabilityReport Analyze()
     {
-        var result = new CapabilityAnalysis(fixture.Analyzer).Analyze();
+        var result = new CapabilityAnalysis(fixture.Assembly).Analyze();
         Assert.True(result.IsSuccess, result.Message);
         return result.Value;
     }
 
-    private readonly AnalyzerFixture fixture;
+    private readonly AssemblyAnalyzerFixture fixture;
 }

@@ -10,16 +10,16 @@ using Silvergun.CodeAnalysis.IL.Tests.Fixture;
 using Xunit;
 
 /// <summary>
-/// Regression cover for the race in <see cref="AssemblyAnalyzer.Create"/> over Analysis.Net's
+/// Regression cover for the race in <see cref="AssemblyDisassembler.Create"/> over Analysis.Net's
 /// process-wide, non-concurrent static state (<c>CCIProvider.TypeExtractor.attributesCache</c> and the
 /// shared <c>Model.Types.PlatformTypes</c> instances). The load sequence is now serialized on a shared
-/// lock, so <see cref="AssemblyAnalyzer.Create"/> is documented safe to call concurrently. Pre-fix, many
+/// lock, so <see cref="AssemblyDisassembler.Create"/> is documented safe to call concurrently. Pre-fix, many
 /// parallel loads reliably threw <see cref="System.InvalidOperationException"/> from a corrupted
 /// non-concurrent <c>Dictionary</c>; post-fix every concurrent create must succeed.
 /// </summary>
-public sealed class AssemblyAnalyzerConcurrencyTests
+public sealed class AssemblyDisassemblerConcurrencyTests
 {
-    public AssemblyAnalyzerConcurrencyTests() => Runtime.Initialize("Silvergun", "TESTS");
+    public AssemblyDisassemblerConcurrencyTests() => Runtime.Initialize("Silvergun", "TESTS");
 
     [Fact]
     public async Task Create_CalledConcurrently_AllSucceedWithoutCorruptingSharedState()
@@ -28,7 +28,7 @@ public sealed class AssemblyAnalyzerConcurrencyTests
         var fixturePath = typeof(Shapes).Assembly.Location;
 
         var tasks = Enumerable.Range(0, degreeOfParallelism)
-            .Select(_ => Task.Run(() => AssemblyAnalyzer.Create(fixturePath)))
+            .Select(_ => Task.Run(() => AssemblyDisassembler.Create(fixturePath)))
             .ToArray();
 
         var results = await Task.WhenAll(tasks);

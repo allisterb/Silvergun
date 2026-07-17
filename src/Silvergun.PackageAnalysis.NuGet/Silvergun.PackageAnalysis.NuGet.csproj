@@ -17,6 +17,7 @@
     <PackageReference Include="NuGet.ProjectModel" Version="7.6.0" />
     <PackageReference Include="NuGet.Protocol" Version="7.6.0" />
     <PackageReference Include="NuGet.Versioning" Version="7.6.0" />
+    <PackageReference Include="Microsoft.CST.RecursiveExtractor" Version="1.2.34" />
   </ItemGroup>
 
 </Project>

@@ -3,20 +3,23 @@ namespace Silvergun.PackageAnalysis.NuGet;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Security.Cryptography;
 
-using global::NuGet.Common;
 using global::NuGet.Frameworks;
 using global::NuGet.Packaging;
 
+using Microsoft.CST.RecursiveExtractor;
+
 /// <summary>
-/// An opened, extracted <c>.nupkg</c> session. <see cref="Open"/> reads the nuspec identity, inventories
-/// the assemblies (all <c>.dll</c>/<c>.exe</c> anywhere in the package, incl. <see cref="PackageItemRole.Other"/>
-/// per ADR 0004 §3 as amended 2026-07-15) and scripts (<c>.ps1</c>/
-/// <c>.targets</c>/<c>.props</c>), and extracts only those inventoried files to a unique temp directory.
-/// <see cref="Dispose"/> deletes that directory (idempotent). Obtain instances through <see cref="Open"/>;
-/// the constructor is private. Never throws from the factory — failures are returned as a <see cref="Result{T}"/>.
+/// An opened, extracted <c>.nupkg</c> session. <see cref="Open"/> reads the nuspec identity, extracts the
+/// package to a unique temp directory with <see cref="Extractor">RecursiveExtractor</see> (bomb/nesting-resistant
+/// per ADR 0008), then inventories the assemblies (all <c>.dll</c>/<c>.exe</c> anywhere in the package, incl.
+/// <see cref="PackageItemRole.Other"/> per ADR 0004 §3 as amended 2026-07-15) and scripts (<c>.ps1</c>/
+/// <c>.targets</c>/<c>.props</c>) from disk. <see cref="Dispose"/> deletes that directory (idempotent). Obtain
+/// instances through <see cref="Open"/>; the constructor is private. Never throws from the factory — failures
+/// are returned as a <see cref="Result{T}"/>.
 /// </summary>
 public sealed class NuGetPackage : Runtime, IDisposable
 {
@@ -64,22 +67,61 @@ public sealed class NuGetPackage : Runtime, IDisposable
         try
         {
             Directory.CreateDirectory(extractionDir);
-            using var reader = new PackageArchiveReader(
-                nupkgPath, DefaultFrameworkNameProvider.Instance, DefaultCompatibilityProvider.Instance);
 
-            var identity = ReadIdentity(reader.NuspecReader);
-            var files = reader.GetFiles().ToArray();
+            // NuGet's reader is used ONLY for nuspec metadata (ADR 0008); disposed before extraction so it
+            // does not hold the .nupkg while RecursiveExtractor reads it.
+            PackageIdentityInfo identity;
+            using (var reader = new PackageArchiveReader(
+                nupkgPath, DefaultFrameworkNameProvider.Instance, DefaultCompatibilityProvider.Instance))
+            {
+                identity = ReadIdentity(reader.NuspecReader);
+            }
+
+            // Content extraction is delegated to RecursiveExtractor — bomb/nesting-resistant (ADR 0008).
+            // On a decompression bomb the resource governor aborts (throws), caught below and surfaced as a
+            // failure Result; a non-Ok status is likewise a failure. Never throws out of the factory.
+            var opts = new ExtractorOptions
+            {
+                MaxExtractedBytes = 2L * 1024 * 1024 * 1024, // absolute cap (2 GiB)
+                MaxExtractedBytesRatio = 200.0,               // zip-bomb ratio cap (its default; set explicitly)
+                Timeout = TimeSpan.FromMinutes(2),
+                // Recurse=false inventories the nupkg's own entries only. Unwinding *nested* archives inside a
+                // nupkg (e.g. a dll hidden in a bundled zip) is a real hostile-input enhancement but changes
+                // inventory results — deferred to a follow-up so this increment stays behavior-preserving.
+                Recurse = false,
+            };
+            var status = new Extractor().ExtractToDirectory(extractionDir, nupkgPath, opts);
+            if (status != ExtractionStatusCode.Ok)
+            {
+                TryDeleteDir(extractionDir);
+                return Result.FailureWithError<NuGetPackage>($"Failed to extract package {nupkgPath} (status {status}).");
+            }
+
+            // RecursiveExtractor nests the archive's entries under a directory named after the .nupkg file.
+            var contentRoot = Path.Combine(extractionDir, Path.GetFileName(nupkgPath));
+            if (!Directory.Exists(contentRoot)) contentRoot = extractionDir;
+
+            // Zip-slip containment (defense in depth over RecursiveExtractor — ADR 0008): the declared entry
+            // names are untrusted. RecursiveExtractor neutralizes a traversal entry (e.g. "../../evil.dll") by
+            // clamping it into the archive root rather than writing outside, so it cannot be excluded by an
+            // on-disk under-root test alone. We validate the declared names here and inventory only files that
+            // correspond to a contained (non-escaping) entry — preserving the pre-RE "escaping entries are
+            // never inventoried" semantics.
+            var contained = ContainedEntryPaths(nupkgPath, contentRoot);
+
+            var files = Directory.EnumerateFiles(contentRoot, "*", SearchOption.AllDirectories)
+                .Select(full => (full, rel: RelativeUnderRoot(contentRoot, full)))
+                .Where(x => IsContained(x.rel, x.full, contained, extractionDir))
+                .ToArray();
 
             var assemblies = files
-                .Where(IsAssembly)
-                .Select(entry => (entry, full: TryExtract(reader, entry, extractionDir)))
-                .Where(x => x.full is not null)
-                .Select(x => MakeAssembly(x.entry, x.full!))
+                .Where(x => IsAssembly(x.rel))
+                .Select(x => MakeAssembly(x.rel, x.full))
                 .ToArray();
 
             var scripts = files
-                .Where(IsScript)
-                .Select(entry => { TryExtract(reader, entry, extractionDir); return new PackageScript(entry.Replace('\\', '/'), RoleOf(entry)); })
+                .Where(x => IsScript(x.rel))
+                .Select(x => new PackageScript(x.rel, RoleOf(x.rel)))
                 .ToArray();
 
             Info("Opened package {0}: {1} assemblies, {2} scripts.", identity.Id, assemblies.Length, scripts.Length);
@@ -118,40 +160,60 @@ public sealed class NuGetPackage : Runtime, IDisposable
             dependencies);
     }
 
-    // Extracts a single inventoried entry; returns the on-disk path, or null on failure (warned, non-fatal).
-    private static string? TryExtract(PackageArchiveReader reader, string entry, string extractionDir)
+    // The declared entry names (read straight from the zip central directory — names only, no decompression,
+    // so bomb-safe) whose target path stays under contentRoot, normalized to forward slashes. Untrusted names
+    // are validated here as the zip-slip containment layer; RecursiveExtractor is the primary guard (ADR 0008).
+    private static HashSet<string> ContainedEntryPaths(string nupkgPath, string contentRoot)
     {
-        try
-        {
-            var target = Path.Combine(extractionDir,
-                entry.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar));
+        var root = Path.GetFullPath(contentRoot);
+        if (!root.EndsWith(Path.DirectorySeparatorChar)) root += Path.DirectorySeparatorChar;
 
-            // Zip-slip defense: the entry name is untrusted; a crafted "../../evil.dll" would escape the
-            // extraction dir. Reject any entry whose resolved path is not under the extraction directory.
-            var fullTarget = Path.GetFullPath(target);
-            var root = Path.GetFullPath(extractionDir);
-            if (!root.EndsWith(Path.DirectorySeparatorChar)) root += Path.DirectorySeparatorChar;
-            if (!fullTarget.StartsWith(root, StringComparison.Ordinal))
+        using var zip = ZipFile.OpenRead(nupkgPath);
+        return zip.Entries
+            .Select(e => e.FullName)
+            .Where(name => !string.IsNullOrEmpty(name) && !name.EndsWith('/'))
+            .Where(name =>
             {
-                Warn("Skipping package entry {0}: resolves outside the extraction directory.", entry);
-                return null;
-            }
-
-            return reader.ExtractFile(entry, target, NullLogger.Instance);
-        }
-        catch (Exception ex)
-        {
-            Warn("Failed to extract package entry {0}: {1}", entry, ex.Message);
-            return null;
-        }
+                var target = Path.GetFullPath(Path.Combine(contentRoot,
+                    name.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar)));
+                return target.StartsWith(root, StringComparison.Ordinal);
+            })
+            .Select(name => name.Replace('\\', '/'))
+            .ToHashSet(StringComparer.Ordinal);
     }
 
-    private static PackageAssembly MakeAssembly(string entry, string fullPath)
+    // Path of an extracted file relative to the content root, normalized to forward slashes.
+    private static string RelativeUnderRoot(string contentRoot, string fullPath) =>
+        Path.GetRelativePath(contentRoot, fullPath).Replace('\\', '/');
+
+    // Inventory gate: the file must correspond to a contained declared entry (zip-slip containment), and its
+    // canonical path must remain under the extraction directory (belt-and-suspenders, defense in depth).
+    private static bool IsContained(string rel, string fullPath, HashSet<string> contained, string extractionDir)
     {
-        var role = RoleOf(entry);
+        if (!contained.Contains(rel))
+        {
+            Warn("Skipping extracted file {0}: does not match a contained package entry.", rel);
+            return false;
+        }
+
+        var full = Path.GetFullPath(fullPath);
+        var root = Path.GetFullPath(extractionDir);
+        if (!root.EndsWith(Path.DirectorySeparatorChar)) root += Path.DirectorySeparatorChar;
+        if (!full.StartsWith(root, StringComparison.Ordinal))
+        {
+            Warn("Skipping extracted file {0}: resolves outside the extraction directory.", rel);
+            return false;
+        }
+
+        return true;
+    }
+
+    private static PackageAssembly MakeAssembly(string relativePath, string fullPath)
+    {
+        var role = RoleOf(relativePath);
         using var fs = File.OpenRead(fullPath);
         var sha = Convert.ToHexStringLower(SHA256.HashData(fs));
-        return new PackageAssembly(entry.Replace('\\', '/'), fullPath, TargetFrameworkOf(entry, role), role, sha);
+        return new PackageAssembly(relativePath, fullPath, TargetFrameworkOf(relativePath, role), role, sha);
     }
 
     private static bool IsAssembly(string entry) =>

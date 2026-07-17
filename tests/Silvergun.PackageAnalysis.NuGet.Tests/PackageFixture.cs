@@ -105,6 +105,20 @@ public sealed class PackageFixture : IDisposable
                 ($"lib\\netstandard2.0\\{FixtureDllName}", fixtureBytes),
             ]);
 
+        // PkgBomb: decompression-bomb regression package (ADR 0008). A single, highly compressible payload
+        // entry of ~50 MB of zero bytes — it zips to a few KB, giving a compression ratio in the thousands:1,
+        // far above the extractor's 200:1 cap. RecursiveExtractor's resource governor must abort extraction
+        // before materializing the payload, so NuGetPackage.Open returns a failure Result (never throws / OOMs).
+        // Payload bytes are all zero: tiny to allocate here, but their decompressed size is what trips the cap.
+        var pkgBombNuspec = NupkgBuilder.NuspecXml(
+            BombId, BombVersion, "Silvergun Tests", "Decompression-bomb regression test package.", "netstandard2.0", []);
+        BombPath = Path.Combine(rootDir, $"{BombId}.{BombVersion}.nupkg");
+        NupkgBuilder.WriteNupkg(BombPath,
+        [
+            ($"{BombId}.nuspec", Encoding.UTF8.GetBytes(pkgBombNuspec)),
+            ("content/bomb.bin", new byte[50_000_000]),
+        ]);
+
         // Broken inputs: a text file renamed .nupkg, and a path that does not exist.
         FakeTextNupkgPath = Path.Combine(rootDir, "fake.nupkg");
         File.WriteAllText(FakeTextNupkgPath, "this is plain text, not a zip archive at all");
@@ -131,6 +145,9 @@ public sealed class PackageFixture : IDisposable
     public const string PkgEId = "PkgE";
     public const string PkgEVersion = "5.6.7";
 
+    public const string BombId = "PkgBomb";
+    public const string BombVersion = "6.7.8";
+
     /// <summary>Root-level dll in PkgC (no folder segment) — classifies as <c>Role=Other</c>.</summary>
     public const string HiddenDllName = "hidden.dll";
 
@@ -143,6 +160,10 @@ public sealed class PackageFixture : IDisposable
     public string PkgCPath { get; }
     public string PkgDPath { get; }
     public string PkgEPath { get; }
+
+    /// <summary>Decompression-bomb package: one ~50 MB all-zero entry that zips tiny (ratio far above the 200:1 cap).</summary>
+    public string BombPath { get; }
+
     public string FakeTextNupkgPath { get; }
     public string MissingNupkgPath { get; }
 

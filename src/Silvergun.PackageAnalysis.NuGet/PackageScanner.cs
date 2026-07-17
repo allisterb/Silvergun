@@ -42,18 +42,18 @@ public sealed class PackageScanner : Runtime
         }
     }
 
-    // Loads and analyzes one assembly; a Create/Analyze failure yields a skipped result carrying the Result message.
+    // Loads and analyzes one assembly; a Load/Analyze failure yields a skipped result carrying the Result message.
     // Metadata is read best-effort in every path — a metadata failure never sinks the assembly (null Metadata).
     private static AssemblyScanResult ScanAssembly(PackageAssembly assembly, bool resolveReferences)
     {
         var metadata = ReadMetadata(assembly.FullPath, resolveReferences);
 
-        var created = AssemblyAnalyzer.Create(assembly.FullPath);
-        if (!created.IsSuccess)
-            return new AssemblyScanResult(assembly, null, created.Message ?? "Failed to load assembly.", metadata);
+        var loaded = AssemblyAnalyzer.Load(assembly.FullPath);
+        if (!loaded.IsSuccess)
+            return new AssemblyScanResult(assembly, null, loaded.Message ?? "Failed to load assembly.", metadata);
 
-        using var analyzer = created.Value;
-        var analysis = new CapabilityAnalysis(analyzer).Analyze();
+        using var cci = loaded.Value;
+        var analysis = new CapabilityAnalysis(cci).Analyze();
         return analysis.IsSuccess
             ? new AssemblyScanResult(assembly, analysis.Value, null, metadata)
             : new AssemblyScanResult(assembly, null, analysis.Message ?? "Capability analysis failed.", metadata);

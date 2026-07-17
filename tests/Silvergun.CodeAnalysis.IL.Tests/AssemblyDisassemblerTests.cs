@@ -10,15 +10,15 @@ using Xunit;
 /// Read-only behavior over a single, shared, successfully-loaded analyzer
 /// (fixture assembly). Covers acceptance cases 1 and 4-9.
 /// </summary>
-public sealed class AssemblyAnalyzerTests : IClassFixture<AnalyzerFixture>
+public sealed class AssemblyDisassemblerTests : IClassFixture<AssemblyDisassemblerFixture>
 {
-    public AssemblyAnalyzerTests(AnalyzerFixture fixture) => this.fixture = fixture;
+    public AssemblyDisassemblerTests(AssemblyDisassemblerFixture fixture) => this.fixture = fixture;
 
     // Case 1
     [Fact]
     public void Create_WithValidPath_LoadsAssemblyAndPath()
     {
-        var result = AssemblyAnalyzer.Create(fixture.FixturePath);
+        var result = AssemblyDisassembler.Create(fixture.FixturePath);
 
         Assert.True(result.IsSuccess, result.Message);
         using var analyzer = result.Value;
@@ -115,7 +115,7 @@ public sealed class AssemblyAnalyzerTests : IClassFixture<AnalyzerFixture>
     [Fact]
     public void Dispose_CalledTwice_DoesNotThrow()
     {
-        var result = AssemblyAnalyzer.Create(fixture.FixturePath);
+        var result = AssemblyDisassembler.Create(fixture.FixturePath);
         Assert.True(result.IsSuccess, result.Message);
 
         var analyzer = result.Value;
@@ -139,5 +139,5 @@ public sealed class AssemblyAnalyzerTests : IClassFixture<AnalyzerFixture>
         Assert.False(result.IsSuccess);
     }
 
-    private readonly AnalyzerFixture fixture;
+    private readonly AssemblyDisassemblerFixture fixture;
 }

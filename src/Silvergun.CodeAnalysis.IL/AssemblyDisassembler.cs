@@ -26,10 +26,10 @@ using Backend.Transformations;
 /// The returned instances are not thread-safe: use a single instance from a single thread, but
 /// distinct instances (each with its own host) may be used in parallel.
 /// </remarks>
-public sealed class AssemblyAnalyzer : Runtime, IDisposable
+public sealed class AssemblyDisassembler : Runtime, IDisposable
 {
     #region Constructors
-    private AssemblyAnalyzer(Model.Host host, Loader loader, Model.Assembly assembly, string assemblyPath)
+    private AssemblyDisassembler(Model.Host host, Loader loader, Model.Assembly assembly, string assemblyPath)
     {
         Host = host;
         this.loader = loader;
@@ -62,10 +62,10 @@ public sealed class AssemblyAnalyzer : Runtime, IDisposable
     /// creates a <see cref="Loader"/>, and loads the assembly. Never throws: any failure (bad path,
     /// not a managed PE, CCI failure) is returned as a failure <see cref="Result{T}"/>.
     /// </summary>
-    public static Result<AssemblyAnalyzer> Create(string assemblyPath)
+    public static Result<AssemblyDisassembler> Create(string assemblyPath)
     {
         if (string.IsNullOrWhiteSpace(assemblyPath) || !File.Exists(assemblyPath))
-            return Result.FailureWithError<AssemblyAnalyzer>($"Assembly file not found: {assemblyPath}.");
+            return Result.FailureWithError<AssemblyDisassembler>($"Assembly file not found: {assemblyPath}.");
 
         var fullPath = assemblyPath;
         using var op = Begin("Loading assembly {0}", fullPath);
@@ -83,13 +83,13 @@ public sealed class AssemblyAnalyzer : Runtime, IDisposable
                 loader = new Loader(host);
                 var assembly = loader.LoadAssembly(fullPath);
                 op.Complete();
-                return Result.Success(new AssemblyAnalyzer(host, loader, assembly, fullPath));
+                return Result.Success(new AssemblyDisassembler(host, loader, assembly, fullPath));
             }
         }
         catch (Exception ex)
         {
             loader?.Dispose();
-            return Result.FailureWithError<AssemblyAnalyzer>($"Failed to load assembly {fullPath}.", ex);
+            return Result.FailureWithError<AssemblyDisassembler>($"Failed to load assembly {fullPath}.", ex);
         }
     }
 

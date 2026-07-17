@@ -8,29 +8,29 @@ using Model.Types;
 
 /// <summary>
 /// Shared xUnit class fixture: initializes the Silvergun runtime (null logging) once
-/// and holds a single successfully-created <see cref="AssemblyAnalyzer"/> over the
+/// and holds a single successfully-created <see cref="AssemblyDisassembler"/> over the
 /// fixture assembly for the read-only tests.
 /// </summary>
-public sealed class AnalyzerFixture : IDisposable
+public sealed class AssemblyDisassemblerFixture : IDisposable
 {
-    public AnalyzerFixture()
+    public AssemblyDisassemblerFixture()
     {
         Runtime.Initialize("Silvergun", "TESTS");
 
         FixturePath = typeof(Shapes).Assembly.Location;
 
-        var result = AssemblyAnalyzer.Create(FixturePath);
+        var result = AssemblyDisassembler.Create(FixturePath);
         if (!result.IsSuccess)
         {
             throw new InvalidOperationException(
-                $"Failed to create AssemblyAnalyzer for '{FixturePath}': {result.Message}",
+                $"Failed to create AssemblyDisassembler for '{FixturePath}': {result.Message}",
                 result.Exception);
         }
 
         Analyzer = result.Value;
     }
 
-    public AssemblyAnalyzer Analyzer { get; }
+    public AssemblyDisassembler Analyzer { get; }
 
     public string FixturePath { get; }
 

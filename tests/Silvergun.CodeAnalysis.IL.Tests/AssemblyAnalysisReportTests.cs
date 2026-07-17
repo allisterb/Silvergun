@@ -11,10 +11,10 @@ using Xunit;
 /// the test output dir) and asserts both halves survive <c>ToJson</c>/<c>FromJson</c>. The fixture is
 /// injected only to guarantee <c>Runtime.Initialize</c> has run once.
 /// </summary>
-public sealed class AssemblyAnalysisReportTests : IClassFixture<AnalyzerFixture>
+public sealed class AssemblyAnalysisReportTests : IClassFixture<AssemblyDisassemblerFixture>
 {
     #region Constructors
-    public AssemblyAnalysisReportTests(AnalyzerFixture fixture) => _ = fixture;
+    public AssemblyAnalysisReportTests(AssemblyDisassemblerFixture fixture) => _ = fixture;
     #endregion
 
     #region Methods
@@ -69,11 +69,11 @@ public sealed class AssemblyAnalysisReportTests : IClassFixture<AnalyzerFixture>
         var metadata = AssemblyMetadata.Read(RuntimePath);
         Assert.True(metadata.IsSuccess, metadata.Message);
 
-        var create = AssemblyAnalyzer.Create(RuntimePath);
+        var create = AssemblyAnalyzer.Load(RuntimePath);
         Assert.True(create.IsSuccess, create.Message);
-        using var analyzer = create.Value;
+        using var cci = create.Value;
 
-        var analysis = new CapabilityAnalysis(analyzer).Analyze();
+        var analysis = new CapabilityAnalysis(cci).Analyze();
         Assert.True(analysis.IsSuccess, analysis.Message);
 
         return new AssemblyAnalysisReport(metadata.Value, analysis.Value);

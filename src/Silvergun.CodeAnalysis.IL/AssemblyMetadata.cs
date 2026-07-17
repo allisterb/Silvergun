@@ -20,7 +20,7 @@ using Nuclear.Creation;
 /// Reads a .NET assembly's rich CCI metadata into a Silvergun-owned serializable <see cref="AssemblyMetadataInfo"/>
 /// (ADR 0006). Loads via a fresh <see cref="PeReader.DefaultHost"/> per call — independent of the
 /// Analysis.Net Model/CCIProvider load path — so it does not touch the shared static state that caused the
-/// <c>AssemblyAnalyzer.Create</c> concurrent-load race. Reference resolution (Nuclear.Assemblies) is
+/// <c>AssemblyDisassembler.Create</c> concurrent-load race. Reference resolution (Nuclear.Assemblies) is
 /// best-effort, local-only and non-fatal. <see cref="Read"/> never throws.
 /// </summary>
 public sealed class AssemblyMetadata : Runtime

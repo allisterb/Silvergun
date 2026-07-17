@@ -391,6 +391,32 @@ public sealed class NuGetPackageTests : IClassFixture<PackageFixture>
             f => f.CallerType.EndsWith("SensitiveOps", StringComparison.Ordinal));
     }
 
+    // Decompression-bomb regression (ADR 0008) — a package with one ~50 MB all-zero entry that zips to a few
+    // KB (ratio thousands:1, far above the 200:1 cap). Extraction must abort under the resource governor:
+    // Open returns a failure Result WITHOUT throwing or OOMing, and Scan surfaces the same failure Result
+    // rather than crashing.
+    [Fact]
+    public void Open_PkgBomb_ReturnsFailure_WithoutThrowingOrOom()
+    {
+        var succeeded = true;
+        var ex = Record.Exception(() => succeeded = NuGetPackage.Open(fixture.BombPath).IsSuccess);
+
+        Assert.Null(ex);
+        Assert.False(succeeded);
+    }
+
+    [Fact]
+    public void Scan_PkgBomb_SurfacesExtractionFailure_WithoutThrowing()
+    {
+        var ex = Record.Exception(() =>
+        {
+            var result = PackageScanner.Scan(fixture.BombPath);
+            Assert.False(result.IsSuccess);
+        });
+
+        Assert.Null(ex);
+    }
+
     private NuGetPackage OpenPkgA()
     {
         var open = NuGetPackage.Open(fixture.PkgAPath);

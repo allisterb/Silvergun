@@ -6,12 +6,12 @@ using Xunit;
 
 /// <summary>
 /// Failure-path behavior. Each test creates its own analyzer (no shared fixture) and
-/// asserts that <see cref="AssemblyAnalyzer.Create"/> returns a failure Result rather
+/// asserts that <see cref="AssemblyDisassembler.Create"/> returns a failure Result rather
 /// than throwing. Covers acceptance cases 2 and 3.
 /// </summary>
-public sealed class AssemblyAnalyzerFailureTests
+public sealed class AssemblyDisassemblerFailureTests
 {
-    public AssemblyAnalyzerFailureTests() => Runtime.Initialize("Silvergun", "TESTS");
+    public AssemblyDisassemblerFailureTests() => Runtime.Initialize("Silvergun", "TESTS");
 
     // Case 2
     [Fact]
@@ -19,7 +19,7 @@ public sealed class AssemblyAnalyzerFailureTests
     {
         var path = Path.Combine(Path.GetTempPath(), $"silvergun_missing_{Guid.NewGuid():N}.dll");
 
-        var result = AssemblyAnalyzer.Create(path);
+        var result = AssemblyDisassembler.Create(path);
 
         Assert.False(result.IsSuccess);
     }
@@ -33,7 +33,7 @@ public sealed class AssemblyAnalyzerFailureTests
 
         try
         {
-            var result = AssemblyAnalyzer.Create(path);
+            var result = AssemblyDisassembler.Create(path);
             Assert.False(result.IsSuccess);
         }
         finally

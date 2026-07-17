@@ -82,16 +82,16 @@ internal static class Program
     {
         ConfigureLogging(json, output, debug);
 
-        var analyzerResult = AssemblyAnalyzer.Create(assemblyPath);
-        if (!analyzerResult.IsSuccess)
+        var cciResult = AssemblyAnalyzer.Load(assemblyPath);
+        if (!cciResult.IsSuccess)
         {
-            Console.Error.WriteLine(analyzerResult.Message);
+            Console.Error.WriteLine(cciResult.Message);
             return 1;
         }
 
-        using var analyzer = analyzerResult.Value;
+        using var cci = cciResult.Value;
 
-        var reportResult = new CapabilityAnalysis(analyzer).Analyze();
+        var reportResult = new CapabilityAnalysis(cci).Analyze();
         if (!reportResult.IsSuccess)
         {
             Console.Error.WriteLine(reportResult.Message);

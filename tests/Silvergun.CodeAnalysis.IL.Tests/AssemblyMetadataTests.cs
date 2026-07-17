@@ -12,16 +12,16 @@ using Xunit;
 /// <summary>
 /// Behavioural tests for <see cref="AssemblyMetadata.Read(string, bool)"/> and the serializable
 /// <see cref="AssemblyMetadataInfo"/>/<see cref="AssemblyReferenceInfo"/> records. Reuses
-/// <see cref="AnalyzerFixture"/> only to initialize the Silvergun runtime once; metadata is read
+/// <see cref="AssemblyDisassemblerFixture"/> only to initialize the Silvergun runtime once; metadata is read
 /// directly from deterministic assemblies present in the test output directory
 /// (<c>Silvergun.Runtime.dll</c> and the fixture dll). Covers the seven cases in the
 /// assembly-metadata-reader spec.
 /// </summary>
-public sealed class AssemblyMetadataTests : IClassFixture<AnalyzerFixture>
+public sealed class AssemblyMetadataTests : IClassFixture<AssemblyDisassemblerFixture>
 {
     #region Constructors
     // The fixture is injected only to guarantee Runtime.Initialize has run once for this class.
-    public AssemblyMetadataTests(AnalyzerFixture fixture) => _ = fixture;
+    public AssemblyMetadataTests(AssemblyDisassemblerFixture fixture) => _ = fixture;
     #endregion
 
     #region Methods
