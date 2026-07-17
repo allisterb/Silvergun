@@ -4,12 +4,14 @@ using System.CommandLine;
 
 using Silvergun.CodeAnalysis.IL;
 using Silvergun.PackageAnalysis.NuGet;
+using Silvergun.PackageAnalysis.NuGet.Squats;
 
 /// <summary>
 /// Entry point for the Silvergun CLI. Exposes the <c>analyze</c> verb, which runs
-/// <see cref="AssemblyAnalyzer"/> + <see cref="CapabilityAnalysis"/> over a .NET assembly, and the
-/// <c>scan-package</c> verb, which runs <see cref="PackageScanner"/> over a <c>.nupkg</c>. Exit codes
-/// are part of the CI contract (ADR 0003): 0 = success, 1 = load/analysis failure or bad arguments,
+/// <see cref="AssemblyAnalyzer"/> + <see cref="CapabilityAnalysis"/> + <see cref="ObfuscationAnalysis"/> over a
+/// .NET assembly; the <c>scan-package</c> verb, which runs <see cref="PackageScanner"/> over a <c>.nupkg</c>;
+/// and the <c>check-squat</c> verb, which runs <see cref="SquatChecker"/> against a package id (network).
+/// Exit codes are part of the CI contract (ADR 0003): 0 = success, 1 = load/analysis failure or bad arguments,
 /// 2 = findings present under <c>--strict</c>.
 /// </summary>
 internal static class Program
@@ -24,6 +26,10 @@ internal static class Program
         var nupkgPathArgument = new Argument<string>("nupkg-path")
         {
             Description = "Path to the .nupkg package to scan."
+        };
+        var packageIdArgument = new Argument<string>("package-id")
+        {
+            Description = "The NuGet package id to check for typosquatting."
         };
         var jsonOption = new Option<bool>("--json")
         {
@@ -70,9 +76,22 @@ internal static class Program
             parse.GetValue(debugOption),
             parse.GetValue(noResolveOption)));
 
+        // check-squat hits nuget.org, so its handler is async; the sync action bridges via GetAwaiter().GetResult()
+        // to keep System.CommandLine's synchronous Invoke path (stdout purity handled by ConfigureLogging).
+        var checkSquatCommand = new Command("check-squat", "Check a NuGet package id for likely typosquatting (network).")
+        {
+            packageIdArgument, jsonOption, outputOption, strictOption, debugOption
+        };
+        checkSquatCommand.SetAction(parse => RunCheckSquat(
+            parse.GetValue(packageIdArgument)!,
+            parse.GetValue(jsonOption),
+            parse.GetValue(outputOption),
+            parse.GetValue(strictOption),
+            parse.GetValue(debugOption)).GetAwaiter().GetResult());
+
         var root = new RootCommand("Silvergun — static capability analysis for .NET assemblies.")
         {
-            analyzeCommand, scanPackageCommand
+            analyzeCommand, scanPackageCommand, checkSquatCommand
         };
 
         return root.Parse(args).Invoke();
@@ -98,15 +117,20 @@ internal static class Program
             return 1;
         }
 
+        // Obfuscation runs off the SAME loaded analyzer (ADR 0010); best-effort — a failure leaves it null.
+        var obfuscationResult = new ObfuscationAnalysis(cci).Analyze();
+        var obfuscation = obfuscationResult.IsSuccess ? obfuscationResult.Value : null;
+
         // Metadata read is best-effort — a failure leaves Metadata null and never changes the exit-code contract.
         var metadataResult = AssemblyMetadata.Read(assemblyPath, !noResolve);
-        var report = new AssemblyAnalysisReport(metadataResult.IsSuccess ? metadataResult.Value : null, reportResult.Value);
+        var report = new AssemblyAnalysisReport(
+            metadataResult.IsSuccess ? metadataResult.Value : null, reportResult.Value, obfuscation);
         var text = json ? report.ToJson() : AssemblySummary(report);
 
         if (!TryEmit(text, output))
             return 1;
 
-        return strict && report.Capabilities.Findings.Count > 0 ? 2 : 0;
+        return strict && (report.Capabilities.Findings.Count > 0 || (report.Obfuscation?.Findings.Count ?? 0) > 0) ? 2 : 0;
     }
 
     private static int RunScanPackage(string nupkgPath, bool json, string? output, bool strict, bool debug, bool noResolve)
@@ -126,7 +150,30 @@ internal static class Program
         if (!TryEmit(text, output))
             return 1;
 
-        return strict && report.AllFindings.Any() ? 2 : 0;
+        var hasObfuscation = report.Assemblies.Any(a => (a.Obfuscation?.Findings.Count ?? 0) > 0);
+        return strict && (report.AllFindings.Any() || hasObfuscation) ? 2 : 0;
+    }
+
+    // Runs the network squat check for one package id; logging is routed off stdout by ConfigureLogging.
+    private static async Task<int> RunCheckSquat(string packageId, bool json, string? output, bool strict, bool debug)
+    {
+        ConfigureLogging(json, output, debug);
+
+        var result = await new SquatChecker(new NuGetPopularitySource()).CheckAsync(packageId);
+        if (!result.IsSuccess)
+        {
+            Console.Error.WriteLine(result.Message);
+            return 1;
+        }
+
+        var findings = result.Value;
+        var report = new SquatCheckReport(packageId, DateTimeOffset.UtcNow, findings);
+        var text = json ? report.ToJson() : SquatSummary(report);
+
+        if (!TryEmit(text, output))
+            return 1;
+
+        return strict && findings.Count > 0 ? 2 : 0;
     }
 
     // Keep stdout machine-parseable: when JSON goes to stdout, log to file only.
@@ -174,13 +221,28 @@ internal static class Program
         lines.Add(string.Empty);
 
         if (capabilities.Findings.Count == 0)
-        {
             lines.Add("No sensitive-API findings.");
-            return string.Join(Environment.NewLine, lines);
+        else
+            AppendFindingsGrouped(lines, capabilities.Findings);
+
+        lines.Add(string.Empty);
+        AppendObfuscationSection(lines, report.Obfuscation);
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    // Lists each obfuscation finding, or "Obfuscation:  (none)" when the report is null/empty.
+    private static void AppendObfuscationSection(List<string> lines, ObfuscationReport? obfuscation)
+    {
+        var findings = obfuscation?.Findings;
+        if (findings is null || findings.Count == 0)
+        {
+            lines.Add("Obfuscation:  (none)");
+            return;
         }
 
-        AppendFindingsGrouped(lines, capabilities.Findings);
-        return string.Join(Environment.NewLine, lines);
+        lines.Add("Obfuscation:");
+        lines.AddRange(findings.Select(f =>
+            $"  {f.Kind}  {f.DetectedAs}  {f.CallerType}.{f.CallerMethod}  (len {f.EncodedLength}, entropy {f.Entropy:F2})"));
     }
 
     // Compact, security-relevant-first metadata block; "(unavailable)" when the read failed.
@@ -245,6 +307,8 @@ internal static class Program
                 lines.Add("  (no findings)");
             else
                 AppendFindingsGrouped(lines, result.Report.Findings);
+
+            AppendObfuscationLine(lines, result.Obfuscation);
         }
 
         lines.Add(string.Empty);
@@ -264,6 +328,33 @@ internal static class Program
 
         var resolved = m.References.Count(r => r.Resolved);
         lines.Add($"  meta: {m.Name} {m.Version ?? "?"}  signed={YN(m.IsStrongNameSigned)} ilonly={YN(m.IsILOnly)} kind={m.ModuleKind} refs={m.References.Count}({resolved} resolved)");
+    }
+
+    // Per-assembly obfuscation sub-section for scan-package; omitted entirely when null/empty.
+    private static void AppendObfuscationLine(List<string> lines, ObfuscationReport? obfuscation)
+    {
+        var findings = obfuscation?.Findings;
+        if (findings is null || findings.Count == 0)
+            return;
+
+        lines.Add($"  obfuscation: {findings.Count} finding(s)");
+        lines.AddRange(findings.Select(f => $"    {f.Kind} {f.DetectedAs}  {f.CallerType}.{f.CallerMethod}"));
+    }
+
+    // Human summary for check-squat: a header and one line per finding, or a "none found" line.
+    private static string SquatSummary(SquatCheckReport report)
+    {
+        var lines = new List<string> { $"Package: {report.PackageId}", string.Empty };
+
+        if (report.Findings.Count == 0)
+        {
+            lines.Add("No likely typosquat targets found.");
+            return string.Join(Environment.NewLine, lines);
+        }
+
+        lines.AddRange(report.Findings.Select(f =>
+            $"  {f.SquattedCandidate}  (candidate {f.CandidateDownloads} dl vs target {f.TargetDownloads} dl)  [{f.Mutator}: {f.Reason}]"));
+        return string.Join(Environment.NewLine, lines);
     }
 
     // Groups findings by Capability and appends the formatted lines (shared by both verbs).

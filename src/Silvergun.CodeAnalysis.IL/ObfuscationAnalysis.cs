@@ -44,27 +44,37 @@ public sealed class ObfuscationAnalysis(AssemblyAnalyzer assembly)
     /// </summary>
     public Result<ObfuscationReport> Analyze()
     {
-        var findings = assembly.Methods
-            .SelectMany(ScanMethod)
-            .Distinct()
-            .OrderBy(f => f.CallerType, StringComparer.Ordinal)
-            .ThenBy(f => f.CallerMethod, StringComparer.Ordinal)
-            .ThenBy(f => f.DetectedAs, StringComparer.Ordinal)
-            .ThenBy(f => f.Kind)
-            .ToArray();
+        try
+        {
+            // Materialize inside the guard: enumerating assembly.Methods advances CCI's lazy type
+            // resolution, which can throw on a corrupt/hostile module — the outer catch upholds the
+            // never-throws contract even for a top-level enumeration failure.
+            var findings = assembly.Methods
+                .SelectMany(ScanMethod)
+                .Distinct()
+                .OrderBy(f => f.CallerType, StringComparer.Ordinal)
+                .ThenBy(f => f.CallerMethod, StringComparer.Ordinal)
+                .ThenBy(f => f.DetectedAs, StringComparer.Ordinal)
+                .ThenBy(f => f.Kind)
+                .ToArray();
 
-        var report = new ObfuscationReport(
-            assembly.AssemblyName,
-            assembly.AssemblyPath,
-            DateTimeOffset.UtcNow,
-            findings);
+            var report = new ObfuscationReport(
+                assembly.AssemblyName,
+                assembly.AssemblyPath,
+                DateTimeOffset.UtcNow,
+                findings);
 
-        return Result.Success(report);
+            return Result.Success(report);
 
-        // NOTE (deferred, nice-to-have): byte-array blobs from <PrivateImplementationDetails> /
-        // RuntimeHelpers.InitializeArray (the .NET idiom for embedded data) are not scanned in this pass —
-        // reaching the RVA-backed field data cleanly through the Analysis.Net model is not straightforward.
-        // String constants deliver the core value; blob scanning can be added as a follow-up.
+            // NOTE (deferred, nice-to-have): byte-array blobs from <PrivateImplementationDetails> /
+            // RuntimeHelpers.InitializeArray (the .NET idiom for embedded data) are not scanned in this pass —
+            // reaching the RVA-backed field data cleanly through the Analysis.Net model is not straightforward.
+            // String constants deliver the core value; blob scanning can be added as a follow-up.
+        }
+        catch (Exception ex)
+        {
+            return Result.FailureWithError<ObfuscationReport>($"Failed to analyze {assembly.AssemblyName}.", ex);
+        }
     }
 
     // Scans one method's CCI operations for ldstr constants and classifies each. Skips (never throws) any

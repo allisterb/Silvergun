@@ -43,20 +43,22 @@ public sealed class PackageScanner : Runtime
     }
 
     // Loads and analyzes one assembly; a Load/Analyze failure yields a skipped result carrying the Result message.
-    // Metadata is read best-effort in every path — a metadata failure never sinks the assembly (null Metadata).
+    // Metadata and obfuscation are read best-effort in every path — a failure never sinks the assembly (null member).
+    // The CCI AssemblyAnalyzer is loaded once and shared by both the capability and obfuscation analyses (ADR 0010).
     private static AssemblyScanResult ScanAssembly(PackageAssembly assembly, bool resolveReferences)
     {
         var metadata = ReadMetadata(assembly.FullPath, resolveReferences);
 
         var loaded = AssemblyAnalyzer.Load(assembly.FullPath);
         if (!loaded.IsSuccess)
-            return new AssemblyScanResult(assembly, null, loaded.Message ?? "Failed to load assembly.", metadata);
+            return new AssemblyScanResult(assembly, null, loaded.Message ?? "Failed to load assembly.", metadata, null);
 
         using var cci = loaded.Value;
+        var obfuscation = AnalyzeObfuscation(cci);
         var analysis = new CapabilityAnalysis(cci).Analyze();
         return analysis.IsSuccess
-            ? new AssemblyScanResult(assembly, analysis.Value, null, metadata)
-            : new AssemblyScanResult(assembly, null, analysis.Message ?? "Capability analysis failed.", metadata);
+            ? new AssemblyScanResult(assembly, analysis.Value, null, metadata, obfuscation)
+            : new AssemblyScanResult(assembly, null, analysis.Message ?? "Capability analysis failed.", metadata, obfuscation);
     }
 
     // Best-effort CCI metadata read; a failure logs a warning and yields null — never fatal.
@@ -67,6 +69,17 @@ public sealed class PackageScanner : Runtime
             return result.Value;
 
         Warn("Could not read metadata for {0}: {1}", path, result.Message ?? "unknown error");
+        return null;
+    }
+
+    // Best-effort obfuscation scan over the already-loaded analyzer; a failure logs a warning and yields null.
+    private static ObfuscationReport? AnalyzeObfuscation(AssemblyAnalyzer cci)
+    {
+        var result = new ObfuscationAnalysis(cci).Analyze();
+        if (result.IsSuccess)
+            return result.Value;
+
+        Warn("Could not analyze obfuscation for {0}: {1}", cci.AssemblyPath, result.Message ?? "unknown error");
         return null;
     }
     #endregion

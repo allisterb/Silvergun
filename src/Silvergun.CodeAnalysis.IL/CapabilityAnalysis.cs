@@ -60,38 +60,48 @@ public sealed class CapabilityAnalysis(AssemblyAnalyzer assembly)
     /// </summary>
     public Result<CapabilityReport> Analyze()
     {
-        var methods = assembly.Methods.ToArray();
-        var findings = new List<ApiCallFinding>();
-        var skipped = new List<string>();
-
-        foreach (var method in methods)
+        try
         {
-            var result = ScanMethod(method);
-            if (result.Skip is not null)
-                skipped.Add(result.Skip);
-            else
-                findings.AddRange(result.Findings);
+            // Materialize inside the guard: enumerating assembly.Methods advances CCI's lazy type
+            // resolution, which can throw on a corrupt/hostile module — the outer catch upholds the
+            // never-throws contract even for a top-level enumeration failure.
+            var methods = assembly.Methods.ToArray();
+            var findings = new List<ApiCallFinding>();
+            var skipped = new List<string>();
+
+            foreach (var method in methods)
+            {
+                var result = ScanMethod(method);
+                if (result.Skip is not null)
+                    skipped.Add(result.Skip);
+                else
+                    findings.AddRange(result.Findings);
+            }
+
+            var ordered = findings
+                .Distinct()
+                .OrderBy(f => f.CallerType, StringComparer.Ordinal)
+                .ThenBy(f => f.CallerMethod, StringComparer.Ordinal)
+                .ThenBy(f => f.CalledApi, StringComparer.Ordinal)
+                .ThenBy(f => f.Kind)
+                .ToArray();
+
+            var report = new CapabilityReport(
+                assembly.AssemblyName,
+                assembly.AssemblyPath,
+                DateTimeOffset.UtcNow,
+                ordered,
+                MethodsTotal: methods.Length,
+                MethodsAnalyzed: methods.Length - skipped.Count,
+                MethodsSkipped: skipped.Count,
+                SkippedMethods: skipped);
+
+            return Result.Success(report);
         }
-
-        var ordered = findings
-            .Distinct()
-            .OrderBy(f => f.CallerType, StringComparer.Ordinal)
-            .ThenBy(f => f.CallerMethod, StringComparer.Ordinal)
-            .ThenBy(f => f.CalledApi, StringComparer.Ordinal)
-            .ThenBy(f => f.Kind)
-            .ToArray();
-
-        var report = new CapabilityReport(
-            assembly.AssemblyName,
-            assembly.AssemblyPath,
-            DateTimeOffset.UtcNow,
-            ordered,
-            MethodsTotal: methods.Length,
-            MethodsAnalyzed: methods.Length - skipped.Count,
-            MethodsSkipped: skipped.Count,
-            SkippedMethods: skipped);
-
-        return Result.Success(report);
+        catch (Exception ex)
+        {
+            return Result.FailureWithError<CapabilityReport>($"Failed to analyze {assembly.AssemblyName}.", ex);
+        }
     }
 
     // Scans one method's CCI operations. Returns either its findings or a skip reason ("Type.Method: reason").

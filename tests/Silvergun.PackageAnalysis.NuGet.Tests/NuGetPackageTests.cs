@@ -146,6 +146,30 @@ public sealed class NuGetPackageTests : IClassFixture<PackageFixture>
         Assert.False(string.IsNullOrWhiteSpace(contentResult.SkipReason));
     }
 
+    // Obfuscation (ADR 0010) — Scan runs ObfuscationAnalysis off the same loaded analyzer per managed
+    // assembly, so the managed lib's AssemblyScanResult.Obfuscation is a non-null report (findings may be
+    // empty; the point is best-effort, no-throw population). The fake native content dll — which is not a
+    // loadable managed assembly — has a null Obfuscation alongside its existing SkipReason.
+    [Fact]
+    public void Scan_PkgA_PopulatesObfuscationForManagedLib_AndNullForNativeContent()
+    {
+        var report = Record.Exception(() => PackageScanner.Scan(fixture.PkgAPath));
+        Assert.Null(report);
+
+        var scan = PackageScanner.Scan(fixture.PkgAPath);
+        Assert.True(scan.IsSuccess, scan.Message);
+
+        var libResult = scan.Value.Assemblies.Single(
+            a => Norm(a.Assembly.RelativePath).EndsWith($"/{fixture.FixtureDllName}", StringComparison.Ordinal));
+        Assert.NotNull(libResult.Obfuscation);
+        Assert.NotNull(libResult.Obfuscation!.Findings);
+
+        var contentResult = scan.Value.Assemblies.Single(
+            a => Norm(a.Assembly.RelativePath).EndsWith("/notmanaged.dll", StringComparison.Ordinal));
+        Assert.Null(contentResult.Obfuscation);
+        Assert.False(string.IsNullOrWhiteSpace(contentResult.SkipReason));
+    }
+
     // Metadata — with resolveReferences: false the managed assembly's metadata is still populated, but
     // no reference is resolved (every AssemblyReferenceInfo.Resolved is false).
     [Fact]
@@ -228,6 +252,19 @@ public sealed class NuGetPackageTests : IClassFixture<PackageFixture>
                 Assert.Equal(a.Metadata.Name, b.Metadata!.Name);
                 Assert.Equal(a.Metadata.Version, b.Metadata.Version);
                 Assert.Equal(a.Metadata.References, b.Metadata.References);
+            }
+
+            // Obfuscation (ADR 0010) survives the round-trip element-wise: null preserved as null, a
+            // non-null report preserved with its AssemblyName and findings.
+            if (a.Obfuscation is null)
+            {
+                Assert.Null(b.Obfuscation);
+            }
+            else
+            {
+                Assert.NotNull(b.Obfuscation);
+                Assert.Equal(a.Obfuscation.AssemblyName, b.Obfuscation!.AssemblyName);
+                Assert.Equal(a.Obfuscation.Findings, b.Obfuscation.Findings);
             }
         }
 

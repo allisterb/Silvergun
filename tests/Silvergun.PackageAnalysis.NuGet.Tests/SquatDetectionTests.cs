@@ -3,6 +3,7 @@ namespace Silvergun.PackageAnalysis.NuGet.Tests;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -240,6 +241,32 @@ public sealed class SquatDetectionTests
         Assert.Equal(popularDownloads, finding.CandidateDownloads);
         Assert.False(string.IsNullOrWhiteSpace(finding.Reason));
     }
+    // SquatCheckReport (ADR 0010) — the CLI's JSON wrapper for check-squat. A report carrying a couple of
+    // findings must round-trip through ToJson/FromJson preserving PackageId, CheckedAt and the findings
+    // element-wise, with the MutatorType enum serialized by name (not a bare number).
+    [Fact]
+    public void SquatCheckReport_JsonRoundTrip_PreservesFindingsAndUsesEnumNames()
+    {
+        var findings = new[]
+        {
+            new SquatFinding("Newtonsft.Json", "Newtonsoft.Json", 5L, 1_000_000_000L, "homoglyph swap", MutatorType.AsciiHomoglyph),
+            new SquatFinding("Newtonsft.Json", "NewtonsoftJson", 5L, 250_000L, "separator removed", MutatorType.SeparatorRemoved),
+        };
+        var report = new SquatCheckReport("Newtonsft.Json", DateTimeOffset.UtcNow, findings);
+
+        var json = report.ToJson();
+        var restored = SquatCheckReport.FromJson(json);
+
+        Assert.NotNull(restored);
+        Assert.Equal(report.PackageId, restored!.PackageId);
+        Assert.Equal(report.CheckedAt, restored.CheckedAt);
+        Assert.Equal(report.Findings, restored.Findings);   // record equality incl. Mutator
+
+        // MutatorType serialized as names, not bare numbers.
+        Assert.Contains("\"AsciiHomoglyph\"", json);
+        Assert.DoesNotMatch(new Regex("\"Mutator\"\\s*:\\s*\\d"), json);
+    }
+
     #endregion
 
     #region Types
