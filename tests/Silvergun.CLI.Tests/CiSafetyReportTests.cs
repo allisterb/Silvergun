@@ -3,6 +3,7 @@ namespace Silvergun.CLI.Tests;
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Compression;
 using System.Text;
 
 using Xunit;
@@ -70,6 +71,73 @@ public sealed class CiSafetyReportTests
         Assert.Contains("--rich", error);
         Assert.DoesNotContain(EscByte, output);   // stdout stays clean on a parse error
     }
+
+    [Fact]
+    public void ScanPackage_DefaultMode_EmitsSevenBitAsciiOnly()
+    {
+        // A benign minimal package (nuspec-only, no assemblies/scripts) yields a clean report. In default
+        // (no --rich) mode its human rendering must be pure 7-bit ASCII with no ANSI (ADR 0014), and the
+        // redirected/stdin-closed run must complete without hanging.
+        var nupkg = BuildMinimalNupkg();
+        try
+        {
+            var (exit, output, _, exited) = RunCli("scan-package", nupkg);
+
+            Assert.True(exited, "CLI did not exit within the timeout — a redirected run must never block on stdin.");
+            Assert.Equal(0, exit);
+            Assert.NotEmpty(output);
+            var offender = Array.Find(output, b => b > MaxAsciiByte);
+            Assert.True(offender == 0, $"default output must be 7-bit ASCII; found byte 0x{offender:x2}.");
+            Assert.DoesNotContain(EscByte, output);
+        }
+        finally
+        {
+            TryDelete(nupkg);
+        }
+    }
+
+    [Fact]
+    public void ScanPackage_Rich_Redirected_CompletesWithoutHang()
+    {
+        // --rich may emit ANSI/Unicode when redirected (expected); the invariant here is only CI-safety:
+        // scan-package must still complete promptly with stdin closed and produce a report (no interactive widgets).
+        var nupkg = BuildMinimalNupkg();
+        try
+        {
+            var (exit, output, _, exited) = RunCli("scan-package", nupkg, "--rich");
+
+            Assert.True(exited, "CLI did not exit within the timeout — a --rich run must never block on stdin.");
+            Assert.Equal(0, exit);
+            Assert.NotEmpty(output);
+        }
+        finally
+        {
+            TryDelete(nupkg);
+        }
+    }
+
+    [Fact]
+    public void ScanPackage_JsonAndRich_IsRejectedBeforeHandlerRuns()
+    {
+        // --json and --rich are mutually-exclusive format selectors (ADR 0014); the scan-package verb shares the
+        // same parse validator as analyze. The combination must be rejected with a non-zero exit and a message on
+        // stderr, keeping stdout clean — before any handler (or package open) runs.
+        var nupkg = BuildMinimalNupkg();
+        try
+        {
+            var (exit, output, error, exited) = RunCli("scan-package", nupkg, "--json", "--rich");
+
+            Assert.True(exited, "CLI did not exit within the timeout.");
+            Assert.NotEqual(0, exit);
+            Assert.Contains("--json", error);
+            Assert.Contains("--rich", error);
+            Assert.DoesNotContain(EscByte, output);   // stdout stays clean on a parse error
+        }
+        finally
+        {
+            TryDelete(nupkg);
+        }
+    }
     #endregion
 
     #region Fields
@@ -82,6 +150,9 @@ public sealed class CiSafetyReportTests
     private const byte EscByte = 0x1b;
     private const byte MaxAsciiByte = 0x7f;
     private const int TimeoutMs = 60_000;
+
+    // Standard nuspec namespace required by NuGet's NuspecReader (used by NuGetPackage.Open to read identity).
+    private const string NuspecNamespace = "http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd";
     #endregion
 
     #region Child types
@@ -115,6 +186,46 @@ public sealed class CiSafetyReportTests
 
         var bytes = Encoding.Latin1.GetBytes(stdout.GetAwaiter().GetResult());
         return (process.ExitCode, bytes, stderr.GetAwaiter().GetResult(), true);
+    }
+
+    // Writes a minimal, valid .nupkg to a unique temp path using pure BCL zip — no NuGet client, no network,
+    // no project reference to the PackageAnalysis test harness. The only structure NuGetPackage.Open needs is a
+    // root-level "<id>.nuspec" carrying the standard nuspec namespace plus id/version (authors/description keep
+    // the identity read clean; the empty dependency group matches a real manifest). No payload dll is included:
+    // a nuspec-only package opens fine and produces a clean, finding-free report — ideal for the ASCII assertion.
+    private static string BuildMinimalNupkg()
+    {
+        const string id = "SilvergunCiSmoke";
+        const string nuspec = $"""
+            <?xml version="1.0" encoding="utf-8"?>
+            <package xmlns="{NuspecNamespace}">
+              <metadata>
+                <id>{id}</id>
+                <version>1.0.0</version>
+                <authors>Silvergun Tests</authors>
+                <description>CI-safety smoke package.</description>
+                <dependencies>
+                  <group targetFramework="netstandard2.0" />
+                </dependencies>
+              </metadata>
+            </package>
+            """;
+
+        var path = Path.Combine(Path.GetTempPath(), $"silvergun-cismoke-{Guid.NewGuid():N}.nupkg");
+        using (var stream = new FileStream(path, FileMode.Create, FileAccess.Write))
+        using (var zip = new ZipArchive(stream, ZipArchiveMode.Create))
+        {
+            var entry = zip.CreateEntry($"{id}.nuspec");
+            using var s = entry.Open();
+            var bytes = Encoding.UTF8.GetBytes(nuspec);
+            s.Write(bytes, 0, bytes.Length);
+        }
+        return path;
+    }
+
+    private static void TryDelete(string path)
+    {
+        try { if (File.Exists(path)) File.Delete(path); } catch { /* best-effort temp cleanup */ }
     }
     #endregion
 }
