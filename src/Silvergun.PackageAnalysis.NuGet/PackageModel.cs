@@ -7,17 +7,24 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 
 using Silvergun.CodeAnalysis.IL;
+using Silvergun.Intel;
 
 /// <summary>One declared dependency of a package (surfaced even when not analyzed — ADR 0004 §6).</summary>
 public sealed record PackageDependencyInfo(string Id, string VersionRange, string TargetFramework);
 
-/// <summary>Package identity and its declared dependency tree, read from the nuspec.</summary>
+/// <summary>
+/// Package identity and its declared dependency tree, read from the nuspec. <see cref="RepositoryUrl"/>
+/// (nuspec <c>&lt;repository url&gt;</c>) and <see cref="ProjectUrl"/> (nuspec <c>&lt;projectUrl&gt;</c>) are
+/// additive intel used for offline project-health repo resolution (ADR 0015); both may be <c>null</c>.
+/// </summary>
 public sealed record PackageIdentityInfo(
     string Id,
     string Version,
     string? Authors,
     string? Description,
-    IReadOnlyList<PackageDependencyInfo> Dependencies);
+    IReadOnlyList<PackageDependencyInfo> Dependencies,
+    string? RepositoryUrl = null,
+    string? ProjectUrl = null);
 
 /// <summary>The role a packaged file plays, derived from its first path segment (ADR 0004 §3).</summary>
 public enum PackageItemRole { Lib, Runtimes, Tools, Build, BuildTransitive, Analyzers, Content, Other }
@@ -64,7 +71,8 @@ public sealed record PackageCapabilityReport(
     DateTimeOffset AnalyzedAt,
     IReadOnlyList<AssemblyScanResult> Assemblies,
     IReadOnlyList<PackageScript> Scripts,
-    IReadOnlyList<ScriptFinding> ScriptFindings)
+    IReadOnlyList<ScriptFinding> ScriptFindings,
+    ProjectHealth? ProjectHealth = null)   // additive (ADR 0015); populated only under scan-package --health, else null
 {
     #region Properties
     /// <summary>Every finding across all analyzed assemblies, flattened in stored order.</summary>

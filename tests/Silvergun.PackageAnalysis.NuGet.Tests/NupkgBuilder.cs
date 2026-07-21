@@ -56,15 +56,25 @@ internal static class NupkgBuilder
         s.Write(bytes, 0, bytes.Length);
     }
 
-    /// <summary>Minimal nuspec: id/version/authors/description plus a dependency group with the given ids.</summary>
+    /// <summary>
+    /// Minimal nuspec: id/version/authors/description plus a dependency group with the given ids. When
+    /// <paramref name="repositoryUrl"/> and/or <paramref name="projectUrl"/> are non-null they are emitted as a
+    /// <c>&lt;repository url="…"&gt;</c> element and a <c>&lt;projectUrl&gt;</c> element respectively (the
+    /// project-health repo hints read by <c>NuGetPackage.ReadIdentity</c>, ADR 0015); when null they are omitted,
+    /// exercising the back-compat "both stay null" path.
+    /// </summary>
     public static string NuspecXml(
         string id, string version, string authors, string description,
-        string dependencyTargetFramework, IEnumerable<(string Id, string Version)> dependencies)
+        string dependencyTargetFramework, IEnumerable<(string Id, string Version)> dependencies,
+        string? repositoryUrl = null, string? projectUrl = null)
     {
         var deps = string.Join(
             "\n        ",
             System.Linq.Enumerable.Select(
                 dependencies, d => $"<dependency id=\"{d.Id}\" version=\"{d.Version}\" />"));
+
+        var projectUrlElement = projectUrl is null ? string.Empty : $"\n    <projectUrl>{projectUrl}</projectUrl>";
+        var repositoryElement = repositoryUrl is null ? string.Empty : $"\n    <repository url=\"{repositoryUrl}\" />";
 
         return $"""
             <?xml version="1.0" encoding="utf-8"?>
@@ -73,7 +83,7 @@ internal static class NupkgBuilder
                 <id>{id}</id>
                 <version>{version}</version>
                 <authors>{authors}</authors>
-                <description>{description}</description>
+                <description>{description}</description>{projectUrlElement}{repositoryElement}
                 <dependencies>
                   <group targetFramework="{dependencyTargetFramework}">
                     {deps}

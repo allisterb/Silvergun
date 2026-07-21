@@ -173,7 +173,10 @@ public sealed class NuGetPackage : Runtime, IDisposable
             nuspec.GetVersion().ToNormalizedString(),
             NullIfEmpty(nuspec.GetAuthors()),
             NullIfEmpty(nuspec.GetDescription()),
-            dependencies);
+            dependencies,
+            // Additive project-health repo hints (ADR 0015) — read straight from the nuspec, offline.
+            NullIfEmpty(nuspec.GetRepositoryMetadata()?.Url),
+            NullIfEmpty(nuspec.GetProjectUrl()));
     }
 
     // The declared entry names (read straight from the zip central directory — names only, no decompression,

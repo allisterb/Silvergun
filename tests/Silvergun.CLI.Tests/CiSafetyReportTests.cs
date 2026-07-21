@@ -117,6 +117,22 @@ public sealed class CiSafetyReportTests
     }
 
     [Fact]
+    public void Health_JsonAndRich_IsRejectedBeforeHandlerRuns()
+    {
+        // The health verb shares the same --json/--rich mutual-exclusion validator (ADR 0015 is advisory but still
+        // supports both format selectors). The combination must be rejected at parse time — non-zero exit, message on
+        // stderr, stdout clean — BEFORE the handler runs, so no nuget.org/GitHub network is ever touched. A plausible
+        // package id is passed only to satisfy the required argument; the parse error fires before it is used.
+        var (exit, output, error, exited) = RunCli("health", "Newtonsoft.Json", "--json", "--rich");
+
+        Assert.True(exited, "CLI did not exit within the timeout.");
+        Assert.NotEqual(0, exit);
+        Assert.Contains("--json", error);
+        Assert.Contains("--rich", error);
+        Assert.DoesNotContain(EscByte, output);   // stdout stays clean on a parse error
+    }
+
+    [Fact]
     public void ScanPackage_JsonAndRich_IsRejectedBeforeHandlerRuns()
     {
         // --json and --rich are mutually-exclusive format selectors (ADR 0014); the scan-package verb shares the

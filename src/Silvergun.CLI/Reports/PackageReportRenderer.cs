@@ -46,6 +46,14 @@ internal static class PackageReportRenderer
         console.Write(AssembliesTree(rich, report.Assemblies));
         console.WriteLine();
 
+        // Opt-in project-health section (scan-package --health, ADR 0015); present only when health was attached.
+        // Advisory only — it never influences the Assessment/exit-code contract.
+        if (report.ProjectHealth is { } health)
+        {
+            HealthSectionRenderer.Write(console, rich, health, health.Repository, unavailableReason: null);
+            console.WriteLine();
+        }
+
         console.Write(Section(rich, "Assessment"));
         Footer(console, rich, report);
     }
