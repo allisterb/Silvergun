@@ -81,7 +81,7 @@ public sealed class CiSafetyReportTests
         var nupkg = BuildMinimalNupkg();
         try
         {
-            var (exit, output, _, exited) = RunCli("scan-package", nupkg);
+            var (exit, output, _, exited) = RunCli("scan-package", nupkg, "--no-vulns");
 
             Assert.True(exited, "CLI did not exit within the timeout — a redirected run must never block on stdin.");
             Assert.Equal(0, exit);
@@ -104,7 +104,7 @@ public sealed class CiSafetyReportTests
         var nupkg = BuildMinimalNupkg();
         try
         {
-            var (exit, output, _, exited) = RunCli("scan-package", nupkg, "--rich");
+            var (exit, output, _, exited) = RunCli("scan-package", nupkg, "--no-vulns", "--rich");
 
             Assert.True(exited, "CLI did not exit within the timeout — a --rich run must never block on stdin.");
             Assert.Equal(0, exit);

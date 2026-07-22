@@ -27,8 +27,7 @@ public sealed class YaraTargetMatchesTests
     [InlineData("/tmp/x/a.dll", "/tmp/x/a.dll", true)]
     // Case-insensitive: yara/OS may echo a differently-cased path (Windows paths are case-insensitive).
     [InlineData("/TMP/X/A.DLL", "/tmp/x/a.dll", true)]
-    // Slash-direction: '/' and '\' are treated alike after normalization.
-    [InlineData("\\tmp\\x\\a.dll", "/tmp/x/a.dll", true)]
+    // NOTE: the slash-direction ('\' vs '/') case is OS-dependent and lives in its own test below.
     // Defensive case: yara echoes the path exactly as it was passed on the command line.
     [InlineData("/tmp/x/deep/module.dll", "/tmp/x/deep/module.dll", true)]
 
@@ -46,6 +45,22 @@ public sealed class YaraTargetMatchesTests
     public void TargetMatches_AnchorsHitToScannedFile(string? target, string fullPath, bool expected)
     {
         Assert.Equal(expected, YaraCliScanner.TargetMatches(target, fullPath));
+    }
+
+    /// <summary>
+    /// Slash-direction equivalence is OS-dependent. On Windows '\' is a path separator, so
+    /// <c>\tmp\x\a.dll</c> and <c>/tmp/x/a.dll</c> name the same file and anchoring must accept the target.
+    /// On Linux/macOS '\' is a legal filename character, so those are genuinely different paths and
+    /// <c>TargetMatches</c> must reject the target. The expected result therefore tracks
+    /// <see cref="OperatingSystem.IsWindows"/> (mirroring <c>YaraCliScanner.Normalize</c>, which only
+    /// backslash-normalizes on Windows).
+    /// </summary>
+    [Fact]
+    public void TargetMatches_SlashDirection_IsOsDependent()
+    {
+        Assert.Equal(
+            OperatingSystem.IsWindows(),
+            YaraCliScanner.TargetMatches(@"\tmp\x\a.dll", "/tmp/x/a.dll"));
     }
     #endregion
 }

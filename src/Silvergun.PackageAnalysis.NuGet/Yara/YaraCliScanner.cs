@@ -182,8 +182,15 @@ public sealed class YaraCliScanner : Runtime, IYaraScanner
             return false;
         }
 
-        static string Normalize(string path) =>
-            Path.GetFullPath(path.Trim()).Replace('\\', '/').TrimEnd('/');
+        static string Normalize(string path)
+        {
+            // Backslash is a path separator only on Windows; on Linux/macOS it is a legal filename
+            // character, so folding it to '/' there would mis-normalize a real path and drop a genuine hit.
+            var p = Path.GetFullPath(path.Trim());
+            if (OperatingSystem.IsWindows())
+                p = p.Replace('\\', '/');
+            return p.TrimEnd('/');
+        }
     }
 
     // Resolves (yara, yarac) from the environment. Missing/blank/nonexistent yara ⇒ (null, null) plus a

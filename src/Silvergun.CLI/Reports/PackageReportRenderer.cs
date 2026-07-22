@@ -4,6 +4,7 @@ using Spectre.Console;
 using Spectre.Console.Rendering;
 
 using Silvergun.CodeAnalysis.IL;
+using Silvergun.Intel;
 using Silvergun.PackageAnalysis.NuGet;
 using Silvergun.PackageAnalysis.NuGet.Yara;
 
@@ -47,6 +48,12 @@ internal static class PackageReportRenderer
         // prominently. Rendered consistently with Script findings (a green "(none)" when clean).
         console.Write(Section(rich, "Malware signatures (YARA)"));
         console.Write(YaraFindingsWidget(rich, report.YaraFindings));
+        console.WriteLine();
+
+        // Known-vulnerability (OSV.dev) hits are concrete, actionable IOCs (ADR 0017) — render prominently, like YARA.
+        // Attached only when the OSV check ran (default; skipped under --no-vulns) — a green "(none)" when it ran clean.
+        console.Write(Section(rich, "Known vulnerabilities (OSV)"));
+        console.Write(VulnerabilitiesWidget(rich, report.Vulnerabilities));
         console.WriteLine();
 
         console.Write(Section(rich, "Assemblies"));
@@ -144,6 +151,39 @@ internal static class PackageReportRenderer
                 Esc(f.RelativePath));
         return table;
     }
+
+    // Known-vulnerability (OSV.dev) findings for the package and its declared dependencies (ADR 0017): the OSV/GHSA id
+    // (red — a concrete, actionable IOC) plus CVE aliases, the attributed PackageId@Version (marked [dependency] for a
+    // dependency checked at its range floor), the summary, and the raw CVSS severity. All fields are untrusted OSV/
+    // package content and pass through Esc; color is stripped in the default (ASCII) mode.
+    private static IRenderable VulnerabilitiesWidget(bool rich, IReadOnlyList<VulnerabilityFinding> findings)
+    {
+        if (findings.Count == 0)
+            return new Markup("[green](none)[/]");
+
+        var table = new Table().Border(TableBorderFor(rich)).Expand();
+        table.AddColumn("[bold]Vulnerability[/]");
+        table.AddColumn("[bold]Package[/]");
+        table.AddColumn("[bold]Severity[/]");
+        table.AddColumn("[bold]Summary[/]");
+        foreach (var f in findings)
+            table.AddRow(
+                $"[bold red]{Esc(f.Id)}[/]{AliasesSuffix(f)}",
+                Esc(PackageLabel(f)),
+                Esc(string.IsNullOrWhiteSpace(f.Severity) ? "-" : f.Severity),
+                Esc(string.IsNullOrWhiteSpace(f.Summary) ? "-" : f.Summary));
+        return table;
+    }
+
+    // A "  (CVE-…, CVE-…)" suffix listing the finding's aliases (typically CVE ids), or empty when there are none.
+    private static string AliasesSuffix(VulnerabilityFinding f) =>
+        f.Aliases.Count == 0 ? string.Empty : $" [grey]({Esc(string.Join(", ", f.Aliases))})[/]";
+
+    // "id@version" plus a "[dependency]" marker when the vuln is attributed to a declared dependency (checked at floor).
+    private static string PackageLabel(VulnerabilityFinding f) =>
+        f.IsDependency
+            ? $"{f.PackageId}@{f.PackageVersion} [dependency]"
+            : $"{f.PackageId}@{f.PackageVersion}";
 
     // A single "family (detection)" label from a YARA finding's enriched metadata; each part is optional.
     private static string FamilyDetection(YaraFinding f)
@@ -247,10 +287,15 @@ internal static class PackageReportRenderer
             ? $"[grey]Malware signatures (YARA):[/] [bold red]{report.YaraFindings.Count} match(es)[/]"
             : "[grey]Malware signatures (YARA):[/] [green]none[/]");
 
-        var attention = allFindings.Count > 0 || report.ScriptFindings.Count > 0 || hasObfuscation || report.YaraFindings.Count > 0;
+        console.MarkupLine(report.Vulnerabilities.Count > 0
+            ? $"[grey]Known vulnerabilities (OSV):[/] [bold red]{report.Vulnerabilities.Count} finding(s)[/]"
+            : "[grey]Known vulnerabilities (OSV):[/] [green]none[/]");
+
+        var attention = allFindings.Count > 0 || report.ScriptFindings.Count > 0 || hasObfuscation
+            || report.YaraFindings.Count > 0 || report.Vulnerabilities.Count > 0;
         console.MarkupLine(attention
             ? $"[bold red]{Esc(AlertGlyph(rich))} Findings present[/] [grey]{Dash(rich)} review recommended.[/]"
-            : $"[bold green]{Esc(CleanGlyph(rich))} Clean[/] [grey]{Dash(rich)} no capability, script, obfuscation, or malware-signature findings.[/]");
+            : $"[bold green]{Esc(CleanGlyph(rich))} Clean[/] [grey]{Dash(rich)} no capability, script, obfuscation, malware-signature, or known-vulnerability findings.[/]");
     }
     #endregion
 }

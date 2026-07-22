@@ -74,7 +74,8 @@ public sealed record PackageCapabilityReport(
     IReadOnlyList<PackageScript> Scripts,
     IReadOnlyList<ScriptFinding> ScriptFindings,
     ProjectHealth? ProjectHealth = null,   // additive (ADR 0015); populated only under scan-package --health, else null
-    IReadOnlyList<YaraFinding>? YaraFindings = null)   // additive (ADR 0016); YARA malware-signature hits, empty when disabled/unavailable
+    IReadOnlyList<YaraFinding>? YaraFindings = null,   // additive (ADR 0016); YARA malware-signature hits, empty when disabled/unavailable
+    IReadOnlyList<VulnerabilityFinding>? Vulnerabilities = null)   // additive (ADR 0017); OSV known-vuln hits, attached by the CLI, empty when skipped/unavailable
 {
     #region Properties
     /// <summary>
@@ -82,6 +83,13 @@ public sealed record PackageCapabilityReport(
     /// list when absent — old JSON that predates this field deserializes to empty, not <c>null</c>.
     /// </summary>
     public IReadOnlyList<YaraFinding> YaraFindings { get; init; } = YaraFindings ?? Array.Empty<YaraFinding>();
+
+    /// <summary>
+    /// Known-vulnerability (OSV.dev) findings for the package and its declared dependencies (ADR 0017). Populated by
+    /// the CLI's network step (never by the offline <see cref="PackageScanner"/>); normalized to an empty list when
+    /// absent — old JSON that predates this field deserializes to empty, not <c>null</c>.
+    /// </summary>
+    public IReadOnlyList<VulnerabilityFinding> Vulnerabilities { get; init; } = Vulnerabilities ?? Array.Empty<VulnerabilityFinding>();
 
     /// <summary>Every finding across all analyzed assemblies, flattened in stored order.</summary>
     [JsonIgnore]

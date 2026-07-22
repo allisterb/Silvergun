@@ -101,6 +101,31 @@ public sealed class ProgramTests
         Assert.Equal(
             Program.ScanExitCode(strict, cap, obf, script),
             Program.ScanExitCode(strict, cap, obf, script, hasYaraFindings: false));
+
+    // The new trailing OSV known-vulnerability gate (ADR 0017): a known vuln is a concrete, actionable IOC, so it
+    // trips --strict on its own (=> 2), stays silent when strict is off (=> 0), and never fabricates a non-zero when
+    // no gate is present.
+    [Theory]
+    [InlineData(true, false, false, false, false, true, 2)]    // strict + only a vulnerability => 2
+    [InlineData(false, false, false, false, false, true, 0)]   // non-strict + vulnerability => 0
+    [InlineData(true, false, false, false, false, false, 0)]   // strict but nothing set => 0
+    [InlineData(true, true, false, false, false, true, 2)]     // vulnerability alongside another gate is still 2
+    [InlineData(true, false, false, false, true, true, 2)]     // vulnerability alongside a YARA hit is still 2
+    public void ScanExitCode_WithVulnerabilityGate_ReturnsTwoOnlyWhenStrictAndAnyGate(
+        bool strict, bool cap, bool obf, bool script, bool yara, bool vuln, int expected) =>
+        Assert.Equal(expected, Program.ScanExitCode(strict, cap, obf, script, yara, vuln));
+
+    // The 6th parameter defaults to false, so a strict scan whose vulnerability-arg is omitted matches the 5-arg
+    // result: pre-existing callers (assembly / check-squat) are unaffected by the additive OSV gate.
+    [Theory]
+    [InlineData(true, false, false, false, false)]
+    [InlineData(true, false, false, false, true)]
+    [InlineData(false, true, true, true, false)]
+    public void ScanExitCode_VulnerabilityDefaultsFalse_MatchesFiveArgOverload(
+        bool strict, bool cap, bool obf, bool script, bool yara) =>
+        Assert.Equal(
+            Program.ScanExitCode(strict, cap, obf, script, yara),
+            Program.ScanExitCode(strict, cap, obf, script, yara, hasVulnerabilities: false));
     #endregion
 
     #region Child types

@@ -73,6 +73,10 @@ internal static class Program
         {
             Description = "Skip YARA malware-signature scanning of the package's extracted files (perf/opt-out)."
         };
+        var noVulnsOption = new Option<bool>("--no-vulns")
+        {
+            Description = "Skip the OSV.dev known-vulnerability check (runs by default; network — this restores fully offline)."
+        };
         var healthPackageIdArgument = new Argument<string>("package-id")
         {
             Description = "The NuGet package id whose source-project (GitHub) health to report."
@@ -102,7 +106,7 @@ internal static class Program
 
         var scanPackageCommand = new Command("scan-package", "Scan a .nupkg for sensitive-API capabilities.")
         {
-            nupkgPathArgument, jsonOption, richOption, outputOption, strictOption, debugOption, noResolveOption, healthOption, noYaraOption
+            nupkgPathArgument, jsonOption, richOption, outputOption, strictOption, debugOption, noResolveOption, healthOption, noYaraOption, noVulnsOption
         };
         scanPackageCommand.Validators.Add(RejectJsonWithRich);
         scanPackageCommand.SetAction(parse => RunScanPackage(
@@ -114,7 +118,8 @@ internal static class Program
             parse.GetValue(debugOption),
             parse.GetValue(noResolveOption),
             parse.GetValue(healthOption),
-            parse.GetValue(noYaraOption)));
+            parse.GetValue(noYaraOption),
+            parse.GetValue(noVulnsOption)));
 
         // check-squat hits nuget.org, so its handler is async; the sync action bridges via GetAwaiter().GetResult()
         // to keep System.CommandLine's synchronous Invoke path (stdout purity handled by ConfigureLogging).
@@ -209,7 +214,7 @@ internal static class Program
             hasScriptFindings: false);
     }
 
-    private static int RunScanPackage(string nupkgPath, bool json, bool rich, string? output, bool strict, bool debug, bool noResolve, bool health, bool noYara)
+    private static int RunScanPackage(string nupkgPath, bool json, bool rich, string? output, bool strict, bool debug, bool noResolve, bool health, bool noYara, bool noVulns)
     {
         ConfigureLogging(json, output, debug);
 
@@ -238,6 +243,13 @@ internal static class Program
                 Console.Error.WriteLine("scan-package: project-health requested but unavailable (no GitHub repository resolved or lookup failed).");
         }
 
+        // OSV known-vulnerability check runs BY DEFAULT (opt out with --no-vulns) — the ONLY other network call besides
+        // --health, and it too lives entirely in the CLI layer (PackageScanner.Scan stays offline). Best-effort/never-
+        // throws: build queries from the local nuspec identity, ask OSV, attach findings. Any failure/empty ⇒ no
+        // findings + a one-line stderr note; stdout/JSON and the exit-code gates below are otherwise unaffected.
+        if (!noVulns)
+            report = report with { Vulnerabilities = ResolveVulnerabilities(report.Package) };
+
         var emitted = json
             ? TryEmit(report.ToJson(), output)
             : EmitHumanReport(c => PackageReportRenderer.Render(c, report, nupkgPath), output, rich);
@@ -245,7 +257,29 @@ internal static class Program
             return 1;
 
         var hasObfuscation = report.Assemblies.Any(a => (a.Obfuscation?.Findings.Count ?? 0) > 0);
-        return ScanExitCode(strict, report.AllFindings.Any(), hasObfuscation, report.ScriptFindings.Any(), report.YaraFindings.Count > 0);
+        return ScanExitCode(strict, report.AllFindings.Any(), hasObfuscation, report.ScriptFindings.Any(), report.YaraFindings.Count > 0, report.Vulnerabilities.Count > 0);
+    }
+
+    // Best-effort OSV.dev known-vulnerability lookup for scan-package (default-on; ADR 0017). Builds queries from the
+    // LOCAL nuspec identity (package@version + declared deps at their range floor), then sync-bridges the network call
+    // (like check-squat/health). Never throws: any exception degrades to an empty list. Emits a single concise stderr
+    // note — "unavailable" on failure, or "no known vulnerabilities" when it ran clean — so stdout/JSON stay pure.
+    private static IReadOnlyList<VulnerabilityFinding> ResolveVulnerabilities(PackageIdentityInfo pkg)
+    {
+        try
+        {
+            var queries = OsvQueryBuilder.Build(pkg);
+            var findings = new OsvClient().QueryAsync(queries).GetAwaiter().GetResult();
+            Console.Error.WriteLine(findings.Count > 0
+                ? $"scan-package: OSV known-vulnerability check found {findings.Count} finding(s)."
+                : "scan-package: OSV known-vulnerability check found no known vulnerabilities.");
+            return findings;
+        }
+        catch
+        {
+            Console.Error.WriteLine("scan-package: known-vulnerability check unavailable (network/OSV). Continuing without it.");
+            return Array.Empty<VulnerabilityFinding>();
+        }
     }
 
     // Runs the network squat check for one package id; logging is routed off stdout by ConfigureLogging.
@@ -366,9 +400,10 @@ internal static class Program
 
     // The --strict CI gate exit-code decision (ADR 0003): 2 when strict and any finding gate trips, else 0.
     // Pure — the run methods pass the concrete gate inputs so this stays independently testable. YARA findings
-    // are high-confidence IOCs and gate too (ADR 0016); default false keeps the non-package callers unchanged.
-    internal static int ScanExitCode(bool strict, bool hasCapabilityFindings, bool hasObfuscation, bool hasScriptFindings, bool hasYaraFindings = false) =>
-        strict && (hasCapabilityFindings || hasObfuscation || hasScriptFindings || hasYaraFindings) ? 2 : 0;
+    // are high-confidence IOCs and gate too (ADR 0016); known vulnerabilities gate too (ADR 0017). The trailing
+    // defaults keep the existing non-package callers/tests unchanged.
+    internal static int ScanExitCode(bool strict, bool hasCapabilityFindings, bool hasObfuscation, bool hasScriptFindings, bool hasYaraFindings = false, bool hasVulnerabilities = false) =>
+        strict && (hasCapabilityFindings || hasObfuscation || hasScriptFindings || hasYaraFindings || hasVulnerabilities) ? 2 : 0;
 
     // Keep stdout machine-parseable: when JSON goes to stdout, log to file only.
     private static void ConfigureLogging(bool json, string? output, bool debug)
