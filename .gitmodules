@@ -1,3 +1,6 @@
 [submodule "ext/analysis-net"]
 	path = ext/analysis-net
 	url = https://github.com/allisterb/analysis-net.git
+[submodule "ext/reversinglabs-yara-rules"]
+	path = ext/reversinglabs-yara-rules
+	url = https://github.com/allisterb/reversinglabs-yara-rules.git
