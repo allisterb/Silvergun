@@ -13,6 +13,7 @@ using Silvergun.CodeAnalysis.IL;
 using Silvergun.Intel;
 using Silvergun.PackageAnalysis.NuGet;
 using Silvergun.PackageAnalysis.NuGet.Squats;
+using Silvergun.PackageAnalysis.NuGet.Yara;
 
 /// <summary>
 /// Entry point for the Silvergun CLI. Exposes the <c>analyze</c> verb, which runs
@@ -68,6 +69,10 @@ internal static class Program
             Description = "Also resolve the package's GitHub repository from the local nuspec and attach a " +
                           "project-health section (network; advisory — never affects the exit code)."
         };
+        var noYaraOption = new Option<bool>("--no-yara")
+        {
+            Description = "Skip YARA malware-signature scanning of the package's extracted files (perf/opt-out)."
+        };
         var healthPackageIdArgument = new Argument<string>("package-id")
         {
             Description = "The NuGet package id whose source-project (GitHub) health to report."
@@ -97,7 +102,7 @@ internal static class Program
 
         var scanPackageCommand = new Command("scan-package", "Scan a .nupkg for sensitive-API capabilities.")
         {
-            nupkgPathArgument, jsonOption, richOption, outputOption, strictOption, debugOption, noResolveOption, healthOption
+            nupkgPathArgument, jsonOption, richOption, outputOption, strictOption, debugOption, noResolveOption, healthOption, noYaraOption
         };
         scanPackageCommand.Validators.Add(RejectJsonWithRich);
         scanPackageCommand.SetAction(parse => RunScanPackage(
@@ -108,7 +113,8 @@ internal static class Program
             parse.GetValue(strictOption),
             parse.GetValue(debugOption),
             parse.GetValue(noResolveOption),
-            parse.GetValue(healthOption)));
+            parse.GetValue(healthOption),
+            parse.GetValue(noYaraOption)));
 
         // check-squat hits nuget.org, so its handler is async; the sync action bridges via GetAwaiter().GetResult()
         // to keep System.CommandLine's synchronous Invoke path (stdout purity handled by ConfigureLogging).
@@ -203,11 +209,11 @@ internal static class Program
             hasScriptFindings: false);
     }
 
-    private static int RunScanPackage(string nupkgPath, bool json, bool rich, string? output, bool strict, bool debug, bool noResolve, bool health)
+    private static int RunScanPackage(string nupkgPath, bool json, bool rich, string? output, bool strict, bool debug, bool noResolve, bool health, bool noYara)
     {
         ConfigureLogging(json, output, debug);
 
-        var scanResult = PackageScanner.Scan(nupkgPath, resolveReferences: !noResolve);
+        var scanResult = PackageScanner.Scan(nupkgPath, resolveReferences: !noResolve, runYara: !noYara);
         if (!scanResult.IsSuccess)
         {
             Console.Error.WriteLine(scanResult.Message);
@@ -215,6 +221,12 @@ internal static class Program
         }
 
         var report = scanResult.Value;
+
+        // YARA was requested (not --no-yara) but no engine is available on this platform/config: note it on stderr
+        // (like --health) so stdout/JSON stay unaffected. On Windows the in-process backend is always present.
+        if (!noYara && !YaraScannerFactory.BackendAvailable)
+            Console.Error.WriteLine(
+                "scan-package: YARA malware-signature scanning unavailable (no engine; set SILVERGUN_YARA_PATH to the yara binary). Continuing without it.");
 
         // --health is the ONLY thing that adds a network call to scan-package (the offline scan above stays offline).
         // Repo resolution is offline (local nuspec); only the GitHub lookup is network. Advisory — never touches the
@@ -233,7 +245,7 @@ internal static class Program
             return 1;
 
         var hasObfuscation = report.Assemblies.Any(a => (a.Obfuscation?.Findings.Count ?? 0) > 0);
-        return ScanExitCode(strict, report.AllFindings.Any(), hasObfuscation, report.ScriptFindings.Any());
+        return ScanExitCode(strict, report.AllFindings.Any(), hasObfuscation, report.ScriptFindings.Any(), report.YaraFindings.Count > 0);
     }
 
     // Runs the network squat check for one package id; logging is routed off stdout by ConfigureLogging.
@@ -353,9 +365,10 @@ internal static class Program
         source is null || source.Trim().ToLowerInvariant() is "nuget" or "librariesio";
 
     // The --strict CI gate exit-code decision (ADR 0003): 2 when strict and any finding gate trips, else 0.
-    // Pure — the run methods pass the concrete gate inputs so this stays independently testable.
-    internal static int ScanExitCode(bool strict, bool hasCapabilityFindings, bool hasObfuscation, bool hasScriptFindings) =>
-        strict && (hasCapabilityFindings || hasObfuscation || hasScriptFindings) ? 2 : 0;
+    // Pure — the run methods pass the concrete gate inputs so this stays independently testable. YARA findings
+    // are high-confidence IOCs and gate too (ADR 0016); default false keeps the non-package callers unchanged.
+    internal static int ScanExitCode(bool strict, bool hasCapabilityFindings, bool hasObfuscation, bool hasScriptFindings, bool hasYaraFindings = false) =>
+        strict && (hasCapabilityFindings || hasObfuscation || hasScriptFindings || hasYaraFindings) ? 2 : 0;
 
     // Keep stdout machine-parseable: when JSON goes to stdout, log to file only.
     private static void ConfigureLogging(bool json, string? output, bool debug)

@@ -79,6 +79,28 @@ public sealed class ProgramTests
     public void ScanExitCode_ReturnsTwoOnlyWhenStrictAndAnyGate(
         bool strict, bool cap, bool obf, bool script, int expected) =>
         Assert.Equal(expected, Program.ScanExitCode(strict, cap, obf, script));
+
+    // The new trailing YARA gate (ADR 0016): a YARA finding is a high-confidence IOC, so it trips --strict on its
+    // own (=> 2), stays silent when strict is off (=> 0), and never fabricates a non-zero when no gate is present.
+    [Theory]
+    [InlineData(true, false, false, false, true, 2)]    // strict + only YARA => 2
+    [InlineData(false, false, false, false, true, 0)]   // non-strict + YARA => 0
+    [InlineData(true, false, false, false, false, 0)]   // strict but nothing set => 0
+    [InlineData(true, true, false, false, true, 2)]     // YARA alongside another gate is still 2
+    public void ScanExitCode_WithYaraGate_ReturnsTwoOnlyWhenStrictAndAnyGate(
+        bool strict, bool cap, bool obf, bool script, bool yara, int expected) =>
+        Assert.Equal(expected, Program.ScanExitCode(strict, cap, obf, script, yara));
+
+    // The 5th parameter defaults to false, so a strict scan whose only YARA-arg is omitted matches the 4-arg result:
+    // pre-existing callers (assembly / check-squat) are unaffected by the additive gate.
+    [Theory]
+    [InlineData(true, false, false, false)]
+    [InlineData(true, true, false, false)]
+    [InlineData(false, true, true, true)]
+    public void ScanExitCode_YaraDefaultsFalse_MatchesFourArgOverload(bool strict, bool cap, bool obf, bool script) =>
+        Assert.Equal(
+            Program.ScanExitCode(strict, cap, obf, script),
+            Program.ScanExitCode(strict, cap, obf, script, hasYaraFindings: false));
     #endregion
 
     #region Child types

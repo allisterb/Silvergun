@@ -8,6 +8,7 @@ using System.Text.Json.Serialization;
 
 using Silvergun.CodeAnalysis.IL;
 using Silvergun.Intel;
+using Silvergun.PackageAnalysis.NuGet.Yara;
 
 /// <summary>One declared dependency of a package (surfaced even when not analyzed — ADR 0004 §6).</summary>
 public sealed record PackageDependencyInfo(string Id, string VersionRange, string TargetFramework);
@@ -72,9 +73,16 @@ public sealed record PackageCapabilityReport(
     IReadOnlyList<AssemblyScanResult> Assemblies,
     IReadOnlyList<PackageScript> Scripts,
     IReadOnlyList<ScriptFinding> ScriptFindings,
-    ProjectHealth? ProjectHealth = null)   // additive (ADR 0015); populated only under scan-package --health, else null
+    ProjectHealth? ProjectHealth = null,   // additive (ADR 0015); populated only under scan-package --health, else null
+    IReadOnlyList<YaraFinding>? YaraFindings = null)   // additive (ADR 0016); YARA malware-signature hits, empty when disabled/unavailable
 {
     #region Properties
+    /// <summary>
+    /// YARA malware-signature findings across the package's extracted files (ADR 0016). Normalized to an empty
+    /// list when absent — old JSON that predates this field deserializes to empty, not <c>null</c>.
+    /// </summary>
+    public IReadOnlyList<YaraFinding> YaraFindings { get; init; } = YaraFindings ?? Array.Empty<YaraFinding>();
+
     /// <summary>Every finding across all analyzed assemblies, flattened in stored order.</summary>
     [JsonIgnore]
     public IEnumerable<ApiCallFinding> AllFindings =>

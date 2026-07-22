@@ -5,6 +5,7 @@ using Spectre.Console.Rendering;
 
 using Silvergun.CodeAnalysis.IL;
 using Silvergun.PackageAnalysis.NuGet;
+using Silvergun.PackageAnalysis.NuGet.Yara;
 
 using static Silvergun.CLI.Reports.ReportTheme;
 
@@ -40,6 +41,12 @@ internal static class PackageReportRenderer
 
         console.Write(Section(rich, "Script findings"));
         console.Write(ScriptFindingsWidget(rich, report.ScriptFindings));
+        console.WriteLine();
+
+        // Malware-signature (YARA) hits are the highest-signal section (named-family IOCs, ADR 0016) — render it
+        // prominently. Rendered consistently with Script findings (a green "(none)" when clean).
+        console.Write(Section(rich, "Malware signatures (YARA)"));
+        console.Write(YaraFindingsWidget(rich, report.YaraFindings));
         console.WriteLine();
 
         console.Write(Section(rich, "Assemblies"));
@@ -114,6 +121,42 @@ internal static class PackageReportRenderer
                 Esc($"{f.RelativePath}:{f.StartLine}"),
                 Esc(f.RuleName));
         return table;
+    }
+
+    // Named-malware (YARA) matches across the extracted files (ADR 0016): rule name (red — high-confidence IOC),
+    // malware family / detection-name, category, and the matched package-relative file. All fields are untrusted
+    // package/rule content and pass through Esc; color is stripped in the default (ASCII) mode.
+    private static IRenderable YaraFindingsWidget(bool rich, IReadOnlyList<YaraFinding> findings)
+    {
+        if (findings.Count == 0)
+            return new Markup("[green](none)[/]");
+
+        var table = new Table().Border(TableBorderFor(rich)).Expand();
+        table.AddColumn("[bold]Rule[/]");
+        table.AddColumn("[bold]Malware family / detection[/]");
+        table.AddColumn("[bold]Category[/]");
+        table.AddColumn("[bold]File[/]");
+        foreach (var f in findings)
+            table.AddRow(
+                $"[bold red]{Esc(f.RuleName)}[/]",
+                Esc(FamilyDetection(f)),
+                Esc(f.Category ?? "-"),
+                Esc(f.RelativePath));
+        return table;
+    }
+
+    // A single "family (detection)" label from a YARA finding's enriched metadata; each part is optional.
+    private static string FamilyDetection(YaraFinding f)
+    {
+        var family = string.IsNullOrWhiteSpace(f.MalwareFamily) ? null : f.MalwareFamily;
+        var detection = string.IsNullOrWhiteSpace(f.DetectionName) ? null : f.DetectionName;
+        return (family, detection) switch
+        {
+            (not null, not null) => $"{family} ({detection})",
+            (not null, null) => family!,
+            (null, not null) => detection!,
+            _ => "-",
+        };
     }
 
     // A tree with one node per packaged assembly: meta line, grouped capability findings (or skip/none), obfuscation.
@@ -200,10 +243,14 @@ internal static class PackageReportRenderer
             ? $"[grey]Obfuscation:[/] [orange1]present[/]"
             : "[grey]Obfuscation:[/] [green]none[/]");
 
-        var attention = allFindings.Count > 0 || report.ScriptFindings.Count > 0 || hasObfuscation;
+        console.MarkupLine(report.YaraFindings.Count > 0
+            ? $"[grey]Malware signatures (YARA):[/] [bold red]{report.YaraFindings.Count} match(es)[/]"
+            : "[grey]Malware signatures (YARA):[/] [green]none[/]");
+
+        var attention = allFindings.Count > 0 || report.ScriptFindings.Count > 0 || hasObfuscation || report.YaraFindings.Count > 0;
         console.MarkupLine(attention
             ? $"[bold red]{Esc(AlertGlyph(rich))} Findings present[/] [grey]{Dash(rich)} review recommended.[/]"
-            : $"[bold green]{Esc(CleanGlyph(rich))} Clean[/] [grey]{Dash(rich)} no capability, script, or obfuscation findings.[/]");
+            : $"[bold green]{Esc(CleanGlyph(rich))} Clean[/] [grey]{Dash(rich)} no capability, script, obfuscation, or malware-signature findings.[/]");
     }
     #endregion
 }

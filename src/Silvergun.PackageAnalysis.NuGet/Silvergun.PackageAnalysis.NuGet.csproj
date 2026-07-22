@@ -1,7 +1,9 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <!-- Multi-targeted (ADR 0016): net10.0-windows hosts the libyara.NET in-process YARA backend
+         (#if WINDOWS); the plain net10.0 build stays libyara-free and Linux-loadable. -->
+    <TargetFrameworks>net10.0;net10.0-windows</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
@@ -19,8 +21,22 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- ReversingLabs MIT YARA rules embedded BY LINK from the ext/ submodule (ADR 0016, see
+         Resources/YaraRules/NOTICE.md); never copied into src/. The Link keeps the submodule's
+         category folders in each manifest resource name, so names stay unique and stable. -->
+    <EmbeddedResource Include="..\..\ext\reversinglabs-yara-rules\yara\**\*.yara">
+      <Link>Resources\YaraRules\ReversingLabs\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </EmbeddedResource>
+    <!-- Our own YARA rules, compiled alongside the ReversingLabs set. -->
+    <EmbeddedResource Include="Resources\YaraRules\Custom\**\*.yara" />
+    <EmbeddedResource Include="Resources\YaraRules\NOTICE.md" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.CST.ApplicationInspector.RulesEngine" Version="1.9.55" />
-    <PackageReference Include="Microsoft.O365.Security.Native.libyara.NET.Core" Version="4.5.5" />
+    <!-- Windows-only: mixed-mode C++/CLI wrapper over native libyara 4.5 (win-x64/win-arm64 only).
+         Conditioned to net10.0-windows so the net10.0 (Linux) artifact never references libyara. -->
+    <PackageReference Include="Microsoft.O365.Security.Native.libyara.NET.Core" Version="4.5.5" Condition="'$(TargetFramework)'=='net10.0-windows'" />
     <PackageReference Include="NuGet.LibraryModel" Version="7.6.0" />
     <PackageReference Include="NuGet.Packaging" Version="7.6.0" />
     <PackageReference Include="NuGet.ProjectModel" Version="7.6.0" />
