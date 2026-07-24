@@ -51,9 +51,9 @@ internal static class PackageReportRenderer
         console.WriteLine();
 
         // Known-vulnerability (OSV.dev) hits are concrete, actionable IOCs (ADR 0017) — render prominently, like YARA.
-        // Attached only when the OSV check ran (default; skipped under --no-vulns) — a green "(none)" when it ran clean.
+        // Keyed on VulnerabilitiesStatus so an outage (Unavailable) is shown as a warning, never as the clean "(none)".
         console.Write(Section(rich, "Known vulnerabilities (OSV)"));
-        console.Write(VulnerabilitiesWidget(rich, report.Vulnerabilities));
+        console.Write(VulnerabilitiesWidget(rich, report.Vulnerabilities, report.VulnerabilitiesStatus));
         console.WriteLine();
 
         console.Write(Section(rich, "Assemblies"));
@@ -156,8 +156,15 @@ internal static class PackageReportRenderer
     // (red — a concrete, actionable IOC) plus CVE aliases, the attributed PackageId@Version (marked [dependency] for a
     // dependency checked at its range floor), the summary, and the raw CVSS severity. All fields are untrusted OSV/
     // package content and pass through Esc; color is stripped in the default (ASCII) mode.
-    private static IRenderable VulnerabilitiesWidget(bool rich, IReadOnlyList<VulnerabilityFinding> findings)
+    private static IRenderable VulnerabilitiesWidget(
+        bool rich, IReadOnlyList<VulnerabilityFinding> findings, VulnerabilityScanStatus status)
     {
+        // NotChecked (e.g. --no-vulns): dim, like other optional sections. Unavailable: a prominent warning that this is
+        // NOT the clean state. Completed: the existing table, or a green "(none)" when it ran and found nothing.
+        if (status == VulnerabilityScanStatus.NotChecked)
+            return new Markup("[grey](not checked)[/]");
+        if (status == VulnerabilityScanStatus.Unavailable)
+            return new Markup($"[yellow]{Esc(AlertGlyph(rich))} known-vulnerability check unavailable {Dash(rich)} NOT verified[/]");
         if (findings.Count == 0)
             return new Markup("[green](none)[/]");
 
@@ -289,13 +296,24 @@ internal static class PackageReportRenderer
 
         console.MarkupLine(report.Vulnerabilities.Count > 0
             ? $"[grey]Known vulnerabilities (OSV):[/] [bold red]{report.Vulnerabilities.Count} finding(s)[/]"
-            : "[grey]Known vulnerabilities (OSV):[/] [green]none[/]");
+            : report.VulnerabilitiesStatus switch
+            {
+                VulnerabilityScanStatus.Unavailable => "[grey]Known vulnerabilities (OSV):[/] [yellow]not verified (check unavailable)[/]",
+                VulnerabilityScanStatus.NotChecked => "[grey]Known vulnerabilities (OSV):[/] [grey]not checked[/]",
+                _ => "[grey]Known vulnerabilities (OSV):[/] [green]none[/]",
+            });
 
         var attention = allFindings.Count > 0 || report.ScriptFindings.Count > 0 || hasObfuscation
             || report.YaraFindings.Count > 0 || report.Vulnerabilities.Count > 0;
-        console.MarkupLine(attention
-            ? $"[bold red]{Esc(AlertGlyph(rich))} Findings present[/] [grey]{Dash(rich)} review recommended.[/]"
-            : $"[bold green]{Esc(CleanGlyph(rich))} Clean[/] [grey]{Dash(rich)} no capability, script, obfuscation, malware-signature, or known-vulnerability findings.[/]");
+        // "Clean" requires the vuln check to have actually completed — Unavailable/NotChecked means the package was NOT
+        // verified against known CVEs, so surface a distinct "not verified" headline rather than a false all-clear.
+        var vulnVerified = report.VulnerabilitiesStatus == VulnerabilityScanStatus.Completed;
+        if (attention)
+            console.MarkupLine($"[bold red]{Esc(AlertGlyph(rich))} Findings present[/] [grey]{Dash(rich)} review recommended.[/]");
+        else if (!vulnVerified)
+            console.MarkupLine($"[yellow]{Esc(AlertGlyph(rich))} Not verified[/] [grey]{Dash(rich)} no findings, but the known-vulnerability check did not complete.[/]");
+        else
+            console.MarkupLine($"[bold green]{Esc(CleanGlyph(rich))} Clean[/] [grey]{Dash(rich)} no capability, script, obfuscation, malware-signature, or known-vulnerability findings.[/]");
     }
     #endregion
 }

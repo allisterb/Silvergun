@@ -7,6 +7,7 @@ using System.Linq;
 using Spectre.Console;
 
 using Silvergun.CLI.Reports;
+using Silvergun.Intel;
 using Silvergun.PackageAnalysis.NuGet;
 using Silvergun.PackageAnalysis.NuGet.Yara;
 
@@ -116,7 +117,10 @@ public sealed class YaraReportRendererTests
             Array.Empty<AssemblyScanResult>(),
             Array.Empty<PackageScript>(),
             Array.Empty<ScriptFinding>(),
-            YaraFindings: findings);
+            YaraFindings: findings,
+            // The YARA-clean footer asserts "Clean", which now requires a COMPLETED vuln check (an unverified scan reads
+            // "not verified"). This section's tests aren't about OSV, so treat the vuln check as completed-and-clean.
+            VulnerabilitiesStatus: VulnerabilityScanStatus.Completed);
     }
     #endregion
 

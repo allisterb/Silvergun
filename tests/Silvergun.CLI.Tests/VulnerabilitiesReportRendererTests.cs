@@ -112,8 +112,8 @@ public sealed class VulnerabilitiesReportRendererTests
         Assert.Contains("[dependency]", output);   // the dependency marker renders literally (it is not a markup tag)
     }
 
-    // A clean report (empty Vulnerabilities) must render the "(none)" clean path without throwing and signal the clean
-    // footer — the same shape as the other "no findings" sections.
+    // A clean report (empty Vulnerabilities) with a COMPLETED check must render the "(none)" clean path without throwing
+    // and signal the clean footer — the same shape as the other "no findings" sections.
     [Fact]
     public void PackageRenderer_CleanVulnerabilities_RendersNoneWithoutThrowing()
     {
@@ -127,6 +127,67 @@ public sealed class VulnerabilitiesReportRendererTests
         Assert.Contains("Known vulnerabilities (OSV)", output);   // the section is always present
         Assert.Contains("(none)", output);                        // clean OSV renders the "(none)" placeholder
         Assert.Contains("Clean", output);                         // and the report footer stays clean
+    }
+
+    // An UNAVAILABLE check (OSV outage) must render distinctly from clean: a prominent "not verified"/"unavailable"
+    // warning, NEVER the clean "(none)" placeholder, and the footer headline must NOT say "Clean" (it would be a false
+    // all-clear on a security-gating signal). Default (ascii) output must still be pure 7-bit ASCII with no leftover
+    // markup — the same invariant every other section upholds.
+    [Fact]
+    public void PackageRenderer_UnavailableVulnerabilities_AsciiConsole_ShowsNotVerifiedNotClean()
+    {
+        var (console, writer) = AsciiConsole();
+
+        PackageReportRenderer.Render(console, ReportWith(VulnerabilityScanStatus.Unavailable), "Benign.nupkg");
+
+        AssertSevenBitAscii(writer);
+        var output = writer.ToString();
+        Assert.Contains("Known vulnerabilities (OSV)", output);
+        Assert.Contains("unavailable", output);          // the outage is surfaced prominently
+        Assert.Contains("not verified", output);         // ... and clearly labelled NOT verified (footer, lower-case)
+        Assert.DoesNotContain("Clean", output);          // and the footer never claims a clean bill of health
+    }
+
+    // The same Unavailable report through the --rich path renders without throwing and carries the warning text.
+    [Fact]
+    public void PackageRenderer_UnavailableVulnerabilities_RichConsole_RendersWarningWithoutThrowing()
+    {
+        var (console, writer) = RichConsole();
+
+        var ex = Record.Exception(() =>
+            PackageReportRenderer.Render(console, ReportWith(VulnerabilityScanStatus.Unavailable), "Benign.nupkg"));
+
+        Assert.Null(ex);
+        Assert.Contains("unavailable", writer.ToString());
+    }
+
+    // A NOT-CHECKED report (e.g. --no-vulns) renders a dim "(not checked)" line, never the clean "(none)", and the
+    // footer does NOT claim "Clean" (the package was not verified against known CVEs). Default output stays 7-bit ASCII.
+    [Fact]
+    public void PackageRenderer_NotCheckedVulnerabilities_AsciiConsole_ShowsNotCheckedNotClean()
+    {
+        var (console, writer) = AsciiConsole();
+
+        PackageReportRenderer.Render(console, ReportWith(VulnerabilityScanStatus.NotChecked), "Benign.nupkg");
+
+        AssertSevenBitAscii(writer);
+        var output = writer.ToString();
+        Assert.Contains("Known vulnerabilities (OSV)", output);
+        Assert.Contains("(not checked)", output);        // the skip is surfaced as its own state
+        Assert.DoesNotContain("Clean", output);          // and the footer does not claim clean
+    }
+
+    // The same NotChecked report through the --rich path renders without throwing and carries the "(not checked)" line.
+    [Fact]
+    public void PackageRenderer_NotCheckedVulnerabilities_RichConsole_RendersNotCheckedWithoutThrowing()
+    {
+        var (console, writer) = RichConsole();
+
+        var ex = Record.Exception(() =>
+            PackageReportRenderer.Render(console, ReportWith(VulnerabilityScanStatus.NotChecked), "Benign.nupkg"));
+
+        Assert.Null(ex);
+        Assert.Contains("(not checked)", writer.ToString());
     }
     #endregion
 
@@ -143,7 +204,12 @@ public sealed class VulnerabilitiesReportRendererTests
             Array.Empty<string>());
 
     // A minimal, otherwise-clean scan-package report carrying exactly the given vulnerability findings (none => clean).
-    private static PackageCapabilityReport ReportWithVulns(params VulnerabilityFinding[] findings)
+    // The OSV check is treated as Completed by default — the state under which findings render and an empty list is the
+    // clean "(none)". Tests that exercise an outage / skip pass Unavailable / NotChecked explicitly.
+    private static PackageCapabilityReport ReportWithVulns(params VulnerabilityFinding[] findings) =>
+        ReportWith(VulnerabilityScanStatus.Completed, findings);
+
+    private static PackageCapabilityReport ReportWith(VulnerabilityScanStatus status, params VulnerabilityFinding[] findings)
     {
         var pkg = new PackageIdentityInfo("Some.Package", "1.0.0", "Author", "A package.", Array.Empty<PackageDependencyInfo>());
         return new PackageCapabilityReport(
@@ -152,7 +218,8 @@ public sealed class VulnerabilitiesReportRendererTests
             Array.Empty<AssemblyScanResult>(),
             Array.Empty<PackageScript>(),
             Array.Empty<ScriptFinding>(),
-            Vulnerabilities: findings);
+            Vulnerabilities: findings,
+            VulnerabilitiesStatus: status);
     }
     #endregion
 

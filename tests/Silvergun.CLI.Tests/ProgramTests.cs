@@ -126,6 +126,16 @@ public sealed class ProgramTests
         Assert.Equal(
             Program.ScanExitCode(strict, cap, obf, script, yara),
             Program.ScanExitCode(strict, cap, obf, script, yara, hasVulnerabilities: false));
+
+    // OSV reachability (the new Unavailable status) is NOT a --strict gate: the gate is findings-only. An Unavailable
+    // check with NO findings (hasVulnerabilities:false) — the outage case — must still exit 0 under --strict, exactly
+    // like a completed-clean scan. ScanExitCode takes only hasVulnerabilities (not the status), so this documents that
+    // an outage never fabricates a non-zero exit; the "not verified" signal lives in the report/stderr, not the code.
+    [Fact]
+    public void ScanExitCode_StrictWithUnavailableStatusButNoFindings_ReturnsZero() =>
+        Assert.Equal(0, Program.ScanExitCode(
+            strict: true, hasCapabilityFindings: false, hasObfuscation: false, hasScriptFindings: false,
+            hasYaraFindings: false, hasVulnerabilities: false));
     #endregion
 
     #region Child types

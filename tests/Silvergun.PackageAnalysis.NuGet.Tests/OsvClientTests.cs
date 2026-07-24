@@ -31,13 +31,14 @@ public sealed class OsvClientTests
         var handler = new StubHttpMessageHandler((req, _) => Route(req, BatchOneVulnThenClean, _ => Ok(DetailJson)));
         var client = new OsvClient(new HttpClient(handler), baseUrl: "https://osv.test");
 
-        var findings = await client.QueryAsync(new[]
+        var result = await client.QueryAsync(new[]
         {
             new OsvQuery("VulnPkg", "1.0.0", IsDependency: false),
             new OsvQuery("CleanPkg", "2.0.0", IsDependency: true),
         });
 
-        var finding = Assert.Single(findings);
+        Assert.True(result.Queried);   // every querybatch chunk completed => the check ran
+        var finding = Assert.Single(result.Findings);
         Assert.Equal("GHSA-vvvv-vvvv-vvvv", finding.Id);
         Assert.Equal("VulnPkg", finding.PackageId);
         Assert.Equal("1.0.0", finding.PackageVersion);
@@ -61,12 +62,14 @@ public sealed class OsvClientTests
         var handler = new StubHttpMessageHandler((req, _) => Route(req, batch, _ => Ok(detail)));
         var client = new OsvClient(new HttpClient(handler), baseUrl: "https://osv.test");
 
-        var findings = await client.QueryAsync(new[]
+        var result = await client.QueryAsync(new[]
         {
             new OsvQuery("PkgA", "1.0.0", IsDependency: false),
             new OsvQuery("PkgB", "2.0.0", IsDependency: true),
         });
 
+        Assert.True(result.Queried);
+        var findings = result.Findings;
         Assert.Equal(2, findings.Count);
         Assert.All(findings, f => Assert.Equal("GHSA-shared", f.Id));
 
@@ -79,37 +82,84 @@ public sealed class OsvClientTests
         Assert.True(b.IsDependency);
     }
 
-    // The querybatch itself failing (non-success or malformed body) collapses the whole call to empty — never throws.
+    // A single-chunk querybatch hard-failing (non-success) collapses to empty findings AND flips Queried=false — an
+    // outage is now distinguishable from a genuinely-clean result. Never throws.
     [Theory]
     [InlineData(HttpStatusCode.NotFound)]
     [InlineData(HttpStatusCode.InternalServerError)]
     [InlineData((HttpStatusCode)429)]
-    public async Task QueryAsync_QueryBatchNonSuccess_ReturnsEmpty(HttpStatusCode status)
+    public async Task QueryAsync_QueryBatchNonSuccess_ReturnsNotQueriedAndEmpty(HttpStatusCode status)
     {
         var handler = new StubHttpMessageHandler((_, _) => new HttpResponseMessage(status));
         var client = new OsvClient(new HttpClient(handler), baseUrl: "https://osv.test");
 
-        Assert.Empty(await client.QueryAsync(new[] { new OsvQuery("VulnPkg", "1.0.0", false) }));
+        var result = await client.QueryAsync(new[] { new OsvQuery("VulnPkg", "1.0.0", false) });
+
+        Assert.False(result.Queried);   // the check could not complete — NOT a clean all-clear
+        Assert.Empty(result.Findings);
     }
 
-    // Malformed JSON in a 200 querybatch body collapses to empty — the parse failure is swallowed.
+    // Malformed JSON in a 200 querybatch body is a hard chunk failure: empty findings and Queried=false.
     [Fact]
-    public async Task QueryAsync_QueryBatchMalformedJson_ReturnsEmpty()
+    public async Task QueryAsync_QueryBatchMalformedJson_ReturnsNotQueriedAndEmpty()
     {
         var handler = new StubHttpMessageHandler((_, _) => Ok("{ not valid json "));
         var client = new OsvClient(new HttpClient(handler), baseUrl: "https://osv.test");
 
-        Assert.Empty(await client.QueryAsync(new[] { new OsvQuery("VulnPkg", "1.0.0", false) }));
+        var result = await client.QueryAsync(new[] { new OsvQuery("VulnPkg", "1.0.0", false) });
+
+        Assert.False(result.Queried);
+        Assert.Empty(result.Findings);
     }
 
-    // A transport-level exception on the querybatch collapses to empty — never propagates.
+    // A transport-level exception on the querybatch is a hard chunk failure: empty findings, Queried=false, no throw.
     [Fact]
-    public async Task QueryAsync_QueryBatchTransportException_ReturnsEmpty()
+    public async Task QueryAsync_QueryBatchTransportException_ReturnsNotQueriedAndEmpty()
     {
         var handler = new StubHttpMessageHandler((_, _) => throw new HttpRequestException("simulated socket failure"));
         var client = new OsvClient(new HttpClient(handler), baseUrl: "https://osv.test");
 
-        Assert.Empty(await client.QueryAsync(new[] { new OsvQuery("VulnPkg", "1.0.0", false) }));
+        var result = await client.QueryAsync(new[] { new OsvQuery("VulnPkg", "1.0.0", false) });
+
+        Assert.False(result.Queried);
+        Assert.Empty(result.Findings);
+    }
+
+    // A TWO-chunk scan where one chunk succeeds (with a vuln) and the other hard-fails: Queried=false (the ID set is
+    // incomplete), yet the findings gathered from the succeeding chunk are STILL returned. ChunkSize is 1000, so 1001
+    // queries force exactly two chunks; the handler fails the second querybatch call while the first reports a vuln for
+    // query[0]. Detail enrichment succeeds so the retained finding is fully populated.
+    [Fact]
+    public async Task QueryAsync_OneChunkSucceedsOneChunkFails_ReturnsNotQueriedWithGatheredFindings()
+    {
+        var batchCall = 0;
+        var handler = new StubHttpMessageHandler((req, _) =>
+        {
+            var path = req.RequestUri!.AbsolutePath;
+            if (path.EndsWith("/querybatch", StringComparison.Ordinal))
+            {
+                batchCall++;
+                // First chunk completes with a vuln for query[0]; the second chunk hard-fails (5xx).
+                return batchCall == 1
+                    ? Ok(BatchOneVulnThenClean)
+                    : new HttpResponseMessage(HttpStatusCode.InternalServerError);
+            }
+            return Ok(DetailJson);
+        });
+        var client = new OsvClient(new HttpClient(handler), baseUrl: "https://osv.test");
+
+        var queries = new OsvQuery[1001];
+        queries[0] = new OsvQuery("VulnPkg", "1.0.0", IsDependency: false);
+        for (var i = 1; i < queries.Length; i++)
+            queries[i] = new OsvQuery($"Clean{i}", "1.0.0", IsDependency: false);
+
+        var result = await client.QueryAsync(queries);
+
+        Assert.Equal(2, batchCall);         // both chunks were attempted
+        Assert.False(result.Queried);       // a chunk failed => the overall check is incomplete
+        var finding = Assert.Single(result.Findings);   // but the first chunk's finding is still returned
+        Assert.Equal("GHSA-vvvv-vvvv-vvvv", finding.Id);
+        Assert.Equal("VulnPkg", finding.PackageId);
     }
 
     // A detail GET failing (non-success) while the querybatch succeeds still yields an id-only finding attributed to
@@ -123,13 +173,14 @@ public sealed class OsvClientTests
             Route(req, BatchOneVulnThenClean, _ => new HttpResponseMessage(status)));
         var client = new OsvClient(new HttpClient(handler), baseUrl: "https://osv.test");
 
-        var findings = await client.QueryAsync(new[]
+        var result = await client.QueryAsync(new[]
         {
             new OsvQuery("VulnPkg", "1.0.0", false),
             new OsvQuery("CleanPkg", "2.0.0", true),
         });
 
-        var finding = Assert.Single(findings);
+        Assert.True(result.Queried);   // a per-id DETAIL failure does NOT flip Queried — the ID set is complete
+        var finding = Assert.Single(result.Findings);
         Assert.Equal("GHSA-vvvv-vvvv-vvvv", finding.Id);
         Assert.Equal("VulnPkg", finding.PackageId);
         Assert.Equal("1.0.0", finding.PackageVersion);
@@ -147,7 +198,10 @@ public sealed class OsvClientTests
             Route(req, BatchOneVulnThenClean, _ => Ok("{ not valid json ")));
         var client = new OsvClient(new HttpClient(handler), baseUrl: "https://osv.test");
 
-        var finding = Assert.Single(await client.QueryAsync(new[] { new OsvQuery("VulnPkg", "1.0.0", false) }));
+        var result = await client.QueryAsync(new[] { new OsvQuery("VulnPkg", "1.0.0", false) });
+
+        Assert.True(result.Queried);   // detail malformed-JSON degrades to id-only but leaves Queried true
+        var finding = Assert.Single(result.Findings);
         Assert.Equal("GHSA-vvvv-vvvv-vvvv", finding.Id);
         Assert.Null(finding.Summary);
         Assert.Null(finding.Severity);
@@ -172,14 +226,17 @@ public sealed class OsvClientTests
     }
 
     // An HttpClient timeout surfaces as a TaskCanceledException while the caller's token is NOT cancelled — the
-    // client treats that as "unavailable" (empty), per the LibrariesIo/GitHub precedent.
+    // client treats that as "unavailable": empty findings AND Queried=false, per the LibrariesIo/GitHub precedent.
     [Fact]
-    public async Task QueryAsync_TimeoutWithoutCancellation_ReturnsEmpty()
+    public async Task QueryAsync_TimeoutWithoutCancellation_ReturnsNotQueriedAndEmpty()
     {
         var handler = new StubHttpMessageHandler((_, _) => throw new TaskCanceledException("simulated HttpClient timeout"));
         var client = new OsvClient(new HttpClient(handler), baseUrl: "https://osv.test");
 
-        Assert.Empty(await client.QueryAsync(new[] { new OsvQuery("VulnPkg", "1.0.0", false) }, CancellationToken.None));
+        var result = await client.QueryAsync(new[] { new OsvQuery("VulnPkg", "1.0.0", false) }, CancellationToken.None);
+
+        Assert.False(result.Queried);
+        Assert.Empty(result.Findings);
     }
 
     // The outgoing querybatch request carries the required User-Agent and Accept headers. The batch returns a clean
@@ -201,32 +258,40 @@ public sealed class OsvClientTests
         });
         var client = new OsvClient(new HttpClient(handler), baseUrl: "https://osv.test");
 
-        await client.QueryAsync(new[] { new OsvQuery("CleanPkg", "1.0.0", false) });
+        var result = await client.QueryAsync(new[] { new OsvQuery("CleanPkg", "1.0.0", false) });
 
+        Assert.True(result.Queried);    // a completed batch with no vulns is still Queried=true (truly clean)
+        Assert.Empty(result.Findings);
         Assert.Equal(HttpMethod.Post, method);
         Assert.Contains("Silvergun", userAgent);
         Assert.Equal("application/json", accept);
     }
 
-    // A null query list short-circuits to empty and sends no HTTP request at all.
+    // A null query list short-circuits to empty and sends no HTTP request — but Queried=true (nothing to check ≠ outage).
     [Fact]
-    public async Task QueryAsync_NullQueries_ReturnsEmptyAndSendsNoRequest()
+    public async Task QueryAsync_NullQueries_ReturnsQueriedEmptyAndSendsNoRequest()
     {
         var handler = new StubHttpMessageHandler((_, _) => Ok(BatchAllClean));
         var client = new OsvClient(new HttpClient(handler), baseUrl: "https://osv.test");
 
-        Assert.Empty(await client.QueryAsync(null!));
+        var result = await client.QueryAsync(null!);
+
+        Assert.True(result.Queried);   // nothing to check is a completed (clean) result, not a failure
+        Assert.Empty(result.Findings);
         Assert.Equal(0, handler.CallCount);
     }
 
-    // An empty query list short-circuits to empty and sends no HTTP request at all.
+    // An empty query list short-circuits to empty and sends no HTTP request — but Queried=true (nothing to check ≠ outage).
     [Fact]
-    public async Task QueryAsync_EmptyQueries_ReturnsEmptyAndSendsNoRequest()
+    public async Task QueryAsync_EmptyQueries_ReturnsQueriedEmptyAndSendsNoRequest()
     {
         var handler = new StubHttpMessageHandler((_, _) => Ok(BatchAllClean));
         var client = new OsvClient(new HttpClient(handler), baseUrl: "https://osv.test");
 
-        Assert.Empty(await client.QueryAsync(Array.Empty<OsvQuery>()));
+        var result = await client.QueryAsync(Array.Empty<OsvQuery>());
+
+        Assert.True(result.Queried);
+        Assert.Empty(result.Findings);
         Assert.Equal(0, handler.CallCount);
     }
 

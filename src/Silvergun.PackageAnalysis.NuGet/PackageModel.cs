@@ -75,7 +75,8 @@ public sealed record PackageCapabilityReport(
     IReadOnlyList<ScriptFinding> ScriptFindings,
     ProjectHealth? ProjectHealth = null,   // additive (ADR 0015); populated only under scan-package --health, else null
     IReadOnlyList<YaraFinding>? YaraFindings = null,   // additive (ADR 0016); YARA malware-signature hits, empty when disabled/unavailable
-    IReadOnlyList<VulnerabilityFinding>? Vulnerabilities = null)   // additive (ADR 0017); OSV known-vuln hits, attached by the CLI, empty when skipped/unavailable
+    IReadOnlyList<VulnerabilityFinding>? Vulnerabilities = null,   // additive (ADR 0017); OSV known-vuln hits, attached by the CLI, empty when skipped/unavailable
+    VulnerabilityScanStatus VulnerabilitiesStatus = VulnerabilityScanStatus.NotChecked)   // additive (ADR 0017 amendment); whether the OSV check ran — old JSON ⇒ NotChecked
 {
     #region Properties
     /// <summary>

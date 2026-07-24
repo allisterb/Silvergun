@@ -9,6 +9,7 @@ using Spectre.Console;
 
 using Silvergun.CLI.Reports;
 using Silvergun.CodeAnalysis.IL;
+using Silvergun.Intel;
 using Silvergun.PackageAnalysis.NuGet;
 using Silvergun.PackageAnalysis.NuGet.Squats;
 
@@ -232,7 +233,10 @@ public sealed class ReportRendererTests
     {
         var (console, writer) = PlainConsole();
         var pkg = new PackageIdentityInfo("Benign.Package", "1.0.0", "Author", null, []);
-        var report = new PackageCapabilityReport(pkg, Epoch, [], [], []);
+        // A fully-clean scan is also a VERIFIED one: the OSV check completed and found nothing. Without Completed the
+        // footer would (correctly) read "not verified", so the clean headline requires an actually-completed vuln check.
+        var report = new PackageCapabilityReport(pkg, Epoch, [], [], [],
+            VulnerabilitiesStatus: VulnerabilityScanStatus.Completed);
 
         var ex = Record.Exception(() => PackageReportRenderer.Render(console, report, "Benign.nupkg"));
 

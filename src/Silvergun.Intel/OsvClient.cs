@@ -35,24 +35,34 @@ public sealed class OsvClient : IVulnerabilitySource
     /// <summary>
     /// Batches <paramref name="queries"/> to <c>/v1/querybatch</c>, dedupes the resulting vulnerability IDs, enriches
     /// each via <c>/v1/vulns/{id}</c>, and emits one <see cref="VulnerabilityFinding"/> per (vulnerability, matching
-    /// query). Empty for a <c>null</c>/empty list; never throws (except honoring cancellation).
+    /// query). A <c>null</c>/empty list is <c>Queried=true</c> with no findings. <c>Queried</c> is <c>true</c> only when
+    /// every querybatch chunk completed (per-id detail failures don't flip it); any chunk failure ⇒ <c>Queried=false</c>
+    /// while still returning the findings gathered so far. Never throws (except honoring cancellation).
     /// </summary>
-    public async Task<IReadOnlyList<VulnerabilityFinding>> QueryAsync(
+    public async Task<OsvQueryResult> QueryAsync(
         IReadOnlyList<OsvQuery> queries, CancellationToken ct = default)
     {
         if (queries is null || queries.Count == 0)
-            return Array.Empty<VulnerabilityFinding>();
+            return new OsvQueryResult(true, Array.Empty<VulnerabilityFinding>());
 
         // vuln id → the input query indices it was returned for (an id can match multiple packages).
         var idToQueries = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+        var queried = true;   // stays true only if EVERY querybatch chunk completes successfully.
 
         for (var offset = 0; offset < queries.Count; offset += ChunkSize)
         {
             var take = Math.Min(ChunkSize, queries.Count - offset);
             var chunk = queries.Skip(offset).Take(take).ToArray();
 
-            // results[i] aligns to chunk[i] by index; a failed chunk yields empty and simply contributes nothing.
+            // results[i] aligns to chunk[i] by index; a null result is a hard chunk failure (flips queried, contributes
+            // nothing) — distinct from a completed chunk that legitimately found no vulns.
             var results = await QueryBatchAsync(chunk, ct);
+            if (results is null)
+            {
+                queried = false;
+                continue;
+            }
+
             var aligned = Math.Min(results.Count, take);
             for (var i = 0; i < aligned; i++)
                 foreach (var id in results[i])
@@ -62,7 +72,7 @@ public sealed class OsvClient : IVulnerabilitySource
         }
 
         if (idToQueries.Count == 0)
-            return Array.Empty<VulnerabilityFinding>();
+            return new OsvQueryResult(queried, Array.Empty<VulnerabilityFinding>());
 
         var findings = new List<VulnerabilityFinding>();
         foreach (var (id, indices) in idToQueries)
@@ -83,11 +93,12 @@ public sealed class OsvClient : IVulnerabilitySource
             }));
         }
 
-        return findings;
+        return new OsvQueryResult(queried, findings);
     }
 
-    // POSTs a chunk to /v1/querybatch; returns the vuln IDs per query, aligned to chunk order. Empty on any failure.
-    private async Task<IReadOnlyList<IReadOnlyList<string>>> QueryBatchAsync(
+    // POSTs a chunk to /v1/querybatch; returns the vuln IDs per query, aligned to chunk order. Returns null on any
+    // hard failure (non-success/transport/malformed) so the caller can mark the whole check as not-completed.
+    private async Task<IReadOnlyList<IReadOnlyList<string>>?> QueryBatchAsync(
         IReadOnlyList<OsvQuery> chunk, CancellationToken ct)
     {
         try
@@ -108,7 +119,7 @@ public sealed class OsvClient : IVulnerabilitySource
 
             using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
             if (!response.IsSuccessStatusCode)
-                return Array.Empty<IReadOnlyList<string>>();
+                return null;
 
             using var stream = await response.Content.ReadAsStreamAsync(ct);
             using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
@@ -116,11 +127,11 @@ public sealed class OsvClient : IVulnerabilitySource
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            throw;   // a real cancellation propagates; an HttpClient timeout falls through to "empty".
+            throw;   // a real cancellation propagates; an HttpClient timeout falls through to "failed".
         }
         catch
         {
-            return Array.Empty<IReadOnlyList<string>>();
+            return null;
         }
     }
 
@@ -152,12 +163,13 @@ public sealed class OsvClient : IVulnerabilitySource
     }
 
     // { "results": [ { "vulns": [ { "id", "modified" } ] } | { } , ... ] } → ids per result, aligned to input order.
-    private static IReadOnlyList<IReadOnlyList<string>> ParseBatchResults(JsonElement root)
+    // A missing/non-array "results" is a malformed response (null ⇒ the caller marks the chunk as failed).
+    private static IReadOnlyList<IReadOnlyList<string>>? ParseBatchResults(JsonElement root)
     {
         if (root.ValueKind != JsonValueKind.Object
             || !root.TryGetProperty("results", out var results)
             || results.ValueKind != JsonValueKind.Array)
-            return Array.Empty<IReadOnlyList<string>>();
+            return null;
 
         var list = new List<IReadOnlyList<string>>(results.GetArrayLength());
         foreach (var result in results.EnumerateArray())

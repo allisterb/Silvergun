@@ -113,6 +113,61 @@ public sealed class PackageReportVulnerabilitiesJsonTests
         Assert.Empty(restored.Vulnerabilities);
         Assert.Equal("Legacy.Package", restored.Package.Id);   // the rest of the legacy report still deserialized
     }
+
+    // The additive VulnerabilitiesStatus survives ToJson => FromJson for every enum value — a report that recorded an
+    // OSV outage must NOT come back deserialized as a completed/clean scan (the false all-clear this field prevents).
+    [Theory]
+    [InlineData(VulnerabilityScanStatus.NotChecked)]
+    [InlineData(VulnerabilityScanStatus.Completed)]
+    [InlineData(VulnerabilityScanStatus.Unavailable)]
+    public void PackageReport_VulnerabilitiesStatus_RoundTrips(VulnerabilityScanStatus status)
+    {
+        var report = MakeReport(Array.Empty<VulnerabilityFinding>()) with { VulnerabilitiesStatus = status };
+
+        var restored = PackageCapabilityReport.FromJson(report.ToJson());
+
+        Assert.NotNull(restored);
+        Assert.Equal(status, restored!.VulnerabilitiesStatus);
+    }
+
+    // The status serializes as its enum NAME (JsonStringEnumConverter), not a numeric ordinal — so the --json contract
+    // stays human/tool-readable and stable across enum reordering.
+    [Fact]
+    public void PackageReport_ToJson_EmitsVulnerabilitiesStatusAsEnumName()
+    {
+        var json = (MakeReport(Array.Empty<VulnerabilityFinding>())
+            with { VulnerabilitiesStatus = VulnerabilityScanStatus.Unavailable }).ToJson();
+
+        Assert.Contains("\"VulnerabilitiesStatus\": \"Unavailable\"", json);
+        Assert.DoesNotContain("\"VulnerabilitiesStatus\": 2", json);   // never a bare ordinal
+    }
+
+    // Back-compat: OLD JSON that predates the status field (no VulnerabilitiesStatus property) deserializes to the
+    // default NotChecked, never throws — mirrors the Vulnerabilities-list back-compat guarantee above.
+    [Fact]
+    public void PackageReport_FromLegacyJsonWithoutStatus_YieldsNotChecked()
+    {
+        const string legacyJson = """
+            {
+              "Package": {
+                "Id": "Legacy.Package",
+                "Version": "1.0.0",
+                "Authors": "Old Author",
+                "Description": "A report serialized before the OSV status field existed.",
+                "Dependencies": []
+              },
+              "AnalyzedAt": "2020-01-01T00:00:00+00:00",
+              "Assemblies": [],
+              "Scripts": [],
+              "ScriptFindings": []
+            }
+            """;
+
+        var restored = PackageCapabilityReport.FromJson(legacyJson);
+
+        Assert.NotNull(restored);
+        Assert.Equal(VulnerabilityScanStatus.NotChecked, restored!.VulnerabilitiesStatus);
+    }
     #endregion
 
     #region Helpers

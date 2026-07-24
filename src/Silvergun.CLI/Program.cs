@@ -247,8 +247,14 @@ internal static class Program
         // --health, and it too lives entirely in the CLI layer (PackageScanner.Scan stays offline). Best-effort/never-
         // throws: build queries from the local nuspec identity, ask OSV, attach findings. Any failure/empty ⇒ no
         // findings + a one-line stderr note; stdout/JSON and the exit-code gates below are otherwise unaffected.
+        // --no-vulns leaves the status at its default NotChecked (no OSV call). Otherwise ask OSV and record whether the
+        // check actually completed (Completed) or could not be reached (Unavailable) — so a genuine clean result and an
+        // outage are distinguishable in both the human report and --json (ADR 0017 amendment).
         if (!noVulns)
-            report = report with { Vulnerabilities = ResolveVulnerabilities(report.Package) };
+        {
+            var (findings, status) = ResolveVulnerabilities(report.Package);
+            report = report with { Vulnerabilities = findings, VulnerabilitiesStatus = status };
+        }
 
         var emitted = json
             ? TryEmit(report.ToJson(), output)
@@ -262,23 +268,27 @@ internal static class Program
 
     // Best-effort OSV.dev known-vulnerability lookup for scan-package (default-on; ADR 0017). Builds queries from the
     // LOCAL nuspec identity (package@version + declared deps at their range floor), then sync-bridges the network call
-    // (like check-squat/health). Never throws: any exception degrades to an empty list. Emits a single concise stderr
-    // note — "unavailable" on failure, or "no known vulnerabilities" when it ran clean — so stdout/JSON stay pure.
-    private static IReadOnlyList<VulnerabilityFinding> ResolveVulnerabilities(PackageIdentityInfo pkg)
+    // (like check-squat/health). Never throws: any exception degrades to Unavailable + empty. Reachability (Queried) is
+    // mapped to a status and a single concise stderr note distinguishing "unavailable" (could not reach OSV — NOT a
+    // clean result) from "no known vulnerabilities" (the check ran and found none) — so stdout/JSON stay pure.
+    private static (IReadOnlyList<VulnerabilityFinding> Findings, VulnerabilityScanStatus Status) ResolveVulnerabilities(PackageIdentityInfo pkg)
     {
         try
         {
             var queries = OsvQueryBuilder.Build(pkg);
-            var findings = new OsvClient().QueryAsync(queries).GetAwaiter().GetResult();
-            Console.Error.WriteLine(findings.Count > 0
-                ? $"scan-package: OSV known-vulnerability check found {findings.Count} finding(s)."
-                : "scan-package: OSV known-vulnerability check found no known vulnerabilities.");
-            return findings;
+            var result = new OsvClient().QueryAsync(queries).GetAwaiter().GetResult();
+            var status = result.Queried ? VulnerabilityScanStatus.Completed : VulnerabilityScanStatus.Unavailable;
+            Console.Error.WriteLine(status == VulnerabilityScanStatus.Unavailable
+                ? "scan-package: known-vulnerability check UNAVAILABLE (could not reach OSV); package NOT verified against known CVEs."
+                : result.Findings.Count == 0
+                    ? "scan-package: no known vulnerabilities found."
+                    : $"scan-package: found {result.Findings.Count} known vulnerabilit{(result.Findings.Count == 1 ? "y" : "ies")}.");
+            return (result.Findings, status);
         }
         catch
         {
-            Console.Error.WriteLine("scan-package: known-vulnerability check unavailable (network/OSV). Continuing without it.");
-            return Array.Empty<VulnerabilityFinding>();
+            Console.Error.WriteLine("scan-package: known-vulnerability check UNAVAILABLE (could not reach OSV); package NOT verified against known CVEs.");
+            return (Array.Empty<VulnerabilityFinding>(), VulnerabilityScanStatus.Unavailable);
         }
     }
 
