@@ -76,7 +76,9 @@ public sealed record PackageCapabilityReport(
     ProjectHealth? ProjectHealth = null,   // additive (ADR 0015); populated only under scan-package --health, else null
     IReadOnlyList<YaraFinding>? YaraFindings = null,   // additive (ADR 0016); YARA malware-signature hits, empty when disabled/unavailable
     IReadOnlyList<VulnerabilityFinding>? Vulnerabilities = null,   // additive (ADR 0017); OSV known-vuln hits, attached by the CLI, empty when skipped/unavailable
-    VulnerabilityScanStatus VulnerabilitiesStatus = VulnerabilityScanStatus.NotChecked)   // additive (ADR 0017 amendment); whether the OSV check ran — old JSON ⇒ NotChecked
+    VulnerabilityScanStatus VulnerabilitiesStatus = VulnerabilityScanStatus.NotChecked,   // additive (ADR 0017 amendment); whether the OSV check ran — old JSON ⇒ NotChecked
+    IReadOnlyList<ResolvedDependency>? ResolvedDependencies = null,   // additive (ADR 0018); resolver-lite transitive set, attached by the CLI, empty when depth 0 / not run
+    DependencyResolutionStatus DependencyResolution = DependencyResolutionStatus.NotRun)   // additive (ADR 0018); whether transitive resolution ran — old JSON ⇒ NotRun
 {
     #region Properties
     /// <summary>
@@ -91,6 +93,13 @@ public sealed record PackageCapabilityReport(
     /// absent — old JSON that predates this field deserializes to empty, not <c>null</c>.
     /// </summary>
     public IReadOnlyList<VulnerabilityFinding> Vulnerabilities { get; init; } = Vulnerabilities ?? Array.Empty<VulnerabilityFinding>();
+
+    /// <summary>
+    /// Resolver-lite transitive dependency set for the package (ADR 0018). Populated by the CLI's <c>--depth</c> network
+    /// step (never by the offline <see cref="PackageScanner"/>); normalized to an empty list when absent — old JSON that
+    /// predates this field deserializes to empty, not <c>null</c>.
+    /// </summary>
+    public IReadOnlyList<ResolvedDependency> ResolvedDependencies { get; init; } = ResolvedDependencies ?? Array.Empty<ResolvedDependency>();
 
     /// <summary>Every finding across all analyzed assemblies, flattened in stored order.</summary>
     [JsonIgnore]

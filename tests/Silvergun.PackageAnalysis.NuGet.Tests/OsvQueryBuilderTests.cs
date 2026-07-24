@@ -125,6 +125,63 @@ public sealed class OsvQueryBuilderTests
         Assert.Equal("Root", self.PackageId);
     }
 
+    // The resolver-lite overload (ADR 0018): the package self-query is emitted at its exact version (IsDependency
+    // false) followed by ONE query per resolved transitive node at its CONCRETE resolved version (IsDependency true) —
+    // not a range floor. A (id, version) appearing twice (here in different case) collapses to a single dependency query.
+    [Fact]
+    public void Build_WithResolvedTransitive_AppendsQueriesAtConcreteVersions_Deduped()
+    {
+        var package = Identity("Root", "1.0.0");
+        var resolved = new[]
+        {
+            new ResolvedDependency("Dep.A", "1.4.2", Depth: 1, IsDirect: true),
+            new ResolvedDependency("Dep.B", "2.0.0", Depth: 2, IsDirect: false),
+            new ResolvedDependency("dep.a", "1.4.2", Depth: 3, IsDirect: false),   // case-insensitive (id, version) dup
+        };
+
+        var queries = OsvQueryBuilder.Build(package, resolved);
+
+        // package self-query + two unique resolved deps (the case-variant duplicate collapsed).
+        Assert.Equal(3, queries.Count);
+
+        var self = Assert.Single(queries, q => q.PackageId == "Root");
+        Assert.Equal("1.0.0", self.Version);
+        Assert.False(self.IsDependency);
+
+        var depA = Assert.Single(queries, q => string.Equals(q.PackageId, "Dep.A", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal("1.4.2", depA.Version);   // the concrete resolved version, verbatim
+        Assert.True(depA.IsDependency);
+
+        var depB = Assert.Single(queries, q => q.PackageId == "Dep.B");
+        Assert.Equal("2.0.0", depB.Version);
+        Assert.True(depB.IsDependency);
+    }
+
+    // With an EMPTY or NULL resolved set the overload yields ONLY the package self-query — and, crucially, it must NOT
+    // fall back to emitting the declared direct dependencies at their range floor (that projection is the SINGLE-arg
+    // overload's job for depth 0). A package that has a direct dep proves the overload ignores package.Dependencies.
+    [Theory]
+    [InlineData(true)]    // empty resolved set
+    [InlineData(false)]   // null resolved set
+    public void Build_NoResolved_MatchesDirectOnlyBehavior(bool empty)
+    {
+        var package = Identity("Root", "1.0.0", Dep("Dep.Direct", "[1.0.0,)"));
+        var resolved = empty ? Array.Empty<ResolvedDependency>() : null;
+
+        var queries = OsvQueryBuilder.Build(package, resolved!);
+
+        // Only the package self-query: the resolved-set overload never floors declared deps.
+        var self = Assert.Single(queries);
+        Assert.Equal("Root", self.PackageId);
+        Assert.Equal("1.0.0", self.Version);
+        Assert.False(self.IsDependency);
+        Assert.DoesNotContain(queries, q => q.PackageId == "Dep.Direct");
+
+        // Contrast: the single-arg (depth-0) builder DOES floor the same direct dep — so this is a real divergence,
+        // not an accident of an empty package.
+        Assert.Contains(OsvQueryBuilder.Build(package), q => q.PackageId == "Dep.Direct");
+    }
+
     // Adversarial input — a package with a missing version and a mix of bad dependency ranges — must never throw;
     // the missing-version self-query is simply not emitted and the bad deps are skipped.
     [Fact]

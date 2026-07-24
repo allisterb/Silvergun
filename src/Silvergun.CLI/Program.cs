@@ -77,6 +77,17 @@ internal static class Program
         {
             Description = "Skip the OSV.dev known-vulnerability check (runs by default; network — this restores fully offline)."
         };
+        var depthOption = new Option<int>("--depth")
+        {
+            Description = "Resolve and vulnerability-check transitive dependencies up to this depth (default 0 = direct deps only; network). Approximate — not a restore."
+        };
+        // Reject a negative --depth at parse time (non-zero exit, message on stderr), mirroring the --source posture;
+        // 0 (the default) and positive values stay valid. The handler clamps positives to a sane maximum.
+        depthOption.Validators.Add(result =>
+        {
+            if (result.GetValueOrDefault<int>() < 0)
+                result.AddError("Invalid --depth value; must be 0 or greater (0 = direct dependencies only).");
+        });
         var healthPackageIdArgument = new Argument<string>("package-id")
         {
             Description = "The NuGet package id whose source-project (GitHub) health to report."
@@ -106,7 +117,7 @@ internal static class Program
 
         var scanPackageCommand = new Command("scan-package", "Scan a .nupkg for sensitive-API capabilities.")
         {
-            nupkgPathArgument, jsonOption, richOption, outputOption, strictOption, debugOption, noResolveOption, healthOption, noYaraOption, noVulnsOption
+            nupkgPathArgument, jsonOption, richOption, outputOption, strictOption, debugOption, noResolveOption, healthOption, noYaraOption, noVulnsOption, depthOption
         };
         scanPackageCommand.Validators.Add(RejectJsonWithRich);
         scanPackageCommand.SetAction(parse => RunScanPackage(
@@ -119,7 +130,8 @@ internal static class Program
             parse.GetValue(noResolveOption),
             parse.GetValue(healthOption),
             parse.GetValue(noYaraOption),
-            parse.GetValue(noVulnsOption)));
+            parse.GetValue(noVulnsOption),
+            parse.GetValue(depthOption)));
 
         // check-squat hits nuget.org, so its handler is async; the sync action bridges via GetAwaiter().GetResult()
         // to keep System.CommandLine's synchronous Invoke path (stdout purity handled by ConfigureLogging).
@@ -214,7 +226,7 @@ internal static class Program
             hasScriptFindings: false);
     }
 
-    private static int RunScanPackage(string nupkgPath, bool json, bool rich, string? output, bool strict, bool debug, bool noResolve, bool health, bool noYara, bool noVulns)
+    private static int RunScanPackage(string nupkgPath, bool json, bool rich, string? output, bool strict, bool debug, bool noResolve, bool health, bool noYara, bool noVulns, int depth)
     {
         ConfigureLogging(json, output, debug);
 
@@ -243,16 +255,33 @@ internal static class Program
                 Console.Error.WriteLine("scan-package: project-health requested but unavailable (no GitHub repository resolved or lookup failed).");
         }
 
+        // Resolver-lite transitive dependency resolution (ADR 0018) is opt-in via --depth and runs ONLY when depth >= 1
+        // AND OSV is enabled (!--no-vulns), because OSV is currently its ONLY consumer. Future consumers (transitive
+        // typosquat/health/capability checks) should also trigger resolution here. It clamps depth to a sane max, lives
+        // entirely in the CLI layer (PackageScanner.Scan stays offline, like --health/OSV), and degrades honestly: any
+        // failure ⇒ DependencyResolution=Partial + empty set + one stderr note, never a crash or a false clean.
+        var clampedDepth = Math.Clamp(depth, 0, MaxResolveDepth);
+        if (clampedDepth >= 1 && !noVulns)
+        {
+            var resolution = ResolveTransitiveDependencies(report.Package, clampedDepth);
+            report = report with { ResolvedDependencies = resolution.Resolved, DependencyResolution = resolution.Status };
+            if (resolution.Status == DependencyResolutionStatus.Partial)
+                Console.Error.WriteLine(
+                    "scan-package: transitive dependency resolution INCOMPLETE (some packages unresolved); transitive coverage is PARTIAL.");
+        }
+
         // OSV known-vulnerability check runs BY DEFAULT (opt out with --no-vulns) — the ONLY other network call besides
         // --health, and it too lives entirely in the CLI layer (PackageScanner.Scan stays offline). Best-effort/never-
-        // throws: build queries from the local nuspec identity, ask OSV, attach findings. Any failure/empty ⇒ no
-        // findings + a one-line stderr note; stdout/JSON and the exit-code gates below are otherwise unaffected.
-        // --no-vulns leaves the status at its default NotChecked (no OSV call). Otherwise ask OSV and record whether the
-        // check actually completed (Completed) or could not be reached (Unavailable) — so a genuine clean result and an
-        // outage are distinguishable in both the human report and --json (ADR 0017 amendment).
+        // throws: build queries from the local nuspec identity (+ resolved transitive set when --depth ran), ask OSV,
+        // attach findings. Any failure/empty ⇒ no findings + a one-line stderr note; stdout/JSON and the exit-code gates
+        // below are otherwise unaffected. --no-vulns leaves the status at its default NotChecked (no OSV call). Otherwise
+        // ask OSV and record whether the check completed (Completed) or could not be reached (Unavailable) — so a genuine
+        // clean result and an outage are distinguishable in both the human report and --json (ADR 0017 amendment).
         if (!noVulns)
         {
-            var (findings, status) = ResolveVulnerabilities(report.Package);
+            // When a resolved transitive set is present, OSV checks every resolved package at its concrete version;
+            // otherwise (depth 0) it checks the package + declared direct deps at their range floor (today's behavior).
+            var (findings, status) = ResolveVulnerabilities(report.Package, report.ResolvedDependencies);
             report = report with { Vulnerabilities = findings, VulnerabilitiesStatus = status };
         }
 
@@ -271,11 +300,16 @@ internal static class Program
     // (like check-squat/health). Never throws: any exception degrades to Unavailable + empty. Reachability (Queried) is
     // mapped to a status and a single concise stderr note distinguishing "unavailable" (could not reach OSV — NOT a
     // clean result) from "no known vulnerabilities" (the check ran and found none) — so stdout/JSON stay pure.
-    private static (IReadOnlyList<VulnerabilityFinding> Findings, VulnerabilityScanStatus Status) ResolveVulnerabilities(PackageIdentityInfo pkg)
+    private static (IReadOnlyList<VulnerabilityFinding> Findings, VulnerabilityScanStatus Status) ResolveVulnerabilities(
+        PackageIdentityInfo pkg, IReadOnlyList<ResolvedDependency> resolved)
     {
         try
         {
-            var queries = OsvQueryBuilder.Build(pkg);
+            // With a resolver-lite set (--depth >= 1) OSV covers every resolved package at its concrete version;
+            // otherwise it uses the direct-only builder (package-exact + declared deps at range floor — depth 0).
+            var queries = resolved.Count > 0
+                ? OsvQueryBuilder.Build(pkg, resolved)
+                : OsvQueryBuilder.Build(pkg);
             var result = new OsvClient().QueryAsync(queries).GetAwaiter().GetResult();
             var status = result.Queried ? VulnerabilityScanStatus.Completed : VulnerabilityScanStatus.Unavailable;
             Console.Error.WriteLine(status == VulnerabilityScanStatus.Unavailable
@@ -289,6 +323,31 @@ internal static class Program
         {
             Console.Error.WriteLine("scan-package: known-vulnerability check UNAVAILABLE (could not reach OSV); package NOT verified against known CVEs.");
             return (Array.Empty<VulnerabilityFinding>(), VulnerabilityScanStatus.Unavailable);
+        }
+    }
+
+    // Best-effort resolver-lite transitive dependency walk for scan-package --depth (ADR 0018). Seeds the resolver from
+    // the LOCAL nuspec's declared direct deps (mapping each dep's version range via NuGet.Versioning, skipping any that
+    // don't parse), then sync-bridges the network walk (like ResolveVulnerabilities/health). The resolver never throws,
+    // but this is wrapped defensively anyway: any failure degrades to a Partial result with an empty set (honest — never
+    // a false clean), which the caller surfaces on stderr and in the render.
+    private static DependencyResolutionResult ResolveTransitiveDependencies(PackageIdentityInfo pkg, int depth)
+    {
+        try
+        {
+            var seeds = (pkg.Dependencies ?? Array.Empty<PackageDependencyInfo>())
+                .Select(d => global::NuGet.Versioning.VersionRange.TryParse(d.VersionRange, out var range) ? (d.Id, Range: range) : (d.Id, Range: null))
+                .Where(s => s.Range is not null)
+                .Select(s => (s.Id, s.Range!))
+                .ToArray();
+
+            return new NuGetDependencyResolver(new NuGetPackageDependencyFetcher())
+                .ResolveAsync(seeds, depth)
+                .GetAwaiter().GetResult();
+        }
+        catch
+        {
+            return new DependencyResolutionResult(DependencyResolutionStatus.Partial, Array.Empty<ResolvedDependency>());
         }
     }
 
@@ -494,5 +553,9 @@ internal static class Program
     // Deterministic report width used when not attached to a TTY (redirected stdout or a file), so default
     // (ASCII) output doesn't vary with the ambient terminal. A TTY may still be measured for wrapping.
     private const int DefaultReportWidth = 100;
+
+    // Sane upper bound for --depth (resolver-lite, ADR 0018): a positive request is clamped to this so a large value
+    // can't fan out into an unbounded network walk. Resolver-lite is an approximation, not a restore — depth stays small.
+    private const int MaxResolveDepth = 8;
     #endregion
 }

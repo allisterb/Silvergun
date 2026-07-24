@@ -50,6 +50,39 @@ public static class OsvQueryBuilder
         return queries;
     }
 
+    /// <summary>
+    /// Projects <paramref name="package"/> plus a resolver-lite <paramref name="resolvedTransitive"/> set (ADR 0018) to
+    /// the OSV queries to run: the package@version (<c>IsDependency</c> <c>false</c>) plus one query per resolved
+    /// dependency at its <b>concrete resolved version</b> (<c>IsDependency</c> <c>true</c>). The resolved set already
+    /// contains the declared direct deps (depth 1) at concrete versions, so no range-floor queries are added here.
+    /// Queries are deduped by (id, version) with a case-insensitive id. A <c>null</c> <paramref name="resolvedTransitive"/>
+    /// is treated as empty (⇒ same as the package-only path). Never throws.
+    /// </summary>
+    public static IReadOnlyList<OsvQuery> Build(
+        PackageIdentityInfo package, IReadOnlyList<ResolvedDependency> resolvedTransitive)
+    {
+        if (package is null)
+            return Array.Empty<OsvQuery>();
+
+        var queries = new List<OsvQuery>();
+        var seen = new HashSet<(string Id, string Version)>(KeyComparer);
+
+        void Add(string id, string version, bool isDependency)
+        {
+            if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(version))
+                return;
+            if (seen.Add((id, version)))
+                queries.Add(new OsvQuery(id, version, isDependency));
+        }
+
+        Add(package.Id, package.Version, isDependency: false);
+
+        foreach (var dep in resolvedTransitive ?? Array.Empty<ResolvedDependency>())
+            Add(dep.Id, dep.Version, isDependency: true);
+
+        return queries;
+    }
+
     // The normalized minimum-version string of a dependency's declared range, or null when the range is
     // unbounded-below, has no resolvable minimum, or fails to parse. Never throws.
     private static string? ResolveFloor(string? versionRange)

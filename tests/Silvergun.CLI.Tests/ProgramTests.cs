@@ -136,6 +136,16 @@ public sealed class ProgramTests
         Assert.Equal(0, Program.ScanExitCode(
             strict: true, hasCapabilityFindings: false, hasObfuscation: false, hasScriptFindings: false,
             hasYaraFindings: false, hasVulnerabilities: false));
+
+    // Resolver-lite (ADR 0018): under --depth the transitive vulnerabilities OSV finds are MERGED into
+    // report.Vulnerabilities (the CLI attaches them via the same `with { Vulnerabilities = ... }` step), so they flow
+    // through the SAME `hasVulnerabilities` gate arg — the ScanExitCode signature is unchanged. This asserts that a
+    // vulnerability of transitive origin still trips --strict to exit 2, exactly like a direct/dependency hit.
+    [Fact]
+    public void ScanExitCode_TransitiveVuln_GatesStrict() =>
+        Assert.Equal(2, Program.ScanExitCode(
+            strict: true, hasCapabilityFindings: false, hasObfuscation: false, hasScriptFindings: false,
+            hasYaraFindings: false, hasVulnerabilities: true));
     #endregion
 
     #region Child types

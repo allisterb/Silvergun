@@ -56,6 +56,16 @@ internal static class PackageReportRenderer
         console.Write(VulnerabilitiesWidget(rich, report.Vulnerabilities, report.VulnerabilitiesStatus));
         console.WriteLine();
 
+        // Resolver-lite transitive dependency coverage (ADR 0018), shown only when --depth resolution actually ran
+        // (NotRun / depth 0 omits the section). Keyed on DependencyResolution so a Partial walk reads as incomplete
+        // coverage, never as a clean all-clear.
+        if (report.DependencyResolution != DependencyResolutionStatus.NotRun)
+        {
+            console.Write(Section(rich, "Transitive dependencies (resolver-lite)"));
+            console.Write(TransitiveWidget(rich, report.ResolvedDependencies, report.DependencyResolution));
+            console.WriteLine();
+        }
+
         console.Write(Section(rich, "Assemblies"));
         console.Write(AssembliesTree(rich, report.Assemblies));
         console.WriteLine();
@@ -192,6 +202,35 @@ internal static class PackageReportRenderer
             ? $"{f.PackageId}@{f.PackageVersion} [dependency]"
             : $"{f.PackageId}@{f.PackageVersion}";
 
+    // Resolver-lite transitive dependency coverage (ADR 0018): a headline keyed on the resolution status plus a table of
+    // resolved nodes (id@version, depth, direct/transitive). Complete states the resolved count + max depth reached and
+    // the "approximate — not a restore" caveat; Partial is a prominent (yellow in --rich) incomplete-coverage note so it
+    // is never mistaken for a clean all-clear. All resolved ids/versions are untrusted and pass through Esc; color is
+    // stripped in the default (ASCII) mode. Callers omit the section entirely for NotRun (depth 0).
+    private static IRenderable TransitiveWidget(
+        bool rich, IReadOnlyList<ResolvedDependency> resolved, DependencyResolutionStatus status)
+    {
+        var maxDepth = resolved.Count == 0 ? 0 : resolved.Max(r => r.Depth);
+        var headline = status == DependencyResolutionStatus.Partial
+            ? new Markup($"[yellow]{Esc(AlertGlyph(rich))} transitive dependencies NOT fully resolved {Dash(rich)} coverage incomplete[/] " +
+                         $"[grey](resolved {resolved.Count} package(s) before the walk was interrupted)[/]")
+            : new Markup($"[grey]Resolved[/] {resolved.Count} transitive package(s), max depth {maxDepth} {Dash(rich)} " +
+                         $"[grey]approximate {Dash(rich)} not a restore.[/]");
+
+        if (resolved.Count == 0)
+            return headline;
+
+        var table = new Table().Border(TableBorderFor(rich)).Expand();
+        table.AddColumn("[bold]Dependency[/]");
+        table.AddColumn("[bold]Version[/]");
+        table.AddColumn("[bold]Depth[/]");
+        table.AddColumn("[bold]Kind[/]");
+        foreach (var d in resolved)
+            table.AddRow(Esc(d.Id), Esc(d.Version), d.Depth.ToString(), d.IsDirect ? "direct" : "transitive");
+
+        return new Rows(headline, table);
+    }
+
     // A single "family (detection)" label from a YARA finding's enriched metadata; each part is optional.
     private static string FamilyDetection(YaraFinding f)
     {
@@ -303,15 +342,31 @@ internal static class PackageReportRenderer
                 _ => "[grey]Known vulnerabilities (OSV):[/] [green]none[/]",
             });
 
+        // Transitive coverage line (resolver-lite, ADR 0018), shown only when --depth resolution ran. A Partial walk is
+        // surfaced as incomplete coverage so it can downgrade the clean claim below (like an OSV outage).
+        if (report.DependencyResolution != DependencyResolutionStatus.NotRun)
+            console.MarkupLine(report.DependencyResolution == DependencyResolutionStatus.Partial
+                ? "[grey]Transitive dependencies:[/] [yellow]coverage incomplete (not fully resolved)[/]"
+                : $"[grey]Transitive dependencies:[/] [green]{report.ResolvedDependencies.Count} resolved[/]");
+
         var attention = allFindings.Count > 0 || report.ScriptFindings.Count > 0 || hasObfuscation
             || report.YaraFindings.Count > 0 || report.Vulnerabilities.Count > 0;
-        // "Clean" requires the vuln check to have actually completed — Unavailable/NotChecked means the package was NOT
-        // verified against known CVEs, so surface a distinct "not verified" headline rather than a false all-clear.
+        // "Clean" requires the vuln check to have actually completed AND transitive resolution to be complete — an OSV
+        // outage (Unavailable/NotChecked) or a Partial transitive walk means the package was NOT fully verified, so
+        // surface a distinct "not verified" headline naming each incomplete check rather than a false all-clear.
         var vulnVerified = report.VulnerabilitiesStatus == VulnerabilityScanStatus.Completed;
+        var transitivePartial = report.DependencyResolution == DependencyResolutionStatus.Partial;
         if (attention)
             console.MarkupLine($"[bold red]{Esc(AlertGlyph(rich))} Findings present[/] [grey]{Dash(rich)} review recommended.[/]");
-        else if (!vulnVerified)
-            console.MarkupLine($"[yellow]{Esc(AlertGlyph(rich))} Not verified[/] [grey]{Dash(rich)} no findings, but the known-vulnerability check did not complete.[/]");
+        else if (!vulnVerified || transitivePartial)
+        {
+            var caveats = new List<string>();
+            if (!vulnVerified)
+                caveats.Add("the known-vulnerability check did not complete");
+            if (transitivePartial)
+                caveats.Add("transitive dependencies were not fully resolved (coverage incomplete)");
+            console.MarkupLine($"[yellow]{Esc(AlertGlyph(rich))} Not verified[/] [grey]{Dash(rich)} no findings, but {string.Join("; ", caveats)}.[/]");
+        }
         else
             console.MarkupLine($"[bold green]{Esc(CleanGlyph(rich))} Clean[/] [grey]{Dash(rich)} no capability, script, obfuscation, malware-signature, or known-vulnerability findings.[/]");
     }
