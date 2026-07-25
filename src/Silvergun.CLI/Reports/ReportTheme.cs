@@ -45,6 +45,9 @@ internal static class ReportTheme
     /// <summary>Prose separator: Unicode em-dash (rich) vs ASCII hyphen (default).</summary>
     internal static string Dash(bool rich) => rich ? "—" : "-";
 
+    /// <summary>Repetition/count prefix (as in "x7"): Unicode multiplication sign (rich) vs ASCII "x" (default).</summary>
+    internal static string Times(bool rich) => rich ? "×" : "x";
+
     /// <summary>Attention glyph for a clean/no-findings headline (ASCII-safe fallback; escape at the call site).</summary>
     internal static string CleanGlyph(bool rich) => rich ? "✔" : "[OK]";
 

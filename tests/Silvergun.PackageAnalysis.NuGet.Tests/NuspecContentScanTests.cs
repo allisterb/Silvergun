@@ -21,9 +21,14 @@ public sealed class NuspecContentScanTests : IClassFixture<PackageFixture>
     #endregion
 
     #region Methods
-    // Acceptance criterion: a manifest whose <description> carries a rule-matching token (certutil LOLBAS) yields
-    // >=1 finding attributed to the nuspec file name with a non-empty RuleId. The package has no scripts, so any
-    // finding must originate from the nuspec scan.
+    // Acceptance criterion: a manifest carrying a rule-matching token yields >=1 finding attributed to the nuspec
+    // file name with a non-empty RuleId. The package has no scripts, so any finding must originate from the nuspec
+    // scan, and each is tagged PackageMetadata (reported, but advisory — it never gates --strict).
+    //
+    // The token lives in a NON-PROSE element (a pastebin <projectUrl>): prose elements — <description> included —
+    // are blanked before the manifest is scanned, because code-oriented rules over human prose are noise by
+    // construction (docs/agent/tasks/script-rule-precision.md). URLs/dependency ids/file targets are precisely the
+    // manifest content that stays scannable, so this asserts the recall that IS still supported.
     [Fact]
     public void Scan_PkgNuspecMatch_FlagsNuspec_WithNuspecRelativePathAndRuleId()
     {
@@ -36,6 +41,7 @@ public sealed class NuspecContentScanTests : IClassFixture<PackageFixture>
 
         Assert.NotEmpty(nuspecFindings);
         Assert.All(nuspecFindings, f => Assert.False(string.IsNullOrEmpty(f.RuleId)));
+        Assert.All(nuspecFindings, f => Assert.Equal(ScriptFindingSource.PackageMetadata, f.Source));
     }
 
     // A clean nuspec (PkgB carries only benign identity, no scripts) produces zero nuspec-attributed findings and

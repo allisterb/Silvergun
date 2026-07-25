@@ -292,7 +292,13 @@ internal static class Program
             return 1;
 
         var hasObfuscation = report.Assemblies.Any(a => (a.Obfuscation?.Findings.Count ?? 0) > 0);
-        return ScanExitCode(strict, report.AllFindings.Any(), hasObfuscation, report.ScriptFindings.Any(), report.YaraFindings.Count > 0, report.Vulnerabilities.Count > 0);
+        // Only findings from real script/build content gate --strict. Findings from the declarative package manifest
+        // (ScriptFindingSource.PackageMetadata) are advisory: still reported in full — human report, footer counts and
+        // --json are unchanged — but they never fail CI on their own, mirroring the ADR 0015 "advisory never gates"
+        // precedent. Nothing in a .nuspec executes, and code-oriented rules over prose are noise by construction
+        // (docs/agent/tasks/script-rule-precision.md).
+        var hasScriptFindings = report.ScriptFindings.Any(f => f.Source == ScriptFindingSource.Script);
+        return ScanExitCode(strict, report.AllFindings.Any(), hasObfuscation, hasScriptFindings, report.YaraFindings.Count > 0, report.Vulnerabilities.Count > 0);
     }
 
     // Best-effort OSV.dev known-vulnerability lookup for scan-package (default-on; ADR 0017). Builds queries from the

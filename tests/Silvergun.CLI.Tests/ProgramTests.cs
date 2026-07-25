@@ -2,14 +2,16 @@ namespace Silvergun.CLI.Tests;
 
 using Silvergun.CLI;
 using Silvergun.Intel;
+using Silvergun.PackageAnalysis.NuGet;
 
 using Xunit;
 
 /// <summary>
 /// Unit tests for the CLI's testable seams: <see cref="Program.SelectPopularitySource"/> source selection,
-/// <see cref="Program.IsValidSource"/> validation, and the <see cref="Program.ScanExitCode"/> --strict gate.
-/// No network is touched — the popularity sources build a client/repository lazily, so asserting the concrete
-/// returned type is safe.
+/// <see cref="Program.IsValidSource"/> validation, and the <see cref="Program.ScanExitCode"/> --strict gate
+/// (including which script findings are allowed to gate it — see
+/// <c>docs/agent/tasks/script-rule-precision.md</c>). No network is touched — the popularity sources build a
+/// client/repository lazily, so asserting the concrete returned type is safe.
 /// </summary>
 public sealed class ProgramTests
 {
@@ -146,6 +148,63 @@ public sealed class ProgramTests
         Assert.Equal(2, Program.ScanExitCode(
             strict: true, hasCapabilityFindings: false, hasObfuscation: false, hasScriptFindings: false,
             hasYaraFindings: false, hasVulnerabilities: true));
+
+    // Script-rule precision (docs/agent/tasks/script-rule-precision.md): findings from the declarative package
+    // manifest (Source=PackageMetadata) are advisory — reported in full, but they must NOT fail CI on their own,
+    // mirroring the ADR 0015 "advisory never gates" precedent. Nothing in a .nuspec executes.
+    //
+    // NOTE ON SHAPE: the gate expression lives INLINE in Program.RunScanPackage (`report.ScriptFindings.Any(f =>
+    // f.Source == ScriptFindingSource.Script)`), with no seam to call. These two tests therefore apply that exact
+    // predicate to a constructed report and feed the result to ScanExitCode, so a regression that widened the gate
+    // back to "any script finding" would have to change this predicate too.
+    [Fact]
+    public void ScanExitCode_MetadataOnlyScriptFindings_DoesNotGateStrict()
+    {
+        var report = ReportWithScriptFindings(
+            Finding("BD000600", ScriptFindingSource.PackageMetadata),
+            Finding("BD000804", ScriptFindingSource.PackageMetadata));
+
+        var hasScriptFindings = report.ScriptFindings.Any(f => f.Source == ScriptFindingSource.Script);
+
+        Assert.NotEmpty(report.ScriptFindings);   // still reported in full ...
+        Assert.False(hasScriptFindings);          // ... but not a gate
+        Assert.Equal(0, Program.ScanExitCode(
+            strict: true, hasCapabilityFindings: false, hasObfuscation: false, hasScriptFindings,
+            hasYaraFindings: false, hasVulnerabilities: false));
+    }
+
+    // The recall half of the same contract: a finding from real script/build content still gates --strict, even when
+    // it sits alongside advisory manifest findings.
+    [Fact]
+    public void ScanExitCode_ScriptSourcedFinding_GatesStrict()
+    {
+        var report = ReportWithScriptFindings(
+            Finding("BD000600", ScriptFindingSource.PackageMetadata),
+            Finding("BD000500", ScriptFindingSource.Script));
+
+        var hasScriptFindings = report.ScriptFindings.Any(f => f.Source == ScriptFindingSource.Script);
+
+        Assert.True(hasScriptFindings);
+        Assert.Equal(2, Program.ScanExitCode(
+            strict: true, hasCapabilityFindings: false, hasObfuscation: false, hasScriptFindings,
+            hasYaraFindings: false, hasVulnerabilities: false));
+    }
+    #endregion
+
+    #region Methods — fixtures
+    private static ScriptFinding Finding(string ruleId, ScriptFindingSource source) =>
+        new(
+            ruleId, "A rule", "Moderate", "Low",
+            source == ScriptFindingSource.PackageMetadata ? "Some.Package.nuspec" : "tools/install.ps1",
+            7, "excerpt", Array.Empty<string>(), Occurrences: 1, Source: source);
+
+    private static PackageCapabilityReport ReportWithScriptFindings(params ScriptFinding[] findings) =>
+        new(
+            new PackageIdentityInfo("Some.Package", "1.0.0", "Author", "A package.", Array.Empty<PackageDependencyInfo>()),
+            DateTimeOffset.UnixEpoch,
+            Array.Empty<AssemblyScanResult>(),
+            Array.Empty<PackageScript>(),
+            findings);
     #endregion
 
     #region Child types

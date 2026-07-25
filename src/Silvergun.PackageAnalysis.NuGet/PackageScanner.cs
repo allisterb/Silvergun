@@ -76,7 +76,8 @@ public sealed class PackageScanner : Runtime
 
     // Best-effort script/content rule scan over the open package (ADR 0012); ScriptRuleScanner already never throws,
     // but a defensive guard here keeps an unexpected failure from sinking the whole package scan. The manifest
-    // (.nuspec) is scanned too — it is kept out of the script inventory but rule-scanned for content (ADR 0012 follow-up).
+    // (.nuspec) is scanned too — it is kept out of the script inventory but rule-scanned for content (ADR 0012 follow-up)
+    // via ScanPackageMetadata, which redacts its prose elements first and tags the findings PackageMetadata (advisory).
     private static IReadOnlyList<ScriptFinding> ScanScripts(NuGetPackage package)
     {
         try
@@ -86,8 +87,14 @@ public sealed class PackageScanner : Runtime
             if (package.NuspecPath is null)
                 return findings;
 
-            var nuspecFindings = scanner.ScanFile(package.NuspecPath, Path.GetFileName(package.NuspecPath));
-            return findings.Concat(nuspecFindings).ToArray();
+            // Re-order the concatenation so the report-level list keeps the same deterministic path -> line -> rule id
+            // order each entry point already guarantees (the planned snapshot/diff feature depends on it).
+            var nuspecFindings = scanner.ScanPackageMetadata(package.NuspecPath, Path.GetFileName(package.NuspecPath));
+            return findings.Concat(nuspecFindings)
+                .OrderBy(f => f.RelativePath, StringComparer.Ordinal)
+                .ThenBy(f => f.StartLine)
+                .ThenBy(f => f.RuleId, StringComparer.Ordinal)
+                .ToArray();
         }
         catch (Exception ex)
         {

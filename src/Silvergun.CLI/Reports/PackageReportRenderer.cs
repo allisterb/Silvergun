@@ -121,6 +121,11 @@ internal static class PackageReportRenderer
         return table;
     }
 
+    // Text-rule (backdoor/LOLBAS) matches in packaged script/build content and package metadata (ADR 0012). Findings are
+    // aggregated per (rule, file), so a rule matching N times renders once with an "xN" repetition marker; manifest-sourced
+    // rows carry a "[metadata]" marker (like "[dependency]" in the vulnerabilities section) because they are advisory and
+    // do not gate --strict. All rule/path text is untrusted package content and passes through Esc; the repetition glyph
+    // comes from the theme so the default mode stays ASCII-only (ADR 0014).
     private static IRenderable ScriptFindingsWidget(bool rich, IReadOnlyList<ScriptFinding> findings)
     {
         if (findings.Count == 0)
@@ -133,12 +138,22 @@ internal static class PackageReportRenderer
         table.AddColumn("[bold]Name[/]");
         foreach (var f in findings)
             table.AddRow(
-                Esc(f.RuleId),
+                Esc(RuleLabel(f, rich)),
                 ColoredSeverity(f.Severity, Esc($"{f.Severity}/{f.Confidence}")),
-                Esc($"{f.RelativePath}:{f.StartLine}"),
+                Esc(FindingLocation(f)),
                 Esc(f.RuleName));
         return table;
     }
+
+    // "BD000600" plus an "x7" repetition marker when the rule matched the file more than once.
+    private static string RuleLabel(ScriptFinding f, bool rich) =>
+        f.Occurrences > 1 ? $"{f.RuleId} {Times(rich)}{f.Occurrences}" : f.RuleId;
+
+    // "path:line" plus a "[metadata]" marker for findings from the declarative manifest (advisory — never gates).
+    private static string FindingLocation(ScriptFinding f) =>
+        f.Source == ScriptFindingSource.PackageMetadata
+            ? $"{f.RelativePath}:{f.StartLine} [metadata]"
+            : $"{f.RelativePath}:{f.StartLine}";
 
     // Named-malware (YARA) matches across the extracted files (ADR 0016): rule name (red — high-confidence IOC),
     // malware family / detection-name, category, and the matched package-relative file. All fields are untrusted
@@ -318,7 +333,7 @@ internal static class PackageReportRenderer
         if (report.ScriptFindings.Count > 0)
         {
             var bySeverity = report.ScriptFindings.GroupBy(f => f.Severity).OrderBy(g => g.Key)
-                .Select(g => ColoredSeverity(g.Key, $"{g.Count()} {g.Key}"));
+                .Select(g => ColoredSeverity(g.Key, Esc($"{g.Count()} {g.Key}")));
             console.MarkupLine($"[grey]Script findings:[/] {string.Join($"  [grey]{Bullet(rich)}[/]  ", bySeverity)}");
         }
         else

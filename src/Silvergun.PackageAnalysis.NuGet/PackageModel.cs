@@ -45,8 +45,18 @@ public sealed record PackageScript(
     PackageItemRole Role);      // .ps1/.psm1/.targets/.props
 
 /// <summary>
+/// What kind of packaged content a <see cref="ScriptFinding"/> came from. <see cref="Script"/> is executable
+/// script/build content and gates <c>--strict</c>; <see cref="PackageMetadata"/> is declarative manifest content
+/// (the <c>.nuspec</c>), which is reported but advisory only — it never gates (mirrors ADR 0015).
+/// </summary>
+public enum ScriptFindingSource { Script, PackageMetadata }
+
+/// <summary>
 /// One text-rule match found in a packaged script/build file by the AppInspector RulesEngine (ADR 0012).
-/// Strings only (ADR 0002) so the report stays serialization-stable across engine/enum versions.
+/// Strings only (ADR 0002) so the report stays serialization-stable across engine/enum versions. Matches are
+/// aggregated per (rule, file): <see cref="Occurrences"/> counts how many times the rule matched, while the
+/// line/excerpt describe the first match. <see cref="Occurrences"/>/<see cref="Source"/> are additive trailing
+/// members — old JSON that predates them deserializes to 1 / <see cref="ScriptFindingSource.Script"/>.
 /// </summary>
 public sealed record ScriptFinding(
     string RuleId,
@@ -56,7 +66,9 @@ public sealed record ScriptFinding(
     string RelativePath,        // package-relative path of the matched script
     int StartLine,
     string? Excerpt,            // matched snippet, when available
-    IReadOnlyList<string> Tags);
+    IReadOnlyList<string> Tags,
+    int Occurrences = 1,        // additive; number of matches of this rule in this file (>= 1)
+    ScriptFindingSource Source = ScriptFindingSource.Script);   // additive; Script gates --strict, PackageMetadata is advisory
 
 /// <summary>The outcome of scanning a single <see cref="PackageAssembly"/>.</summary>
 public sealed record AssemblyScanResult(
