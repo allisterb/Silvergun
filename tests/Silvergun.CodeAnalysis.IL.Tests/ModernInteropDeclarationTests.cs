@@ -222,7 +222,11 @@ public sealed class ModernInteropDeclarationTests : IClassFixture<ModernInteropF
     //
     // The count is assembly-wide (MethodsTotal has no per-type form), so it names every bodied method in the
     // fixture assembly: ModernInteropOps' DebugMessage marshalling stub, NamedCallback, UnnamedCallback and
-    // Clean, plus the three [UnmanagedCallersOnly] methods on HostileInteropNames. The bodyless pinvokeimpl
+    // Clean, plus the three [UnmanagedCallersOnly] methods on HostileInteropNames (7), plus CapabilityShapes'
+    // 9 unguarded methods (ReadsFileBytes, CreatesWebClient, StartsProcess, ProbesEnvironment, LoadsAssembly,
+    // InvokesViaReflection, AllocatesUnmanagedMemory, CreatesAes, TriggersGarbageCollection) and its two
+    // net10.0-only methods (GetsDefaultAssemblyLoadContext, SizeOfInt32) — 11 more, for 18 total (see
+    // TargetFrameworkMatrixTests.Baselines[net10.0], measured the same way). The bodyless pinvokeimpl
     // declarations are absent by construction. Adding a bodied method to the fixture must fail this test.
     [Fact]
     public void Analyze_UnmanagedCallersOnlyMethods_AreStillAnalyzedExactlyOnceAndSkipNothing()
@@ -237,14 +241,18 @@ public sealed class ModernInteropDeclarationTests : IClassFixture<ModernInteropF
 
     // 2g — the type name the fixture assembly reports through CCI is the same full name reflection gives, so the
     // literal used throughout this class is not a private convention. Every finding in the fixture assembly is
-    // attributed to one of its two declaring types and nothing else — no compiler-generated or invented owner.
+    // attributed to one of its three declaring types and nothing else — no compiler-generated or invented owner.
+    // CapabilityShapes (docs/agent/tasks/capability-shapes-across-tfms.md) is the third: its capability call
+    // sites are ordinary Call/Construct findings, not the interop metadata seam this class otherwise covers, but
+    // they still live in the same fixture assembly this test scans, so the allowlist must include them.
     [Fact]
     public void Analyze_CallerType_IsTheReflectionFullNameOfTheDeclaringType()
     {
         Assert.Equal(OpsType, typeof(ModernInteropOps).FullName);
         Assert.Equal(HostileType, typeof(HostileInteropNames).FullName);
+        Assert.Equal(ShapesType, typeof(CapabilityShapes).FullName);
 
-        Assert.All(Analyze().Findings, f => Assert.Contains(f.CallerType, new[] { OpsType, HostileType }));
+        Assert.All(Analyze().Findings, f => Assert.Contains(f.CallerType, new[] { OpsType, HostileType, ShapesType }));
     }
 
     private CapabilityReport Analyze()
@@ -258,9 +266,13 @@ public sealed class ModernInteropDeclarationTests : IClassFixture<ModernInteropF
     #region Fields
     private const string OpsType = "Silvergun.CodeAnalysis.IL.Tests.MatrixFixture.ModernInteropOps";
     private const string HostileType = "Silvergun.CodeAnalysis.IL.Tests.MatrixFixture.HostileInteropNames";
+    private const string ShapesType = "Silvergun.CodeAnalysis.IL.Tests.MatrixFixture.CapabilityShapes";
 
     // Every method in the fixture assembly that carries a body, hence every method the call-site pass walks.
-    private const int BodiedFixtureMethods = 7;
+    // 18 = 7 (ModernInteropOps' DebugMessage stub + NamedCallback + UnnamedCallback + Clean, plus
+    // HostileInteropNames' three [UnmanagedCallersOnly] methods) + 11 from CapabilityShapes (9 unguarded +
+    // GetsDefaultAssemblyLoadContext + SizeOfInt32, its two net10.0-only methods).
+    private const int BodiedFixtureMethods = 18;
 
     private readonly ModernInteropFixture fixture;
     #endregion

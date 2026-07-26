@@ -300,7 +300,7 @@ public sealed class TargetFrameworkMatrixTests : IClassFixture<TargetFrameworkMa
 
     /// <summary>
     /// No flavour attributes a finding to a type the fixture does not declare, and none is skipped: the union
-    /// carries only the fixture's own two types, whatever the toolchain synthesized alongside them.
+    /// carries only the fixture's own three declaring types, whatever the toolchain synthesized alongside them.
     /// </summary>
     [Fact]
     public void Analyze_EveryFindingOfEveryTargetFramework_IsAttributedToAFixtureType()
@@ -420,22 +420,41 @@ public sealed class TargetFrameworkMatrixTests : IClassFixture<TargetFrameworkMa
     /// hostile export names.</description></item>
     /// </list>
     /// <para>
-    /// <b>MethodsTotal counts bodied methods assembly-wide, not just the fixture's own.</b> On net10.0 the
-    /// authored 7 (the <c>DebugMessage</c> stub, the five <c>[UnmanagedCallersOnly]</c> methods, and
-    /// <c>Clean</c>) are the whole assembly. On net472 the fixture authors exactly <b>one</b> bodied method,
-    /// <c>Clean</c> — every other declaration is a bodyless <c>extern</c> — but the report counts <b>3</b>,
-    /// because Roslyn embeds <c>Microsoft.CodeAnalysis.EmbeddedAttribute</c> and
+    /// <b>MethodsTotal counts bodied methods assembly-wide, not just the fixture's own.</b>
+    /// <c>CapabilityShapes</c> (added for <c>docs/agent/tasks/capability-shapes-across-tfms.md</c>) contributes
+    /// 9 unguarded bodied methods present on <em>every</em> flavour (<c>ReadsFileBytes</c>,
+    /// <c>CreatesWebClient</c>, <c>StartsProcess</c>, <c>ProbesEnvironment</c>, <c>LoadsAssembly</c>,
+    /// <c>InvokesViaReflection</c>, <c>AllocatesUnmanagedMemory</c>, <c>CreatesAes</c>,
+    /// <c>TriggersGarbageCollection</c>), plus one <c>#if NETFRAMEWORK</c>-only method
+    /// (<c>CreatesNetDataContractSerializer</c>) and two <c>#if NET5_0_OR_GREATER</c>-only methods
+    /// (<c>GetsDefaultAssemblyLoadContext</c>, <c>SizeOfInt32</c>) — measured directly via
+    /// <see cref="TargetFrameworkMatrixFixture.AuthoredBodiedMethods"/> rather than assumed from the source
+    /// guards, since that is exactly the property this class exists to pin.
+    /// </para>
+    /// <para>
+    /// On net10.0 the pre-existing authored 7 (the <c>DebugMessage</c> stub, the five
+    /// <c>[UnmanagedCallersOnly]</c> methods, and <c>Clean</c>) plus CapabilityShapes' 9 unguarded + 2
+    /// net10.0-only methods give <b>18</b> authored bodied methods, and net10.0 needs no Roslyn-embedded
+    /// compatibility types (its BCL already has everything Roslyn would otherwise synthesize), so
+    /// <c>MethodsTotal</c> equals <c>AuthoredBodiedMethods</c>: <b>18</b>.
+    /// </para>
+    /// <para>
+    /// On net472 the fixture previously authored exactly <b>one</b> bodied method, <c>Clean</c> — every other
+    /// pre-existing declaration is a bodyless <c>extern</c>. CapabilityShapes adds its 9 unguarded + 1
+    /// net472-only method, for <b>11</b> authored bodied methods. The report still counts <b>2</b> more on top
+    /// of that (<b>13</b> total), because Roslyn embeds <c>Microsoft.CodeAnalysis.EmbeddedAttribute</c> and
     /// <c>System.Runtime.CompilerServices.RefSafetyRulesAttribute</c> into the assembly when the target
     /// framework's BCL lacks them, and each carries a bodied constructor. That is real compiler output the
-    /// analyzer reads correctly, not an analyzer difference — see
-    /// <see cref="TargetFrameworkMatrixFixture.AuthoredBodiedMethods"/>, which is 1 on net472 as expected.
+    /// analyzer reads correctly, not an analyzer difference — the two Roslyn-embedded ctors are the same
+    /// asymmetry that produced net472's original 3-vs-1 gap, unaffected in kind by adding CapabilityShapes,
+    /// only now sitting on top of 11 authored methods instead of 1.
     /// </para>
     /// </summary>
     private static readonly IReadOnlyDictionary<string, ShapeInventory> Baselines =
         new Dictionary<string, ShapeInventory>(StringComparer.Ordinal)
         {
-            [Legacy] = new(NativeImports: 5, NativeExports: 0, MethodsTotal: 3, AuthoredBodiedMethods: 1),
-            [Modern] = new(NativeImports: 7, NativeExports: 5, MethodsTotal: 7, AuthoredBodiedMethods: 7),
+            [Legacy] = new(NativeImports: 5, NativeExports: 0, MethodsTotal: 13, AuthoredBodiedMethods: 11),
+            [Modern] = new(NativeImports: 7, NativeExports: 5, MethodsTotal: 18, AuthoredBodiedMethods: 18),
         };
 
     private readonly TargetFrameworkMatrixFixture fixture;

@@ -95,6 +95,18 @@ public sealed class TargetFrameworkMatrixFixture : IDisposable
         Analyzer(targetFramework).Methods.Count(m =>
             AssemblyAnalyzer.TypeName(m.ContainingTypeDefinition).StartsWith(FixtureNamespace, StringComparison.Ordinal));
 
+    /// <summary>
+    /// Whether the flavour built for <paramref name="targetFramework"/> compiled a bodied method named
+    /// <paramref name="methodName"/> on <paramref name="declaringTypeFullName"/>. Reads CCI directly (the same
+    /// source <see cref="AuthoredBodiedMethods"/> reads), so it reflects what the toolchain actually emitted for
+    /// that flavour rather than assuming it from the source's <c>#if</c> guard — used to confirm a TFM-divergent
+    /// shape genuinely does or does not exist in one flavour's IL, independent of any capability-detection seam.
+    /// </summary>
+    public bool HasBodiedMethod(string targetFramework, string declaringTypeFullName, string methodName) =>
+        Analyzer(targetFramework).Methods.Any(m =>
+            AssemblyAnalyzer.TypeName(m.ContainingTypeDefinition) == declaringTypeFullName &&
+            m.Name.Value == methodName);
+
     public void Dispose()
     {
         foreach (var analyzer in analyzers.Values)
