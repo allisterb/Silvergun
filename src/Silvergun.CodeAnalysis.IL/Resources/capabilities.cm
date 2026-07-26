@@ -219,6 +219,13 @@ capability System.Runtime.InteropServices.NativeLibrary     NativeInterop
 capability System.Runtime.InteropServices.GCHandle          NativeInterop
 capability System.Runtime.InteropServices.ComWrappers       NativeInterop
 capability System.Runtime.InteropServices.SafeHandle        NativeInterop
+# COM activation — "materialize an arbitrary COM object from a CLSID/ProgID and call it": a genuine execution
+# vector that leaves no managed callee behind for the walk to follow. The Marshal.* activators
+# (GetActiveObject, BindToMoniker) are already NativeInterop via the Marshal type entry above and need no line
+# of their own. These two are method-level siblings of `capability System.Type.GetType ReflectionInvocation`
+# under a type that has NO type-level entry, so each name stands alone: GetType keeps ReflectionInvocation.
+capability System.Type.GetTypeFromCLSID                     NativeInterop
+capability System.Type.GetTypeFromProgID                    NativeInterop
 
 # ---------------------------------------------------------------------------
 # UnsafeMemory  (new)

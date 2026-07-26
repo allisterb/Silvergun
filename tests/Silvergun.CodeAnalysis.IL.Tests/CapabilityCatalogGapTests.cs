@@ -178,14 +178,28 @@ public sealed class CapabilityCatalogGapTests : IClassFixture<AssemblyAnalyzerFi
         Assert.Contains(report.Findings, f => f.Kind == ApiCallKind.NativeImport);
     }
 
-    // 4a — NativeImport is the terminal ApiCallKind, so it sorts last in the (…, ThenBy Kind) ordering.
+    // 4a — the two metadata-seam kinds (a pinvokeimpl declaration, an [UnmanagedCallersOnly] export) sort AFTER
+    // every bytecode call-site kind in the (…, ThenBy Kind) ordering, so a finding with no call instruction
+    // behind it never interleaves with real call sites for the same caller. This is the stable property; which
+    // single kind happens to be terminal is not — ApiCallKind is append-only, so the last value moves whenever a
+    // seam is added (NativeExport displaced NativeImport as the maximum).
     [Fact]
-    public void ApiCallKind_NativeImport_SortsLastAmongKinds()
+    public void ApiCallKind_MetadataSeamKinds_SortAfterCallSiteKinds()
     {
-        Assert.Equal(ApiCallKind.NativeImport, Enum.GetValues<ApiCallKind>().Max());
+        ApiCallKind[] callSiteKinds = [ApiCallKind.Call, ApiCallKind.Construct, ApiCallKind.MethodPointerLoad];
+        ApiCallKind[] metadataSeamKinds = [ApiCallKind.NativeImport, ApiCallKind.NativeExport];
+
         Assert.All(
-            Enum.GetValues<ApiCallKind>().Where(k => k != ApiCallKind.NativeImport),
-            k => Assert.True(k < ApiCallKind.NativeImport));
+            metadataSeamKinds,
+            seam => Assert.All(callSiteKinds, callSite => Assert.True(
+                callSite < seam,
+                $"{callSite} must sort before the metadata seam kind {seam}.")));
+
+        // ...and the two groups together are the whole enum: a newly appended kind has to be classified here
+        // rather than silently escaping the ordering contract.
+        Assert.Equal(
+            Enum.GetValues<ApiCallKind>().Order(),
+            callSiteKinds.Concat(metadataSeamKinds).Order());
     }
 
     // 4b — the ordered output (which now includes NativeImport findings) is deterministic and honours the

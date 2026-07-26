@@ -390,6 +390,47 @@ public sealed class CapabilityMapDataTests
             CapabilityMap.Default.Classify("System.IO.Directory.Delete"));
     }
 
+    // COM activation (interop-detection-gaps.md phase 3): GetTypeFromCLSID/GetTypeFromProgID materialize an
+    // arbitrary COM object from a CLSID/ProgID, which is an execution vector across the native boundary — not
+    // reflection over managed metadata. System.Type carries no type entry, so each of its members stands alone
+    // and these two are method-level siblings of the ReflectionInvocation ones.
+    [Theory]
+    [InlineData("System.Type.GetTypeFromCLSID")]
+    [InlineData("System.Type.GetTypeFromProgID")]
+    public void Default_ComActivationMembersOfType_AreNativeInterop(string key)
+    {
+        Assert.Equal(
+            new CapabilityVerdict(CapabilityClass.Capability, Capability.NativeInterop),
+            CapabilityMap.Default.Classify(key));
+    }
+
+    // ...paired with the siblings they sit beside, because "the new entries landed" and "the new entries were
+    // written as a type entry that swallowed System.Type" look identical if only the first side is asserted:
+    // GetType keeps its own ReflectionInvocation line, and an unlisted member stays unclassified.
+    [Fact]
+    public void Default_SiblingsOfTheComActivationEntries_KeepTheirOwnVerdicts()
+    {
+        Assert.Equal(
+            new CapabilityVerdict(CapabilityClass.Capability, Capability.ReflectionInvocation),
+            CapabilityMap.Default.Classify("System.Type.GetType"));
+
+        Assert.Equal(CapabilityVerdict.None, CapabilityMap.Default.Classify("System.Type.GetMethod"));
+    }
+
+    // The other two COM activators are on Marshal, which already has a type entry, so they were deliberately
+    // given NO line of their own — coverage is INHERITED. Asserted anyway: the acceptance criterion is that the
+    // API classifies as NativeInterop, not that a particular line exists, and this is what would break if the
+    // Marshal type entry were ever narrowed to a method list.
+    [Theory]
+    [InlineData("System.Runtime.InteropServices.Marshal.GetActiveObject")]
+    [InlineData("System.Runtime.InteropServices.Marshal.BindToMoniker")]
+    public void Default_MarshalComActivators_AreNativeInteropByInheritingTheTypeEntry(string key)
+    {
+        Assert.Equal(
+            new CapabilityVerdict(CapabilityClass.Capability, Capability.NativeInterop),
+            CapabilityMap.Default.Classify(key));
+    }
+
     // Task.Run takes a delegate: it is a call-graph EDGE, not a capability. Marking it safe would terminate
     // traversal and hide whatever the delegate does, so it is deliberately left unclassified (seed §2).
     [Theory]

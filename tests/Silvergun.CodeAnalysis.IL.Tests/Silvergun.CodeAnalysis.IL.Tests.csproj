@@ -17,6 +17,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Silvergun.CodeAnalysis.IL\Silvergun.CodeAnalysis.IL.csproj" />
     <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.Fixture\Silvergun.CodeAnalysis.IL.Tests.Fixture.csproj" />
+    <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.MatrixFixture\Silvergun.CodeAnalysis.IL.Tests.MatrixFixture.csproj" />
   </ItemGroup>
 
 </Project>

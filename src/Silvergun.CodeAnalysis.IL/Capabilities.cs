@@ -29,10 +29,13 @@ public enum Capability
 public sealed record SensitiveApi(Capability Capability, string TypePrefix, string? Method = null);
 
 /// <summary>
-/// How the sensitive API was referenced. The first three are bytecode call sites; <see cref="NativeImport"/>
-/// is a metadata seam — a <c>[DllImport]</c>/pinvokeimpl declaration, which has no call instruction.
+/// How the sensitive API was referenced. The first three are bytecode call sites; the last two are metadata
+/// seams with no call instruction at all — <see cref="NativeImport"/> is a <c>[DllImport]</c>/pinvokeimpl
+/// declaration (managed code calling <em>out</em> to native), <see cref="NativeExport"/> an
+/// <c>[UnmanagedCallersOnly]</c> method (native code calling <em>into</em> the assembly).
+/// <para><b>Append-only</b>, for the same reason as <see cref="Capability"/>.</para>
 /// </summary>
-public enum ApiCallKind { Call, Construct, MethodPointerLoad, NativeImport }
+public enum ApiCallKind { Call, Construct, MethodPointerLoad, NativeImport, NativeExport }
 
 /// <summary>One detected sensitive-API call. Carries only strings/enums — no Analysis.Net types (ADR 0001/0002).</summary>
 public sealed record ApiCallFinding(
@@ -41,7 +44,9 @@ public sealed record ApiCallFinding(
     string CallerType,      // full name of the type containing the calling method
     string CallerMethod,    // calling method name
     string CalledApi);      // "Namespace.TypeName.MethodName" of the callee (TypeName + "..ctor" for Construct;
-                            // "module!entryPoint" native target for NativeImport)
+                            // "module!entryPoint" native target for NativeImport;
+                            // "<managed>!entryPoint" exported entry point for NativeExport, where "<managed>" is a
+                            // literal marker — the owning method is not repeated, it is already in CallerMethod)
 
 /// <summary>A serializable capability report for a single analyzed assembly.</summary>
 public sealed record CapabilityReport(
