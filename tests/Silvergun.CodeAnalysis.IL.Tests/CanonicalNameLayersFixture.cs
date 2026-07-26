@@ -25,11 +25,27 @@ using ModelBytecode = Model.Bytecode;
 public sealed class CanonicalNameLayersFixture : IDisposable
 {
     #region Constructors
+    /// <summary>The default subject: the shared netstandard2.0 fixture assembly.</summary>
     public CanonicalNameLayersFixture()
+        : this(typeof(Shapes).Assembly.Location)
+    {
+    }
+
+    /// <summary>
+    /// The same two-layer rendering over an arbitrary assembly, so the parity contract can be asserted against
+    /// another flavour of the toolchain (e.g. the net472 matrix fixture, which references <c>mscorlib</c>
+    /// rather than <c>System.Runtime</c>) without duplicating the walk.
+    /// <para>
+    /// Deliberately <b>not</b> public: xUnit rejects a class fixture type that declares more than one public
+    /// constructor, so the parameterized form is internal and composed by
+    /// <see cref="Net472CanonicalNameLayersFixture"/> rather than used as a class fixture directly.
+    /// </para>
+    /// </summary>
+    internal CanonicalNameLayersFixture(string fixturePath)
     {
         Runtime.Initialize("Silvergun", "TESTS");
 
-        FixturePath = typeof(Shapes).Assembly.Location;
+        FixturePath = fixturePath;
 
         var cci = AssemblyAnalyzer.Load(FixturePath);
         if (!cci.IsSuccess)

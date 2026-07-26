@@ -40,17 +40,8 @@ public sealed class CanonicalNameParityTests : IClassFixture<CanonicalNameLayers
     /// definitions and for call sites. Any difference is reported as the symmetric difference, per side.
     /// </summary>
     [Fact]
-    public void CciAndModelLayers_ProduceIdenticalKeySets_ForFixtureAssembly()
-    {
-        var differences = new List<string>();
-
-        Compare("definition ClassificationKey", fixture.CciLayer.DefinitionKeys, fixture.ModelLayer.DefinitionKeys, differences);
-        Compare("definition NodeId", fixture.CciLayer.DefinitionNodeIds, fixture.ModelLayer.DefinitionNodeIds, differences);
-        Compare("call-site ClassificationKey", fixture.CciLayer.CallSiteKeys, fixture.ModelLayer.CallSiteKeys, differences);
-        Compare("call-site NodeId", fixture.CciLayer.CallSiteNodeIds, fixture.ModelLayer.CallSiteNodeIds, differences);
-
-        Assert.True(differences.Count == 0, string.Join(Environment.NewLine, differences));
-    }
+    public void CciAndModelLayers_ProduceIdenticalKeySets_ForFixtureAssembly() =>
+        CanonicalNameParity.AssertLayersAgree(fixture.CciLayer, fixture.ModelLayer);
 
     /// <summary>
     /// Guards the parity test against passing vacuously: both layers must have produced a substantial number
@@ -342,32 +333,10 @@ public sealed class CanonicalNameParityTests : IClassFixture<CanonicalNameLayers
         Assert.Null(exception);
     }
 
-    // Reports the symmetric difference so a failure names the offending entries instead of just "sets differ".
-    private static void Compare(string what, IReadOnlySet<string> cci, IReadOnlySet<string> model, List<string> differences)
-    {
-        var onlyCci = cci.Except(model, StringComparer.Ordinal).OrderBy(s => s, StringComparer.Ordinal).ToArray();
-        var onlyModel = model.Except(cci, StringComparer.Ordinal).OrderBy(s => s, StringComparer.Ordinal).ToArray();
-
-        if (onlyCci.Length == 0 && onlyModel.Length == 0)
-            return;
-
-        differences.Add(
-            $"{what}: {cci.Count} CCI vs {model.Count} Model; " +
-            $"{onlyCci.Length} only in CCI, {onlyModel.Length} only in Model." +
-            Render("  only in CCI:   ", onlyCci) +
-            Render("  only in Model: ", onlyModel));
-    }
-
-    private static string Render(string label, IReadOnlyList<string> names) =>
-        names.Count == 0
-            ? string.Empty
-            : Environment.NewLine + string.Join(Environment.NewLine, names.Take(MaxReported).Select(n => label + n)) +
-              (names.Count > MaxReported ? $"{Environment.NewLine}  … and {names.Count - MaxReported} more" : string.Empty);
     #endregion
 
     #region Fields
     private const string Prefix = "Silvergun.CodeAnalysis.IL.Tests.Fixture.";
-    private const int MaxReported = 40;
 
     // The three parameter shapes of CanonicalShapes.TakesNestedGenericInstantiations, rendered.
     private const string InnerInstantiated = Prefix + "GenericOuter.Inner`2<System.Int32,System.String>";

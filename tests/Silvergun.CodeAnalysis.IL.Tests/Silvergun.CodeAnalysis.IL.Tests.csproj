@@ -17,7 +17,18 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Silvergun.CodeAnalysis.IL\Silvergun.CodeAnalysis.IL.csproj" />
     <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.Fixture\Silvergun.CodeAnalysis.IL.Tests.Fixture.csproj" />
+    <!-- The matrix fixture is multi-targeted. This normal reference resolves to the best match for THIS
+         project (net10.0) and is what typeof(ModernInteropOps) compiles against. -->
     <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.MatrixFixture\Silvergun.CodeAnalysis.IL.Tests.MatrixFixture.csproj" />
+    <!-- ...but only that best match would be BUILT, so on a clean checkout `dotnet test` here would run the
+         TFM matrix tests with no net472 output on disk. This second reference forces the net472 flavour to be
+         built as well; ReferenceOutputAssembly="false" keeps it off the compile/runtime reference set (it is
+         located by path at test time, never loaded by the host). Every matrix TFM other than this project's
+         own needs a line here. -->
+    <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.MatrixFixture\Silvergun.CodeAnalysis.IL.Tests.MatrixFixture.csproj"
+                      ReferenceOutputAssembly="false"
+                      SkipGetTargetFrameworkProperties="true"
+                      AdditionalProperties="TargetFramework=net472" />
   </ItemGroup>
 
 </Project>

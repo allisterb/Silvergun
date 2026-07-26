@@ -2,7 +2,7 @@ namespace Silvergun.CodeAnalysis.IL.Tests.MatrixFixture;
 
 using System.Runtime.InteropServices;
 
-// This fixture is built for the whole target matrix — net472, net8.0 and net10.0 — so the analyzer can be
+// This fixture is built for the whole target matrix — net472 and net10.0 — so the analyzer can be
 // read against the SAME declarations as compiled by each flavour of the toolchain (the netstandard2.0 fixture
 // cannot express the modern shapes at all).
 // Everything here is a *declaration* analyzed statically — nothing is ever executed, and the native
@@ -19,7 +19,7 @@ using System.Runtime.InteropServices;
 public static partial class ModernInteropOps
 {
     // [LibraryImport] and StringMarshalling exist on net7.0+ only, so on the matrix they are present in the
-    // net8.0 and net10.0 flavours and absent from net472. The `partial` declarations must be guarded together
+    // net10.0 flavour and absent from net472. The `partial` declarations must be guarded together
     // with the attribute: without the source generator there is no implementing part, which is a compile error
     // (CS8795) rather than a missing shape.
 #if NET7_0_OR_GREATER
@@ -50,7 +50,7 @@ public static partial class ModernInteropOps
     internal static extern uint CurrentThreadId();
 
     // [UnmanagedCallersOnly] exists on net5.0+ only, so on the matrix the reverse-P/Invoke shapes are present
-    // in the net8.0 and net10.0 flavours and absent from net472, which has no managed-export mechanism at all.
+    // in the net10.0 flavour and absent from net472, which has no managed-export mechanism at all.
 #if NET5_0_OR_GREATER
     /// <summary>
     /// SUBJECT C — <em>reverse</em> P/Invoke: a managed method published as a native-callable entry point.
