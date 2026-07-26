@@ -1,0 +1,307 @@
+# Silvergun built-in capability map (ADR 0019).
+#
+# Line-oriented, '#' comments to end of line, blank lines ignored:
+#
+#   capability  <pattern> <CAPABILITY>     a sink: classify and stop
+#   safe        <pattern>                  allowlist: TERMINATES traversal
+#   unspecified <pattern>                  clears an inherited type/subtree classification, keep walking
+#   unanalyzed  <pattern>                  opacity: we cannot see through it, always report
+#   ignore-edge <caller-pattern> <callee-pattern>
+#
+# Patterns are matched against a ClassificationKey (Namespace.Outer.Inner.Method, no signature):
+#
+#   Ns.Type          that type, all of its members
+#   Ns.Type.Method   one method, all overloads (constructors are Ns.Type..ctor)
+#   Ns.Prefix.*      the subtree: any key starting with "Ns.Prefix."
+#
+# Most specific wins: type+method > type > longest subtree prefix. At equal specificity the last entry
+# loaded wins, so a layered override file beats these built-ins.
+#
+# A TYPE ENTRY DOES NOT COVER NESTED TYPES. Matching a key against a type entry strips exactly one trailing
+# segment, while a ClassificationKey renders nesting with '.' — so "Ns.Type" matches "Ns.Type.Member" but NOT
+# "Ns.Type.Nested.Member". Write "Ns.Type.*" when a nested type must be covered. This is intended, and is a
+# deliberate difference from the legacy StartsWith behaviour.
+#
+# CASE SENSITIVITY IS ASYMMETRIC. Directive keywords ('capability', 'safe', ...) and capability names
+# ('FileSystem', ...) are matched case-INSENSITIVELY; patterns are compared ordinal case-SENSITIVELY, so a
+# mis-cased pattern silently matches nothing.
+#
+# WARNING: 'safe' terminates traversal, so a wrong safe entry silently UNDER-reports. Prefer leaving an
+# API unclassified when unsure. Entries here were hand-synthesized and are not yet linted against the
+# real reference assemblies (capability-map-seed.md section 4) — a typo'd entry never matches anything.
+#
+# SCOPE: this map describes the APIs a SCANNED assembly might call, not the APIs Silvergun itself can
+# call. .NET Framework-only surface is therefore in scope and is deliberately retained — a .nupkg
+# routinely ships net472/netstandard2.0 targets. Do not prune an entry merely because it is absent from
+# .NET 10 (NetDataContractSerializer, Assembly.UnsafeLoadFrom/LoadWithPartialName, AppDomain,
+# Microsoft.Win32.SystemEvents, WindowsIdentity, FtpWebRequest, CodeDom.Compiler.*, BinaryFormatter).
+
+# ---------------------------------------------------------------------------
+# FileSystem
+# ---------------------------------------------------------------------------
+capability System.IO.File                                   FileSystem
+capability System.IO.FileInfo                               FileSystem
+capability System.IO.Directory                              FileSystem
+# Carve-out from `capability System.IO.Directory`: GetCurrentDirectory reads process state, it does not touch
+# the file system. Keeping it here would give the same observable operation two capabilities depending on
+# which API the caller reached for — System.Environment.get_CurrentDirectory is an EnvironmentProbe.
+capability System.IO.Directory.GetCurrentDirectory          EnvironmentProbe
+capability System.IO.DirectoryInfo                          FileSystem
+capability System.IO.FileStream                             FileSystem
+capability System.IO.FileSystemInfo                         FileSystem
+capability System.IO.FileSystemWatcher                      FileSystem
+capability System.IO.DriveInfo                              FileSystem
+# Carve-out from `capability System.IO.DriveInfo`: GetDrives enumerates the mounted drive letters and reads no
+# file — it is the identical operation to System.Environment.GetLogicalDrives, which is an EnvironmentProbe
+# below, and the same observable act must not get two capabilities depending on which API the caller reached
+# for. The instance members (get_TotalSize, get_AvailableFreeSpace, get_RootDirectory, ...) do inspect the
+# volume and stay FileSystem via the type entry above.
+capability System.IO.DriveInfo.GetDrives                    EnvironmentProbe
+capability System.IO.Enumeration.*                          FileSystem
+capability System.IO.MemoryMappedFiles.*                    FileSystem
+capability System.IO.IsolatedStorage.*                      FileSystem
+capability System.IO.Compression.ZipFile                    FileSystem
+capability System.IO.Compression.ZipFileExtensions          FileSystem
+capability System.IO.StreamWriter..ctor                     FileSystem
+capability System.IO.StreamReader..ctor                     FileSystem
+# First carve-out from `safe System.IO.Path`: GetTempFileName creates a file.
+capability System.IO.Path.GetTempFileName                   FileSystem
+# Second carve-out: GetTempPath creates nothing and reads no file — it is a pure TMP/TEMP environment read,
+# so it gets the same capability as System.Environment.GetEnvironmentVariable.
+capability System.IO.Path.GetTempPath                       EnvironmentProbe
+# Path is otherwise pure string manipulation
+safe       System.IO.Path
+
+# ---------------------------------------------------------------------------
+# Network
+# ---------------------------------------------------------------------------
+capability System.Net.Http.HttpClient                       Network
+capability System.Net.Http.HttpMessageInvoker               Network
+capability System.Net.Http.HttpClientHandler                Network
+capability System.Net.Http.SocketsHttpHandler               Network
+capability System.Net.WebClient                             Network
+capability System.Net.WebRequest                            Network
+capability System.Net.HttpWebRequest                        Network
+capability System.Net.FtpWebRequest                         Network
+capability System.Net.HttpListener                          Network
+capability System.Net.Dns                                   Network
+# Carve-out from `capability System.Net.Dns`: GetHostName emits no network traffic — it returns the local
+# machine's name, the same reconnaissance signal as System.Environment.get_MachineName. The resolving members
+# (GetHostEntry, GetHostAddresses, GetHostByName and their Async/Begin forms) do talk to a resolver and stay
+# Network via the type entry above.
+capability System.Net.Dns.GetHostName                       EnvironmentProbe
+capability System.Net.Sockets.*                             Network
+capability System.Net.WebSockets.*                          Network
+capability System.Net.Mail.*                                Network
+capability System.Net.NetworkInformation.Ping               Network
+capability System.Net.Security.SslStream                    Network
+
+# ---------------------------------------------------------------------------
+# ProcessExecution
+# ---------------------------------------------------------------------------
+capability System.Diagnostics.Process                       ProcessExecution
+# Carve-out from `capability System.Diagnostics.Process`: LOOKING UP a process is reconnaissance of the host,
+# not execution. Enumerating what is running is the textbook sandbox/analysis-tool check ("is a debugger, a
+# packet sniffer or a VM guest agent up?"), and reporting it as ProcessExecution conflates "listed what is
+# running" with "started a program" — the distinction a reviewer most needs. Start/Kill/WaitForExit and every
+# other member stay ProcessExecution via the type entry above.
+capability System.Diagnostics.Process.GetProcesses          EnvironmentProbe
+capability System.Diagnostics.Process.GetProcessesByName    EnvironmentProbe
+capability System.Diagnostics.Process.GetProcessById        EnvironmentProbe
+capability System.Diagnostics.Process.GetCurrentProcess     EnvironmentProbe
+capability System.Diagnostics.Process.get_MachineName       EnvironmentProbe
+capability System.Diagnostics.ProcessStartInfo              ProcessExecution
+
+# ---------------------------------------------------------------------------
+# Registry  (read/write split is a deferred follow-up)
+# ---------------------------------------------------------------------------
+capability Microsoft.Win32.Registry                         Registry
+capability Microsoft.Win32.RegistryKey                      Registry
+
+# ---------------------------------------------------------------------------
+# EnvironmentProbe — reconnaissance of the host
+# ---------------------------------------------------------------------------
+capability System.Environment.GetEnvironmentVariable        EnvironmentProbe
+capability System.Environment.GetEnvironmentVariables       EnvironmentProbe
+capability System.Environment.GetFolderPath                 EnvironmentProbe
+capability System.Environment.GetLogicalDrives              EnvironmentProbe
+capability System.Environment.GetCommandLineArgs            EnvironmentProbe
+capability System.Environment.get_UserName                  EnvironmentProbe
+capability System.Environment.get_MachineName               EnvironmentProbe
+capability System.Environment.get_UserDomainName            EnvironmentProbe
+capability System.Environment.get_OSVersion                 EnvironmentProbe
+capability System.Environment.get_CommandLine               EnvironmentProbe
+capability System.Environment.get_CurrentDirectory          EnvironmentProbe
+capability System.Environment.get_ProcessPath               EnvironmentProbe
+capability System.Environment.get_SystemDirectory           EnvironmentProbe
+capability System.Environment.get_UserInteractive           EnvironmentProbe
+capability System.Runtime.InteropServices.RuntimeInformation EnvironmentProbe
+capability System.Net.NetworkInformation.NetworkInterface   EnvironmentProbe
+capability System.Security.Principal.WindowsIdentity        EnvironmentProbe
+capability Microsoft.Win32.SystemEvents                     EnvironmentProbe
+capability System.TimeZoneInfo.get_Local                    EnvironmentProbe
+# Carve-out from `capability System.AppDomain RuntimeControl` below: these two are leaf getters that read where
+# the domain was loaded from and what it is called. Observing the host is not controlling the runtime, and
+# get_BaseDirectory in particular is the standard "where am I installed?" probe.
+capability System.AppDomain.get_BaseDirectory               EnvironmentProbe
+capability System.AppDomain.get_FriendlyName                EnvironmentProbe
+# Carve-out from `safe System.Globalization.*`: locale/region fingerprinting is textbook reconnaissance
+# ("skip the CIS countries"), the same signal System.Environment.get_UserName is here for. These are leaf
+# property getters — there is nothing deeper to walk — so they are a capability, not `unspecified`.
+capability System.Globalization.CultureInfo.get_CurrentCulture      EnvironmentProbe
+capability System.Globalization.CultureInfo.get_CurrentUICulture    EnvironmentProbe
+capability System.Globalization.CultureInfo.get_InstalledUICulture  EnvironmentProbe
+capability System.Globalization.RegionInfo.get_CurrentRegion        EnvironmentProbe
+
+# ---------------------------------------------------------------------------
+# DynamicCodeLoading — code that did not exist at compile time
+# ---------------------------------------------------------------------------
+capability System.Reflection.Assembly.Load                  DynamicCodeLoading
+capability System.Reflection.Assembly.LoadFrom              DynamicCodeLoading
+capability System.Reflection.Assembly.LoadFile              DynamicCodeLoading
+capability System.Reflection.Assembly.UnsafeLoadFrom        DynamicCodeLoading
+capability System.Reflection.Assembly.LoadWithPartialName   DynamicCodeLoading
+capability System.Activator.CreateInstance                  DynamicCodeLoading
+capability System.Activator.CreateInstanceFrom              DynamicCodeLoading
+capability System.Reflection.Emit.*                         DynamicCodeLoading
+capability System.Linq.Expressions.Expression.Compile       DynamicCodeLoading
+capability System.Linq.Expressions.LambdaExpression.Compile DynamicCodeLoading
+# Carve-outs from `capability System.Runtime.Loader.AssemblyLoadContext RuntimeControl` and
+# `capability System.AppDomain RuntimeControl` below. Those type entries catch every member not named here,
+# and these load an assembly — that is dynamic code loading, not runtime control. The pattern language has no
+# mid-name wildcard, so each loading member needs its own line.
+capability System.Runtime.Loader.AssemblyLoadContext.LoadFromAssemblyPath     DynamicCodeLoading
+capability System.Runtime.Loader.AssemblyLoadContext.LoadFromAssemblyName     DynamicCodeLoading
+capability System.Runtime.Loader.AssemblyLoadContext.LoadFromNativeImagePath  DynamicCodeLoading
+capability System.Runtime.Loader.AssemblyLoadContext.LoadFromStream           DynamicCodeLoading
+capability System.AppDomain.Load                            DynamicCodeLoading
+# The full AppDomain loading surface, kept symmetric: every one of these resolves an assembly and runs or
+# instantiates code out of it, so the *AndUnwrap / *From siblings must not disagree with their base overloads.
+capability System.AppDomain.ExecuteAssembly                 DynamicCodeLoading
+capability System.AppDomain.ExecuteAssemblyByName           DynamicCodeLoading
+capability System.AppDomain.DefineDynamicAssembly           DynamicCodeLoading
+capability System.AppDomain.CreateInstance                  DynamicCodeLoading
+capability System.AppDomain.CreateInstanceAndUnwrap         DynamicCodeLoading
+capability System.AppDomain.CreateInstanceFrom              DynamicCodeLoading
+capability System.AppDomain.CreateInstanceFromAndUnwrap     DynamicCodeLoading
+capability System.CodeDom.Compiler.*                        DynamicCodeLoading
+capability Microsoft.CSharp.RuntimeBinder.*                 DynamicCodeLoading
+# Carve-out from `safe System.Text.*`: CompileToAssembly emits a .NET assembly to disk. Framework-only, and
+# retained for exactly that reason (see SCOPE above). RegexOptions.Compiled is an options *value*, not a call
+# site, and this map keys on methods, so there is deliberately no entry for it.
+capability System.Text.RegularExpressions.Regex.CompileToAssembly  DynamicCodeLoading
+# Deserialization gadget vectors. NetDataContractSerializer never shipped in .NET Core/5+ and stays
+# anyway: scanned packages routinely ship net472/netstandard2.0 assemblies (see SCOPE above).
+capability System.Runtime.Serialization.Formatters.Binary.BinaryFormatter    DynamicCodeLoading
+capability System.Runtime.Serialization.NetDataContractSerializer            DynamicCodeLoading
+
+# ---------------------------------------------------------------------------
+# ReflectionInvocation — indirection the call graph cannot follow
+# ---------------------------------------------------------------------------
+capability System.Reflection.MethodBase.Invoke              ReflectionInvocation
+capability System.Reflection.MethodInfo.Invoke              ReflectionInvocation
+capability System.Reflection.ConstructorInfo.Invoke         ReflectionInvocation
+capability System.Reflection.PropertyInfo.GetValue          ReflectionInvocation
+capability System.Reflection.PropertyInfo.SetValue          ReflectionInvocation
+capability System.Reflection.FieldInfo.GetValue             ReflectionInvocation
+capability System.Reflection.FieldInfo.SetValue             ReflectionInvocation
+capability System.Reflection.MethodInfo.CreateDelegate      ReflectionInvocation
+capability System.Delegate.DynamicInvoke                    ReflectionInvocation
+capability System.Delegate.CreateDelegate                   ReflectionInvocation
+capability System.Type.InvokeMember                         ReflectionInvocation
+capability System.Type.GetType                              ReflectionInvocation
+
+# ---------------------------------------------------------------------------
+# NativeInterop
+# ---------------------------------------------------------------------------
+capability System.Runtime.InteropServices.Marshal           NativeInterop
+capability System.Runtime.InteropServices.NativeLibrary     NativeInterop
+capability System.Runtime.InteropServices.GCHandle          NativeInterop
+capability System.Runtime.InteropServices.ComWrappers       NativeInterop
+capability System.Runtime.InteropServices.SafeHandle        NativeInterop
+
+# ---------------------------------------------------------------------------
+# UnsafeMemory  (new)
+# ---------------------------------------------------------------------------
+capability System.Runtime.CompilerServices.Unsafe           UnsafeMemory
+capability System.Runtime.InteropServices.NativeMemory      UnsafeMemory
+capability System.Runtime.InteropServices.MemoryMarshal     UnsafeMemory
+
+# ---------------------------------------------------------------------------
+# RuntimeControl  (new)
+# ---------------------------------------------------------------------------
+capability System.GC                                        RuntimeControl
+# These two type entries catch every member not listed explicitly elsewhere (AppDomain.SetData/GetData,
+# AppendPrivatePath, SetPrincipalPolicy, Unload, the assembly-resolve event hooks, ...). Their loading members
+# are carved out to DynamicCodeLoading above (AppDomain.Load/ExecuteAssembly*/DefineDynamicAssembly/
+# CreateInstance*, AssemblyLoadContext.LoadFrom*) and their two host-reconnaissance getters
+# (AppDomain.get_BaseDirectory/get_FriendlyName) to EnvironmentProbe.
+capability System.AppDomain                                 RuntimeControl
+capability System.Environment.Exit                          RuntimeControl
+capability System.Environment.FailFast                      RuntimeControl
+capability System.Runtime.Loader.AssemblyLoadContext        RuntimeControl
+capability System.Runtime.GCSettings                        RuntimeControl
+capability System.Runtime.ProfileOptimization               RuntimeControl
+capability System.Diagnostics.Debugger                      RuntimeControl
+
+# ---------------------------------------------------------------------------
+# Cryptography — ransomware / data-protection signal, not inherently bad
+# ---------------------------------------------------------------------------
+capability System.Security.Cryptography.*                   Cryptography
+
+# ---------------------------------------------------------------------------
+# SAFE — allowlist. Terminates traversal, so a wrong entry UNDER-reports.
+# ---------------------------------------------------------------------------
+safe System.String
+safe System.Math
+safe System.MathF
+safe System.Convert
+safe System.BitConverter
+safe System.Array
+safe System.Enum
+safe System.Guid
+safe System.Uri
+safe System.Version
+safe System.DateTime
+safe System.DateTimeOffset
+safe System.TimeSpan
+safe System.TimeOnly
+safe System.DateOnly
+safe System.Decimal
+safe System.Double
+safe System.Single
+safe System.Int32
+safe System.Int64
+safe System.UInt32
+safe System.UInt64
+safe System.Int16
+safe System.UInt16
+safe System.Byte
+safe System.SByte
+safe System.Boolean
+safe System.Char
+safe System.IntPtr
+safe System.UIntPtr
+safe System.StringComparer
+safe System.Text.*
+# Carve-out: System.Text.Json is NOT safe (deserialization gadget vector). A longer
+# prefix wins, so this re-opens the subtree that `safe System.Text.*` would swallow.
+unspecified System.Text.Json.*
+safe System.Globalization.*
+safe System.Collections.*
+safe System.Numerics.*
+safe System.Buffers.*
+safe System.Linq.Enumerable
+safe System.Linq.Queryable
+safe System.Linq.ImmutableArrayExtensions
+safe System.IO.MemoryStream
+safe System.IO.StringWriter
+safe System.IO.StringReader
+safe System.Threading.Interlocked
+safe System.Threading.Monitor
+safe System.Threading.SemaphoreSlim
+safe System.Threading.CancellationToken
+safe System.Threading.CancellationTokenSource
+safe System.Diagnostics.Stopwatch
+safe System.Diagnostics.Debug
+safe System.Diagnostics.Contracts.*

@@ -5,11 +5,19 @@ using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-/// <summary>Categories of sensitive behaviour a piece of CIL can exhibit.</summary>
+/// <summary>
+/// Categories of sensitive behaviour a piece of CIL can exhibit.
+/// <para>
+/// <b>Append-only.</b> New values go at the end and existing ones are never reordered or renamed: the ordinals
+/// are load-bearing wherever a value is compared or persisted numerically, and a mid-enum insertion has bitten us
+/// before (ADR 0019 decision 5). JSON is written by name, so appending is safe.
+/// </para>
+/// </summary>
 public enum Capability
 {
     FileSystem, Network, ProcessExecution, Registry, EnvironmentProbe,
-    DynamicCodeLoading, NativeInterop, Cryptography, ReflectionInvocation
+    DynamicCodeLoading, NativeInterop, Cryptography, ReflectionInvocation,
+    UnsafeMemory, RuntimeControl
 }
 
 /// <summary>

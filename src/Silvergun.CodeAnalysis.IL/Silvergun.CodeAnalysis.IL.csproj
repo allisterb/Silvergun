@@ -7,6 +7,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- The built-in capability map (ADR 0019). A build item, not a package reference. -->
+    <EmbeddedResource Include="Resources\capabilities.cm" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\ext\analysis-net\Backend\Backend.NET6.csproj" />
     <ProjectReference Include="..\..\ext\analysis-net\CCIProvider\CCIProvider.NET6.csproj" />
     <ProjectReference Include="..\..\ext\analysis-net\cci\NET6\Microsoft.Cci\Microsoft.Cci.NET6.csproj" />

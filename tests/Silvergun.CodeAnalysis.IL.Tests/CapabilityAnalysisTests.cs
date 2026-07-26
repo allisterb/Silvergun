@@ -167,16 +167,28 @@ public sealed class CapabilityAnalysisTests : IClassFixture<AssemblyAnalyzerFixt
         Assert.DoesNotMatch(new Regex("\"Kind\"\\s*:\\s*\\d"), json);
     }
 
-    // Case 7
+    // Case 7 — "no capability in the taxonomy is unreachable" now lives with the map it asserts against:
+    // CapabilityMapDataTests.Default_RepresentsEveryCapabilityInTheTaxonomy. Only the legacy-catalog guard
+    // below belongs in this class.
+
+    // Case 7b — the legacy catalog is FROZEN pending phase 2 (which wires CapabilityAnalysis onto the map),
+    // so it is deliberately scoped to the nine capabilities that predate the map and must not be asserted to
+    // cover the two appended ones. Keeping this guard means phase 2's "no lost findings" gate still has a
+    // concrete before-state to preserve: every one of these nine must still be produced after the switch.
     [Fact]
-    public void Catalog_IsNonEmpty_AndCoversEveryCapability()
+    public void Catalog_IsNonEmpty_AndStillCoversThePreMapCapabilities()
     {
         Assert.NotEmpty(CapabilityAnalysis.Catalog);
 
-        foreach (var capability in Enum.GetValues<Capability>())
-        {
-            Assert.Contains(CapabilityAnalysis.Catalog, e => e.Capability == capability);
-        }
+        Capability[] preMap =
+        [
+            Capability.FileSystem, Capability.Network, Capability.ProcessExecution, Capability.Registry,
+            Capability.EnvironmentProbe, Capability.DynamicCodeLoading, Capability.NativeInterop,
+            Capability.Cryptography, Capability.ReflectionInvocation,
+        ];
+
+        Assert.All(preMap, capability =>
+            Assert.Contains(CapabilityAnalysis.Catalog, e => e.Capability == capability));
     }
 
     // Case 8 (ADR 0005, the crux) — EH-heavy regression. DownloadInTryCatchAsync compiles to an async
