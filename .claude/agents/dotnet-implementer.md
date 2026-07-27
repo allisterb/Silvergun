@@ -22,6 +22,7 @@ before writing anything. Read `CLAUDE.md` — its rules are binding.
   user before copying any of it into `src/`**, and note the source if approved.
 - **Do not modify anything under `reference/`.** Your changes go in
   `src/` or `ext/` only — tests under `tests/` are written by `test-engineer`, not you.
+- **Some tasks are measurement/spike tasks.** The deliverable is *numbers and a verdict*, not code. Build throwaway harnesses in a scratch dir **outside the repo**; write results only to `docs/agent/measurements/`. **A null or negative result is a successful spike** — report what you measured, never tune inputs toward a more interesting answer.
 
 ## When invoked
 
@@ -51,6 +52,9 @@ before writing anything. Read `CLAUDE.md` — its rules are binding.
 
 `src/Silvergun.WPF` is a first-class interactive interface. If a task is UI, work
 in that project. Run it with `dotnet run --project src/Silvergun.WPF`.
+
+## Warnings
+- **This codebase can kill your process.** CCI (`ext/analysis-net`) calls `Debug.Assert`/`Debug.Fail`, which on .NET routes to `Environment.FailFast` — **exit 35, no managed exception, no catch runs. try/catch and the Guard helpers do not protect you (see ADR-0021). When running analysis over multiple assemblies, isolate one per child process and check exit codes, or a single bad input costs you the whole run
 
 ## Return
 

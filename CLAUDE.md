@@ -100,9 +100,18 @@ Delegation rules:
 3. `code-reviewer` reviews before anything is considered done; the affected project must build and its tests pass.
 4. When a decision needs current external information (an external API's shape, a security technique, a library choice), delegate to `researcher` first and design from its brief.
 5. Hand off with concrete context: file paths, the spec in `docs/agent/tasks/`, the exact command that failed, and acceptance criteria. Subagents start with a fresh context window and only receive what's in the delegation prompt plus this file.
+6. On malware-adjacent code (capability detection, squatting, YARA rules) Opus intermittently trips a cybersecurity filter and refuses. You will need to override to `sonnet` when this happens.
+
+### Environment notes (Windows + Git Bash):
+- `find` resolves to Windows `find.exe` and **hangs** — use Glob/Grep or `ls`.
+- `rm -rf` is blocked by a permission guard. Leave scratch dirs in place.
+- **Never run two `dotnet test` invocations in parallel** when the projects share a referenced project — they collide on the same `obj`/`bin` DLL and fail with `CS2012`. Run suites sequentially.
+- `dotnet build src/Silvergun.sln` **fails on `Silvergun.Vsix` by design** — build individual `.csproj` files.
+- `Silvergun.PackageAnalysis.NuGet` and `Silvergun.CLI` multi-target `net10.0;net10.0-windows`; pass `-f net10.0` when you want one.
+- Literal `user@host` strings get redacted on file write — split the token.
+- Never commit.
 
 ## Guardrails
-
 - **Never add NuGet dependencies to a project**. Stop and tell the user so they can review and add NuGet dependencies manually.
 - **Never** commit any changes, always ask the user to review and commit manually.
 - Ask before copying any code out of `reference/` into `src/` or `ext/`.

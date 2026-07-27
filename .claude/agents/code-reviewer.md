@@ -17,6 +17,7 @@ modify code. `CLAUDE.md` rules are binding.
 2. Read the relevant task spec so you check against its acceptance criteria, not
    just your own preferences.
 3. Review thoroughly and report.
+4. **Verify, don't accept.** If a comment states a derivation, recompute it. If a test pins a number, check the number is *right*, not merely that the test passes.
 
 ## Review checklist
 
@@ -34,6 +35,9 @@ modify code. `CLAUDE.md` rules are binding.
   with `_` backing fields; members placed in the correct `#region`s; functional,
   concise style as described in `CLAUDE.md`.
 - **Design:** follows existing patterns; no unnecessary new dependencies.
+- **Never update a pinned baseline to match observed output** unless you can state *why* the new value is correct. Test counts, method counts and finding counts in specs and comments go stale — **re-measure, don't trust the written number**. Papering over a genuine regression by adjusting a baseline is the worst failure mode available to you.
+- For code in `ext/`, our `/src` style rules do **not** apply — check the change matches the **upstream file's** existing style, and that the diff is minimal. Flag any unnecessary line touched: `ext/` is a fork we still merge from, so every touched line is a future merge conflict.
+- **This codebase can kill your process.** CCI (`ext/analysis-net`) calls `Debug.Assert`/`Debug.Fail`, which on .NET routes to `Environment.FailFast` — exit 35, no managed exception, no `catch` runs. try/catch and the Guard helpers do not protect you (see ADR-0021). When running analysis over multiple assemblies, isolate one per child process and check exit codes, or a single bad input costs you the whole run
 
 ## Return
 

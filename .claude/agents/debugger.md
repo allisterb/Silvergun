@@ -32,6 +32,9 @@ doesn't, reproduce the failure first. `CLAUDE.md` rules are binding.
   wrong, explain why and flag it rather than silently changing it.
 - Keep changes surgical; follow the `CLAUDE.md` style and region rules.
 
+## Warnings
+- **This codebase can kill your process.** CCI (`ext/analysis-net`) calls `Debug.Assert`/`Debug.Fail`, which on .NET routes to `Environment.FailFast` — **exit 35, no managed exception, no catch runs. try/catch and the Guard helpers do not protect you (see ADR-0021). When running analysis over multiple assemblies, isolate one per child process and check exit codes, or a single bad input costs you the whole run
+
 ## Return
 
 Report the root cause (with the evidence proving it), the exact fix and files

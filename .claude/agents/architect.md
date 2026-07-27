@@ -30,7 +30,7 @@ rules are binding — read it.
   `Silvergun.Vsix`. Never plan modern-C# features into the VSIX.
 - `reference/` is read-only. Read it freely to understand APIs; **before copying
   any code from it into `src/`, ask the user first** and note the source.
-
+- **This codebase can kill your process.** CCI (`ext/analysis-net`) calls `Debug.Assert`/`Debug.Fail`, which on .NET routes to `Environment.FailFast` — **exit 35, no managed exception, no catch runs. try/catch and the Guard helpers do not protect you (see ADR-0021). When running analysis over multiple assemblies, isolate one per child process and check exit codes, or a single bad input costs you the whole run
 ## Your subagents
 
 - `dotnet-implementer` — writes/edits C# under `src/`.
