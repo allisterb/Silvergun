@@ -428,8 +428,5 @@ FodyWeavers.xsd
 *.msm
 *.msp
 
-CLAUDE.md
-.claude/*
-.claude.bak/*
 docs/agent/*
 reference/*

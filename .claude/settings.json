@@ -1,0 +1,11 @@
+{
+  "agent": "architect",
+  "permissions": {
+    "deny": [
+      "Bash(git push:*)",
+      "Bash(rm -rf:*)",
+      "Edit(reference/**)",
+      "Write(reference/**)"
+    ]
+  }
+}
