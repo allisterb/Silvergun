@@ -158,7 +158,7 @@ public sealed class CiSafetyReportTests
 
     #region Fields
     // Path to the CLI apphost copied next to the test assembly by the project reference.
-    private static readonly string CliExe = Path.Combine(AppContext.BaseDirectory, "Silvergun.CLI.exe");
+    private static readonly string CliExe = ApphostPath.Resolve(AppContext.BaseDirectory, "Silvergun.CLI");
 
     // A managed assembly guaranteed present in the test output (referenced transitively) to analyze.
     private static readonly string TargetAssembly = Path.Combine(AppContext.BaseDirectory, "Silvergun.CodeAnalysis.IL.dll");

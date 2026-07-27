@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- Pathological signature shapes are hostile-metadata fixtures by nature (TypedReference*, etc.) and need
+         raw pointer syntax to express in C# at all. CS8500 ("takes the address of, gets the size of, or
+         declares a pointer to a managed type") is expected and left as a warning, not suppressed - it is the
+         same warning an attacker's Roslyn-compiled package would also carry, so keeping it visible documents
+         that this file is deliberately unusual. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Silvergun.CodeAnalysis.IL\Silvergun.CodeAnalysis.IL.csproj" />
+  </ItemGroup>
+
+</Project>

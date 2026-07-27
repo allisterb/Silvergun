@@ -2,7 +2,6 @@ namespace Silvergun.CLI.Tests;
 
 using System;
 using System.Diagnostics;
-using System.IO;
 using System.Text;
 
 using Xunit;
@@ -88,7 +87,7 @@ public sealed class DepthOptionTests
 
     #region Fields
     // Path to the CLI apphost copied next to the test assembly by the project reference.
-    private static readonly string CliExe = Path.Combine(AppContext.BaseDirectory, "Silvergun.CLI.exe");
+    private static readonly string CliExe = ApphostPath.Resolve(AppContext.BaseDirectory, "Silvergun.CLI");
 
     private const int TimeoutMs = 60_000;
     #endregion

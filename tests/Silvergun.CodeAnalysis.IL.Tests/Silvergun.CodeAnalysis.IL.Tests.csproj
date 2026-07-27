@@ -29,6 +29,11 @@
                       ReferenceOutputAssembly="false"
                       SkipGetTargetFrameworkProperties="true"
                       AdditionalProperties="TargetFramework=net472" />
+    <!-- The pathological-signature probe (ADR-0021/0022): a plain ProjectReference to an Exe project copies
+         its apphost (.exe) into THIS project's output directory, which is what lets the regression test spawn
+         it as a child process by path (see ChildProcessProbe / TypedReferencePointerRegressionTests) — the
+         same mechanism Silvergun.CLI.Tests uses for the CLI apphost. -->
+    <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.PathologicalSignatureProbe\Silvergun.CodeAnalysis.IL.Tests.PathologicalSignatureProbe.csproj" />
   </ItemGroup>
 
 </Project>
