@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- The same net472/net10.0 pair as Silvergun.CodeAnalysis.IL.Tests.MatrixFixture, compiled from
+         IDENTICAL source across both TFMs. Regression fixture for the TAC void-return fix in
+         ext/analysis-net's Disassembler (Backend/Transformations/Disassembler.cs IsVoidReturn) - see
+         docs/agent/measurements/tac-platformtypes-spike.md. Deliberately its own project, NOT added to
+         MatrixFixture, so this fixture's shapes never touch MatrixFixture's pinned method-count baselines
+         (TargetFrameworkMatrixTests.Baselines, ModernInteropDeclarationTests.BodiedFixtureMethods). -->
+    <TargetFrameworks>net472;net10.0</TargetFrameworks>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <!-- CalliOps.cs (net10.0-only, #if guarded) needs unsafe for `delegate*` function pointers, which is
+         what produces a genuine `calli` IL instruction to lift. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

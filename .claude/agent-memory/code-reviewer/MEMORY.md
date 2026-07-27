@@ -6,3 +6,5 @@
 - [CCI signature-decoding project (ADR-0022)](project_cci_signature_decoding.md) — staged FailFast fix plan; Stage 0 + its regression test landed clean, track Stage 1/2 scope
 - [Verifying ECMA-335 signature-decoder arms](feedback_ext_signature_decoder_review.md) — check byte consumption + grammar reachability, not just return value
 - [Isolating FailFast re-verification](feedback_isolate-failfast-child-process.md) — actually revert/rebuild/run FailFast regression tests as a Bash child process, then restore and diff-check
+- [PlatformTypes.Void fix status](project_platformtypes_void_fix.md) — what's fixed, what's accepted risk, what's still out of scope
+- [analysis-net review workflow](project_analysisnet_workflow.md) — spike-doc pattern, re-verify claims by reverting, ADR-0021 FailFast isolation

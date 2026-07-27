@@ -36,6 +36,66 @@ bytecode model.
 failure is one layer up in TAC lifting. Porting to Cecil is a separate loader-modernization
 question, not this fix.
 
+## ✅ FIXED 2026-07-27 — the cheap fix worked, and it was bigger than diagnosed
+
+Spike: `docs/agent/measurements/tac-platformtypes-spike.md`. **Corpus-wide TAC failures
+15,308 → 1,140 = 92.6% reduction.** Six of seven real assemblies went from 17–36% failure to
+**0.0–0.6%**. Change is ~20 lines in `ext/analysis-net/Backend/Transformations/Disassembler.cs`,
+all 855 tests still green.
+
+**The diagnosis was right but UNDERCOUNTED: there were THREE `.Equals(PlatformTypes.Void)`
+sites, not one.** `ProcessReturn` was the obvious one; the other two (a direct `call`/`callvirt`
+and an indirect `calli`) **push a phantom result for every call to a void method**, which
+surfaces later as a `Push()` capacity overflow far from the real cause. That is why the biggest
+failure bucket was the message-less `Operation is not valid due to the current state of the
+object.` (68.3%) rather than something obviously void-related. **Generalisable lesson: fix the
+predicate, then grep for every other use of that same predicate before measuring.**
+
+**The decisive experiment was a control pair, not a bigger corpus:** the *same* `Newtonsoft.Json`
+13.0.4 package, `net45` build vs `net6.0` build — **0.07% vs 29.1% failure**, ~400× — plus a
+purpose-built identical-source fixture at net472 (0/7) vs net10.0 (4/7). TFM isolated as the sole
+variable. Use that pattern for any "is this a modern-IL problem?" question.
+
+**What this changes:** TAC lifting is now broadly viable on modern assemblies, so **the parked
+taint/dataflow track and the points-to analysis (call graph more precise than CHA) are
+un-blocked** — re-cost them rather than treating TAC as broken.
+
+**Still broken, and now the dominant residual:** the EH/CFG stack-depth-consistency defect at
+`Disassembler.cs:1067` — 2.7% residual on `Microsoft.CodeAnalysis.CSharp`, near-zero elsewhere.
+Untouched by this fix; a genuinely harder compiler problem.
+
+**The corollary elsewhere — NOW MEASURED (2026-07-27):**
+`docs/agent/measurements/platformtypes-comparison-audit.md`.
+
+- **174 genuinely-broken comparisons**, not the ~220 a naive `PlatformTypes.` grep suggests —
+  of 254 occurrences, 76 are harmless **construction/assignment**. **Always separate
+  construction from comparison before quoting a defect count.** (My grep was also wrong in
+  both directions: it undercounted `TypeHelper.cs` and missed `CCIProvider`/`Console` entirely.)
+- **162 of them are in `TypeHelper.cs`, 12 in `TypeInferenceAnalysis.cs`, and they are one
+  repeated `.Equals(PlatformTypes.X)` predicate shape** — not 174 distinct decisions. So a
+  single shared helper fixes essentially all of it.
+- **None are reachable today.** Stronger than "nothing calls TypeInferenceAnalysis":
+  `TypeInferenceAnalysis` is `TypeHelper.cs`'s **only** external caller in the outer fork, so
+  those 162 are structurally unreachable, not coincidentally quiet. `CCIProvider` (the live
+  path) has 16 `PlatformTypes` refs, **all construction**.
+- **Divergence if the dataflow track were on: 4.14%** (37,518/905,446) over six modern
+  assemblies, **18.5%** for the highest-stakes predicate
+  (`ReturnType.Equals(PlatformTypes.Boolean)`). **Two net472 controls diverged exactly 0.00%**
+  — that control is what validates the instrument; always include one.
+- **Fix shape: a shared `PlatformTypes.Matches` helper** (generalise the shipped
+  `Disassembler.IsVoidReturn`). **Retargeting the static table was assessed and REJECTED with
+  evidence:** `AssemblyDisassembler` analyses different TFMs concurrently and would need
+  `PlatformTypes.Object` to resolve to different assemblies *simultaneously* — a single static
+  table cannot do that under any locking; it would have to become a per-`Host` instance.
+
+**⚠️ SEPARATE BLOCKER for the dataflow track, found as a byproduct:** a real
+`NullReferenceException` in `Dereference.Type` (`Model/ThreeAddressCode/Operands.cs:888`) fires
+**13,617 times** on the corpus — including **546 times on the net45 control**, so it is
+independent of the `PlatformTypes` defect and TFM-agnostic. It is a normal catchable exception
+(not ADR-0021's uncatchable FailFast, which is confined to the `cci` submodule), but it means
+**`TypeInferenceAnalysis.Analyze()` would crash on real code on any TFM before the
+`PlatformTypes` issue even matters.** Fix this first if the dataflow track proceeds.
+
 ## ⚠️ SECOND, INDEPENDENT DEFECT CLASS (found 2026-07-26) — the CCI *reader* can kill the process
 
 Separate from the TAC lifter, and more dangerous. **`ext/analysis-net`'s CCI reader terminates the

@@ -34,6 +34,16 @@
          it as a child process by path (see ChildProcessProbe / TypedReferencePointerRegressionTests) — the
          same mechanism Silvergun.CLI.Tests uses for the CLI apphost. -->
     <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.PathologicalSignatureProbe\Silvergun.CodeAnalysis.IL.Tests.PathologicalSignatureProbe.csproj" />
+    <!-- Regression fixture for the TAC void-return fix in ext/analysis-net's Disassembler - see
+         docs/agent/measurements/tac-platformtypes-spike.md. Also multi-targeted (net472;net10.0), so the
+         same "normal reference + forced-build reference" pair as the MatrixFixture entries above is needed:
+         the plain reference resolves to THIS project's own TFM (net10.0) for typeof(Widget) to compile
+         against, and the second one forces the net472 flavour to be built too. -->
+    <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.VoidReturnFixture\Silvergun.CodeAnalysis.IL.Tests.VoidReturnFixture.csproj" />
+    <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.VoidReturnFixture\Silvergun.CodeAnalysis.IL.Tests.VoidReturnFixture.csproj"
+                      ReferenceOutputAssembly="false"
+                      SkipGetTargetFrameworkProperties="true"
+                      AdditionalProperties="TargetFramework=net472" />
   </ItemGroup>
 
 </Project>
