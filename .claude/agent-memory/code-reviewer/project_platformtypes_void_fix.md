@@ -17,18 +17,19 @@ identical source) + 34 xUnit tests in `VoidReturnLiftingRegressionTests.cs`, all
 confirmed by reverting the `ext/` fix (20/34 red, 14 green — matches the claimed split exactly) and
 restoring it.
 
-**Known, accepted residual risk**: `IsVoidReturn`'s fallback path matches on namespace+name only,
-ignoring `ContainingAssembly` — a hostile assembly declaring its own non-corlib `System.Void` type
-(legal at the IL level, illegal only in C#) would false-positive-match and desync the operand stack.
-The spike itself flagged this and judged it low-priority for the current threat model (most-likely
-manifests as a later Pop/Push exception, not silent misclassification). Not fixed as of this review —
-worth tightening to a known-corlib-assembly-name allowlist if a future spike targets adversarial IL
-specifically, since Silvergun's stated purpose is analyzing *hostile* packages.
+**Superseded (2026-07-27, `platformtypes-comparison-fix.md`)**: the residual below was tightened, not
+left as "not fixed" — `IsVoidReturn`'s local namespace+name fallback (assembly-agnostic) was replaced
+by the general `BasicType.Equals` corlib-unification fix (`Model/Types/CoreLibraryNames.cs`'s
+known-corlib-name allowlist), exactly the direction this memory previously flagged as worth doing. See
+[[typeinferenceanalysis-readiness]] for the full verification. The **spoofable-by-name** residual
+(an assembly that just calls itself `mscorlib`) is *not* closed — `IAssemblyReference` still has no
+public key token/version — and is now pinned by an explicit xUnit test
+(`Equals_AssemblyNamedMscorlibButNotTheRealOne_IsAcceptedKnownLimitationNotABug`) rather than only a
+code comment.
 
 **Deliberately out of scope, not yet addressed**: ~150 more `.Equals(PlatformTypes.X)` comparisons
 (`Boolean`, `Int32`, `Object`, etc., not just `Void`) in `Backend/Analyses/TypeInferenceAnalysis.cs`
-and `Model/Types/TypeHelper.cs`, same mscorlib-pinned mismatch, but they run on already-lifted TAC
-(post-`Disassembler`), not reached during lifting — confirmed by grep, no `PlatformTypes.Void`
-comparison exists in `Backend/` outside `Disassembler.cs`'s own new helper. This is flagged as a
-plausible next spike, especially since `TypeInferenceAnalysis` sits directly on top of TAC and is a
-likely next step for any dataflow/points-to work — see [[project-analysisnet-workflow]].
+and `Model/Types/TypeHelper.cs` are now **implicitly fixed too**, since they all go through the same
+widened `BasicType.Equals` — but both files remain unreachable from `src/` today (unchanged
+conclusion), so this is dormant, not live. `TypeInferenceAnalysis` sits directly on top of TAC and is
+a likely next step for any dataflow/points-to work — see [[project-analysisnet-workflow]].

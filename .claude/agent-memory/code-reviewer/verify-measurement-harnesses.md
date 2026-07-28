@@ -39,3 +39,17 @@ this session's sub-tasks. Rebuilt Debug, reran two assemblies including the net4
 the doc's "after" numbers exactly (including deterministic timeout method names), then stashed the fix
 and reproduced "before" exactly too. Worth checking the *current* session's scratchpad path first (cheap,
 no Glob needed) before searching other session dirs.
+
+**Confirmed a third time (2026-07-27, `platformtypes-comparison-fix.md` review) — and this time no
+measurement doc existed to check against at all.** The task's own acceptance criteria required the
+divergence/TAC/type-inference/capability numbers to be reported, but no `docs/agent/measurements/*.md`
+was ever committed for this task. Found `results/{baseline,afterfix}` (typediv/realinfer) and a
+`capmap-harness/` (with `diff-capmap.ps1` and a freshly regenerated `capmap-before.tsv`) already sitting
+in-session; reran `aggregate.ps1` over both directly rather than trusting the launcher-prompt's summary
+numbers, and diffed the regenerated capability TSV against the real `docs/agent/measurements/capmap-
+before.tsv`. All figures matched exactly (divergence 4.14%/18.49%→0%, TAC 1,140→1,140 row-for-row,
+capability 5,128→5,128 byte-identical modulo a BOM sort artifact, non-termination 20→21, completion
+−1 method) — so the underlying work was sound even though nothing was written up. **This is the
+important case**: when there's no doc to "just re-read," check the scratchpad anyway before assuming
+the claimed numbers are unverifiable — they're often still sitting there, and re-deriving them directly
+is exactly what closes the gap a missing doc leaves.

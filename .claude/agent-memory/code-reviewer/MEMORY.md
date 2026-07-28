@@ -6,8 +6,8 @@
 - [CCI signature-decoding project (ADR-0022)](project_cci_signature_decoding.md) — staged FailFast fix plan; Stage 0 + its regression test landed clean, track Stage 1/2 scope
 - [Verifying ECMA-335 signature-decoder arms](feedback_ext_signature_decoder_review.md) — check byte consumption + grammar reachability, not just return value
 - [Isolating FailFast re-verification](feedback_isolate-failfast-child-process.md) — actually revert/rebuild/run FailFast regression tests as a Bash child process, then restore and diff-check
-- [PlatformTypes.Void fix status](project_platformtypes_void_fix.md) — what's fixed, what's accepted risk, what's still out of scope
+- [PlatformTypes.Void fix status](project_platformtypes_void_fix.md) — void fix now superseded by the general `BasicType.Equals` corlib-unification (2026-07-27); spoof residual pinned by a test, not just a comment.
 - [analysis-net review workflow](project_analysisnet_workflow.md) — spike-doc pattern, re-verify claims by reverting, ADR-0021 FailFast isolation
-- [Re-run scratchpad measurement harnesses to verify docs/agent/measurements claims](verify-measurement-harnesses.md) — don't just re-read the doc's tables, rebuild+rerun the Probe if it's still in scratch.
-- [TypeInferenceAnalysis / dataflow track readiness](typeinferenceanalysis-readiness.md) — ongoing prerequisite-by-prerequisite unblocking effort; not reachable from src/ yet.
+- [Re-run scratchpad measurement harnesses to verify docs/agent/measurements claims](verify-measurement-harnesses.md) — don't just re-read the doc's tables, rebuild+rerun the Probe if it's still in scratch; even useful with **no doc at all**.
+- [TypeInferenceAnalysis / dataflow track readiness](typeinferenceanalysis-readiness.md) — `PlatformTypes` mscorlib-pinning item now fixed (`BasicType.Equals` widened); still unreached from src/.
 - [ext/ comments explaining non-obvious design rationale are acceptable](ext-comment-proportionality.md) — weigh merge-conflict cost against the alternative of the reasoning being lost.

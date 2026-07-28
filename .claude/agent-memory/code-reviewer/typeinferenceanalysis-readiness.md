@@ -14,10 +14,27 @@ at a time, each landed as a standalone measured fix:
 1. `platformtypes-comparison-audit.md` (2026-07-27) — found 174 `PlatformTypes.X` equality
    comparisons (`Model/Types/TypeHelper.cs` 162, `Backend/Analyses/TypeInferenceAnalysis.cs` 12) that
    are assembly-name-pinned to `"mscorlib"` and silently wrong on modern TFMs (4.1% divergence
-   overall, 18.5% for the `bool`-return-type predicate). **Not fixed yet** — recommended shape is a
-   shared `PlatformTypes.Matches` helper (Option 2 in that doc), scoped to a known-corelib-name
-   allowlist (fully assembly-agnostic matching would be spoofable by a hostile package literally
-   named `mscorlib`).
+   overall, 18.5% for the `bool`-return-type predicate). The audit's own Phase D recommended a
+   shared `PlatformTypes.Matches` helper at ~180 call sites (Option 2/"A" in the follow-up task).
+   **Fixed differently in `platformtypes-comparison-fix.md` (2026-07-27)**: the task doc re-opened
+   "Option B" — widen `BasicType.Equals` itself (`Model/Types/Types.cs`) to unify two `IBasicType`s
+   when both `ContainingAssembly`s are known core libraries (new `Model/Types/CoreLibraryNames.cs`,
+   shared with `Disassembler.IsVoidReturn`, which lost its own duplicate allowlist and now reduces to
+   `type.Equals(PlatformTypes.Void)`). Chosen over the helper because `BasicType.GetHashCode()` was
+   independently confirmed to already hash on `Name` only (ignoring `ContainingAssembly`), so widening
+   `Equals` doesn't weaken the hash/equals contract, and `IBasicType` was independently confirmed to
+   have exactly one implementer (`BasicType`), bounding the blast radius. Reviewed and verified by
+   rebuilding the scratchpad `typediv`/`realinfer`/capmap harnesses (not just re-reading the numbers):
+   divergence 4.14%/18.49% → exactly 0% both, TAC failures 1,140 → 1,140 row-for-row identical,
+   capability findings 5,128 → 5,128 byte-identical (only a BOM sort-order artifact in the diff),
+   reverting `Equals` alone reproduces exactly "5 red / 9 green" on the new 14-test suite. Two small,
+   honestly-reported side effects, both in the still-unreachable-from-`src/` `TypeInferenceAnalysis`
+   path: fixed-point non-termination 20→21 methods and completion 65011/65031→65010/65031 (−1 method) —
+   plausible read is more comparisons now correctly resolve, pushing one borderline method over the
+   harness's timeout; not root-caused, consistent with the pre-existing 9→14→20 rising trend. **Gap**:
+   no `docs/agent/measurements/*.md` was written up for this task despite its acceptance criteria
+   requiring the gate numbers be reported — they were reconstructed and verified by the reviewer
+   directly from the scratch `results/{baseline,afterfix}` dirs, not from a committed doc.
 2. `dereference-type-nre-fix.md` (2026-07-27) — fixed `Dereference.Type`'s unguarded
    `(Reference.Type as PointerType).TargetType` (100% of 12,248 sites had `Reference.Type == null`,
    because `Disassembler`'s `TemporalVariable`s are typed lazily by `TypeInferenceAnalysis`'s own
