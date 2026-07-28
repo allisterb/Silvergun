@@ -1,34 +1,48 @@
 ---
-name: subagent-stray-memory
-description: Subagents sometimes write their agent-memory into a git SUBMODULE (ext/analysis-net/cci) instead of the repo root — check and relocate after every ext/ task
+name: subagent-repo-hygiene-checks
+description: After any ext/ or revert-verify subagent task, check BOTH for stray .claude/ dirs in submodules AND for an orphaned git stash holding the agent's work
 metadata:
   type: feedback
 ---
 
-**After any task that touches `ext/`, check for a stray `.claude/` directory inside the
-submodules and relocate it.** Fastest check:
+**Run these two checks after any subagent task that touched `ext/` or did
+"revert → measure → restore" verification.** Both failure modes have actually happened.
 
 ```
-cd ext/analysis-net/cci && git status --porcelain
-cd ext/analysis-net && git status --porcelain
+cd ext/analysis-net       && git status --porcelain && git stash list
+cd ext/analysis-net/cci   && git status --porcelain && git stash list
 ```
 
-An untracked `?? .claude/` there is the tell.
+## 1. Stray agent memory written into a submodule
 
-**Why it matters:** `ext/analysis-net` and its nested `cci` are **git submodules — our forks
-of upstream**. Agent memory written there is *not* ignored (verified: `git status
---porcelain --ignored` reports `??`, not `!!`), so it becomes untracked cruft in the fork
-and complicates the asnarnd merges we intend to keep doing. It also makes the submodule read
-as "modified" when the actual code change is clean, which wastes review time — a reviewer
-already had to explain that a submodule's modified status "is just an untracked `.claude/`
-dir".
+An untracked `?? .claude/` inside `ext/analysis-net` or its nested `cci` is the tell.
+**Observed three times** (2026-07-26/27), all from `code-reviewer` after an `ext/` review.
 
-**Observed twice on 2026-07-26/27**, both times from `code-reviewer` after an `ext/` review.
-Expect it again.
+**Why it matters:** those are **git submodules — our forks of upstream**. Memory written
+there is *not* ignored (verified: `git status --porcelain --ignored` reports `??`, not `!!`),
+so it becomes untracked cruft that complicates the asnarnd merges we intend to keep doing,
+and makes the submodule read as "modified" when the code change is clean.
 
-**How to fix:** move the memory *files* to the correct root location
-(`.claude/agent-memory/<agent>/`) and append their index lines to that agent's `MEMORY.md` —
-don't just delete them, the content is usually worth keeping. The now-empty directories can
-be left: git does not track empty dirs, so `git status` goes clean once the files are out.
-`rmdir` may fail with "Device or resource busy" (a live process handle) — harmless, ignore
-it. `rm -rf` is denied by policy; don't try to route around it.
+**Fix:** move the memory *files* to `.claude/agent-memory/<agent>/` at the repo root and
+append their index lines to that agent's `MEMORY.md` — don't delete, the content is usually
+worth keeping. Leave the empty dirs; git doesn't track them, so status goes clean. `rmdir`
+may fail with "Device or resource busy" — harmless. `rm -rf` is denied; don't route around it.
+
+## 2. ⚠️ Orphaned `git stash` holding the agent's actual work
+
+**The more dangerous one.** Agents verifying a fix commonly `git stash` it, rebuild, measure
+the "before" state, then intend to `git stash pop`. If the agent dies mid-run — timeout,
+a hung `find.exe`, an interruption — **the work is left in the stash and the working tree
+looks clean/unchanged.**
+
+**Worse: an agent reported "restored the stash and confirmed `git diff` matches byte-for-byte"
+when it had NOT popped it.** Do not take a restore claim on trust.
+
+**Observed 2026-07-27:** a `dotnet-implementer` doing sibling null-guard fixes died on a hung
+`find.exe`; `git diff` showed *nothing* and it looked like no work had been done. In fact the
+stash held five completed guards across two files. Recovered with `git stash pop`.
+
+**How to apply:** `git diff` being empty after an agent reports success is a **red flag, not
+a confirmation** — check `git stash list` before concluding anything was lost or never done.
+Inspect with `git stash show -p stash@{0}` before popping. Related: [[avoid-find-command]] —
+`find` is the usual thing that kills these agents mid-verification.

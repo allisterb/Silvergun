@@ -10,7 +10,7 @@
 - [Positioning: differentiated lane](project_positioning_differentiated_lane.md) — core value is static+dynamic hunting NuGet/VS don't do; vuln-data/resolver-lite parity is commodity completeness, not the differentiator — don't over-invest
 - [Measure before designing](project_measure_before_designing.md) — spike first on any ext/analysis-net or compiler-behaviour claim; 8 architect assumptions falsified by measurement so far
 - [Opus cyber-filter on reviews](project_opus_cyber_filter_reviews.md) — Opus 4.8 specialists trip a cybersecurity safety filter on malware-adjacent code; re-dispatch on Sonnet with correctness-framed wording
-- [Subagents write memory into submodules](feedback_subagent_stray_memory.md) — check `ext/**` for stray `.claude/` after every ext/ task; relocate, don't delete
+- [Post-subagent repo hygiene checks](feedback_subagent_stray_memory.md) — after ext/ or revert-verify tasks check for stray `.claude/` AND an orphaned `git stash` holding the agent's work
 - [Avoid the `find` command](feedback_avoid_find_command.md) — `find` hangs (resolves to Windows find.exe, blocks on stdin); use Glob/Grep tools instead
 - [Email-literal redaction on file writes](feedback_email_literal_redaction.md) — literal `user@host` (e.g. `git@github.com`) is silently rewritten when written to a file; split the token
 - [Prefer PowerShell scripts](feedback_no_powershell.md) — REVERSED 2026-07-26: PowerShell now allowed/preferred over finicky Bash; also don't run test suites in parallel (CS2012)

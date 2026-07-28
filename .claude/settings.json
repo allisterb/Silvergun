@@ -4,6 +4,8 @@
     "deny": [
       "Bash(git push:*)",
       "Bash(rm -rf:*)",
+	  "Bash(find:*)",
+	  "Bash(sed:*)",
       "Edit(reference/**)",
       "Write(reference/**)"
     ]

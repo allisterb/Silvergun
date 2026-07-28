@@ -8,3 +8,6 @@
 - [Isolating FailFast re-verification](feedback_isolate-failfast-child-process.md) — actually revert/rebuild/run FailFast regression tests as a Bash child process, then restore and diff-check
 - [PlatformTypes.Void fix status](project_platformtypes_void_fix.md) — what's fixed, what's accepted risk, what's still out of scope
 - [analysis-net review workflow](project_analysisnet_workflow.md) — spike-doc pattern, re-verify claims by reverting, ADR-0021 FailFast isolation
+- [Re-run scratchpad measurement harnesses to verify docs/agent/measurements claims](verify-measurement-harnesses.md) — don't just re-read the doc's tables, rebuild+rerun the Probe if it's still in scratch.
+- [TypeInferenceAnalysis / dataflow track readiness](typeinferenceanalysis-readiness.md) — ongoing prerequisite-by-prerequisite unblocking effort; not reachable from src/ yet.
+- [ext/ comments explaining non-obvious design rationale are acceptable](ext-comment-proportionality.md) — weigh merge-conflict cost against the alternative of the reasoning being lost.

@@ -114,6 +114,7 @@ Delegation rules:
 ## Guardrails
 - **Never add NuGet dependencies to a project**. Stop and tell the user so they can review and add NuGet dependencies manually.
 - **Never** commit any changes, always ask the user to review and commit manually.
+- **Never** run `find` or `sed` from Bash as it frequently hangs. Prefer PowerShell scripting for searhing or parsing text.
 - Ask before copying any code out of `reference/` into `src/` or `ext/`.
 - Respect per-project .NET targets 
 - Do not weaken or delete passing tests to make a change compile — fix the code.
