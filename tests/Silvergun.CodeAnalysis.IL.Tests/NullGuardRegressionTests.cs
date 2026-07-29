@@ -12,9 +12,23 @@ using Xunit;
 /// <b>lazily</b> by <c>TypeInferenceAnalysis</c>'s fixed-point pass, so a variable with <c>Type == null</c> is a
 /// normal "not yet known" state, not an error. Each guarded getter/helper below used to throw
 /// <c>NullReferenceException</c> unconditionally on that state; each now returns <c>null</c> instead —
-/// deliberately <b>not</b> <c>PlatformTypes.Unknown</c>, which would permanently pin a wrong answer, since
-/// nothing in the fixed point overwrites an already-non-null <c>Type</c> (see the fix comments in
-/// <c>Operands.cs</c>/<c>TypeHelper.cs</c> for the full self-healing-retry rationale).
+/// deliberately <b>not</b> <c>PlatformTypes.Unknown</c>, which would permanently pin a wrong answer.
+/// <b>Rationale corrected 2026-07-29 (review finding N4):</b> this used to say "nothing in the fixed point
+/// overwrites an already-non-null <c>Type</c>", which is false — <c>Visit(BinaryInstruction)</c> assigns
+/// <c>instruction.Result.Type</c> unconditionally on every visit (<c>TypeInferenceAnalysis.cs:246</c>,
+/// <c>:252</c>). The pinning happens in the <i>operand back-propagation</i>, which is fill-only — e.g.
+/// <c>Visit(ConditionalBranchInstruction)</c> (<c>:295-304</c>) copies one operand's type onto the other only
+/// while that other operand's <c>Type</c> is still null, while <c>Visit(LoadInstruction)</c> (<c>:147-154</c>),
+/// <c>Visit(StoreInstruction)</c> (<c>:170-176</c>) and <c>Visit(ReturnInstruction)</c> (<c>:182-189</c>) fill
+/// an operand when its <c>Type</c> is null <b>or equals <c>Object</c></b>, or when the incoming type is
+/// <c>Boolean</c> (these are not all the operand writes: <c>Visit(BinaryInstruction)</c>'s <c>Eq</c>/<c>Neq</c>
+/// arm at <c>:264-271</c> assigns unconditionally, but only ever <c>Boolean</c>). That <c>Object</c> disjunct is
+/// the crux: a slot holding <c>PlatformTypes.Object</c> stays <i>recoverable</i> by a later iteration, whereas
+/// <c>UnknownType</c> does not override <c>Equals</c>, so an <c>Unknown</c>-pinned slot matches none of the
+/// disjuncts and is <i>unrecoverable</i>. A non-null <c>Unknown</c> seeded there blocks the real type from ever
+/// arriving on any non-Boolean path; <c>null</c> keeps the slot open (see the fix comments in
+/// <c>Operands.cs</c>/<c>TypeHelper.cs</c> for the full self-healing-retry rationale, and
+/// <see cref="StackTypePromotionTests"/> for the sentinel-operand case).
 /// <para>
 /// <b>None of these sites are reachable from any <c>src/</c> path today</b> — <c>TypeInferenceAnalysis</c> isn't
 /// wired into Silvergun's pipeline yet. These tests exist purely so a future upstream merge into

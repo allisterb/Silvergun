@@ -33,6 +33,26 @@ mean "it is detected."** The subagent handled it correctly by pinning the true n
 in a canary test that is *designed to fail* when the gap closes; prefer that over
 asserting the desired-but-false behaviour or dropping the case.
 
+**⚠️ NEW AND IMPORTANT (2026-07-28): measuring is not enough — VERIFY THE REPORT AGAINST THE
+RAW OUTPUT.** Three times in one session a subagent's headline contradicted its own data files:
+
+- "Non-termination 21 → 0" — the raw results showed **21 → 3 still timing out, plus 14
+  terminating without converging**. The agent had conflated "no longer infinite" with "no
+  longer times out".
+- Quoted absolutes (65,010 → 65,014) came from a different phase with a different denominator
+  than the run being reported.
+- A cost measurement claimed "statistically indistinguishable" — true for benign input,
+  meaningless for the adversarial case that actually mattered (it later measured 50× worse).
+
+Each was caught in minutes by aggregating the raw per-assembly result files myself
+(`grep -h "^METRIC " results/*/*.txt | awk '{s+=$2} END {print s}'`). **Budget for this: when a
+report gives gate numbers, re-aggregate them from the raw files before relaying them.** Ask
+subagents for "numbers, not adjectives", and tell them explicitly to flag anything that missed
+target rather than rounding it to success — that framing visibly improved later reports.
+
+**Corollary:** a cost/perf measurement over *benign* input says nothing about the hostile case.
+On any hostile-input path, require the worst case to be measured explicitly and separately.
+
 **Delegation corollary learned the same day:** when a spec adds members to a fixture
 assembly whose tests pin *assembly-wide* counts, a "phase 1: shapes only, don't touch
 existing tests" split **cannot** leave the suite green — the baselines break by

@@ -11,3 +11,4 @@
 - [Re-run scratchpad measurement harnesses to verify docs/agent/measurements claims](verify-measurement-harnesses.md) — don't just re-read the doc's tables, rebuild+rerun the Probe if it's still in scratch; even useful with **no doc at all**.
 - [TypeInferenceAnalysis / dataflow track readiness](typeinferenceanalysis-readiness.md) — `PlatformTypes` mscorlib-pinning item now fixed (`BasicType.Equals` widened); still unreached from src/.
 - [ext/ comments explaining non-obvious design rationale are acceptable](ext-comment-proportionality.md) — weigh merge-conflict cost against the alternative of the reasoning being lost.
+- [Auditing "commutative by construction" claims](feedback_verify-structural-commutativity-claims.md) — partition result arms constant-vs-operand, then trace null/Unknown sentinels through each.

@@ -88,6 +88,62 @@ Untouched by this fix; a genuinely harder compiler problem.
   `PlatformTypes.Object` to resolve to different assemblies *simultaneously* — a single static
   table cannot do that under any locking; it would have to become a per-`Host` instance.
 
+## ⛔ 2026-07-28 — `TypeInferenceAnalysis` TERMINATES but is NOT TRUSTWORTHY. Do not build on it.
+
+Termination is fully fixed (`measurements/typeinference-nontermination.md`): 0 NREs, 0 timeouts,
+65,028 converge + 17 observably flagged, bound 100 + cycle detection windowed at 20 with an
+adversarial worst case of `O(100×20×V)` time / `O(20V)` memory **independent of hash quality**.
+
+**But the audit that followed (`measurements/typehelper-nonmonotonic-audit.md`) found the
+answers are frequently WRONG — and wrong *stably*, with no flag:**
+
+- **Commutativity is violated.** `BinarySignedNumericOperationType(left, right)` takes only two
+  types and no operator, so it is pure numeric promotion and **must** be commutative. It is
+  asymmetric on **~40%** of all `PlatformTypes` pairs (~26% even restricted to the realistic
+  14-type numeric subset). Root cause: the float-left branch at `TypeHelper.cs:781-783` returns
+  `right` unconditionally. This is a **provable** bug — no oracle needed.
+- **18.56% of variables disagree with their declared metadata type** (34,840 / 187,702), *zero
+  unexplained*: 97.9% from the Boolean-override guard — including **26.7% where the instance
+  receiver `this` is typed `Boolean`** — and 3.5% from Object-narrowing.
+- **25.25% of methods are order-dependent** (15,721 / 62,270; 41,511 variable divergences), and
+  **both traversal orders report `CONVERGED=True`**. That is the smoking gun: the analysis
+  confidently reaches *different* fixed points depending on CFG traversal order.
+
+**Cost to fix (from the audit):** ~days for commutativity (self-contained, testable); **1–2
+weeks** to replace the Boolean-override/Object-narrowing guards with real `MergedType` merging
+and re-run every gate. Nothing is urgently broken — `TypeInferenceAnalysis` is still unreferenced
+from `src/`.
+
+**How to apply:** treat "it converges" as saying nothing about correctness here. Any
+points-to/dataflow/taint work must either fix these rules first or not depend on inferred types.
+**Re-run the audit's three oracle-free checks as the acceptance test** for any fix:
+(1) exhaustive commutativity over `PlatformTypes` pairs, (2) inferred-vs-declared metadata
+ground truth, (3) confluence under reversed CFG ordering. That trio is reusable for any
+type-inference change and needs no external oracle.
+
+⚠️ **Caveat learned 2026-07-29 while fixing check 1: THE ORACLE IS THE WEAK POINT, NOT THE
+CORPUS.** The rewritten promotion passed an exhaustive 2,601-pair commutativity sweep while
+still laundering the `PlatformTypes.Unknown` *sentinel* into a confident `PlatformTypes.Object`.
+My first diagnosis — "the sentinel wasn't in the operand list" — **was wrong, and `test-engineer`
+proved it**: `PlatformTypes.Unknown` is declared `public static readonly UnknownType` and
+`UnknownType : IType`, so a reflect-all-`IType`-fields corpus had it all along. The bug survived
+because **both operand orders returned the same wrong answer**, and a symmetry-only oracle can
+never see that. **Generalisable: enlarging the corpus does not fix an oracle gap. For any
+oracle-free symmetry/confluence check, pair it with a value-level assertion on sentinel/bottom
+inputs (`Unknown`, `null`, unresolved refs) — "f(a,b) == f(b,a)" must be joined by "and it isn't
+a fabricated definite answer".**
+Second, smaller: **an exhaustive-looking pair count can hide aliases** — the 37 reflected
+`PlatformTypes` fields include `Int8`/`SByte`, `Float64`/`Double`, `ArrayLengthType`/`SizeofType`/
+`UInt32`, so ~6 of the 2,601 pairs are duplicates. Pin counts as assertions (so a sweep cannot
+silently shrink) but never quote them as *distinct* coverage.
+
+**⚠️ Two caveats on the audit itself:** the original `scratchpad/tac-spike` corpus had been
+deleted, so it was rebuilt from the NuGet cache with one version substitution (Kestrel 2.2.0 for
+5.0.17) — denominators differ from earlier runs (62,270 vs 65,045 methods), so don't compare
+across them. And the "two-outcome, period-2" claim was only *corroborated*, not re-derived,
+because the `onIteration` hook was removed at an earlier review — **removing that hook cost us
+verification ability later**, worth weighing next time an instrumentation seam is trimmed.
+
 **⚠️ SEPARATE BLOCKER for the dataflow track, found as a byproduct:** a real
 `NullReferenceException` in `Dereference.Type` (`Model/ThreeAddressCode/Operands.cs:888`) fires
 **13,617 times** on the corpus — including **546 times on the net45 control**, so it is
@@ -95,6 +151,21 @@ independent of the `PlatformTypes` defect and TFM-agnostic. It is a normal catch
 (not ADR-0021's uncatchable FailFast, which is confined to the `cci` submodule), but it means
 **`TypeInferenceAnalysis.Analyze()` would crash on real code on any TFM before the
 `PlatformTypes` issue even matters.** Fix this first if the dataflow track proceeds.
+
+## ⚠️ 2026-07-29 — FailFast is NOT the only uncatchable kill: unbounded recursion is a second mechanism
+
+Do not read ADR-0021 as "the uncatchable-kill problem = `Debug.Fail`". A **self-referential enum**
+(`E : E`) sends `TypeHelper.StackType` into unbounded recursion ⇒ **`StackOverflowException`**,
+which .NET also cannot catch. Measured (7,405 frames). **The defect exists independently in BOTH
+halves of the fork** — `Model/Types/TypeHelper.cs:290` (not reachable from `src/`) and
+`cci/CoreObjectModel/MetadataHelper/TypeHelper.cs:2091`, whose caller `StackTypesAreEquivalent`
+is documented as being for **signature matching**, so it may be on the live path. Reachability
+spike + fix specced at `tasks/self-referential-enum-stack-overflow.md`, not yet run.
+
+**How to apply:** when auditing `ext/` for hostile-input safety, grep for **unbounded recursion
+over attacker-controlled metadata graphs** (enum underlying types, pointer/array element types,
+generic argument nesting, base-type chains), not just for `Debug.Assert`. A `try/catch` catches
+neither mechanism. Depth-bound overloads are the cheap fix — legitimate depth is ~1.
 
 ## ⚠️ SECOND, INDEPENDENT DEFECT CLASS (found 2026-07-26) — the CCI *reader* can kill the process
 

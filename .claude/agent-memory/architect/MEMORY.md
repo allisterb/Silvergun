@@ -8,9 +8,9 @@
 - [Test-fixture packages](reference_test_fixture_packages.md) — user-authored nuget.org packages for live smoke tests; Jumbee.Console.Snapshot has a depth-2 transitive vuln (ImageSharp GHSA-rxmq-m78w-7wmc)
 - [External intel optional keys](project_external_intel_optional_keys.md) — enrich analysis with optional user-provided API keys (libraries.io/OSS Index/Sonatype); degrade gracefully to keyless; enrichment not hard dependency
 - [Positioning: differentiated lane](project_positioning_differentiated_lane.md) — core value is static+dynamic hunting NuGet/VS don't do; vuln-data/resolver-lite parity is commodity completeness, not the differentiator — don't over-invest
-- [Measure before designing](project_measure_before_designing.md) — spike first on any ext/analysis-net or compiler-behaviour claim; 8 architect assumptions falsified by measurement so far
+- [Measure before designing](project_measure_before_designing.md) — spike first on ext/analysis-net claims; ALSO re-aggregate raw output yourself — 3 subagent reports contradicted their own data
 - [Opus cyber-filter on reviews](project_opus_cyber_filter_reviews.md) — Opus 4.8 specialists trip a cybersecurity safety filter on malware-adjacent code; re-dispatch on Sonnet with correctness-framed wording
 - [Post-subagent repo hygiene checks](feedback_subagent_stray_memory.md) — after ext/ or revert-verify tasks check for stray `.claude/` AND an orphaned `git stash` holding the agent's work
-- [Avoid the `find` command](feedback_avoid_find_command.md) — `find` hangs (resolves to Windows find.exe, blocks on stdin); use Glob/Grep tools instead
+- [Avoid the `find` command](feedback_avoid_find_command.md) — `find` AND `sed` are now DENIED in settings.json (find cost 3 incidents); use Glob/Grep/Read or PowerShell
 - [Email-literal redaction on file writes](feedback_email_literal_redaction.md) — literal `user@host` (e.g. `git@github.com`) is silently rewritten when written to a file; split the token
 - [Prefer PowerShell scripts](feedback_no_powershell.md) — REVERSED 2026-07-26: PowerShell now allowed/preferred over finicky Bash; also don't run test suites in parallel (CS2012)
