@@ -73,10 +73,15 @@ public sealed record ScriptFinding(
 /// <summary>The outcome of scanning a single <see cref="PackageAssembly"/>.</summary>
 public sealed record AssemblyScanResult(
     PackageAssembly Assembly,
-    CapabilityReport? Report,   // null when not analyzable
-    string? SkipReason,         // non-null when Report is null (e.g. "not a managed assembly")
-    AssemblyMetadataInfo? Metadata,   // null if metadata read failed or assembly not analyzable
-    ObfuscationReport? Obfuscation);   // null if obfuscation analysis failed or assembly not analyzable
+    // null when no capability report was produced — either nothing could be read out of the file OR analysis was
+    // attempted and threw. Not a statement that the file is inherently un-analyzable; SkipReason carries the detail.
+    CapabilityReport? Report,
+    // Non-null when Report is null. Carries no single cause: PackageScanner sets it both for a file nothing could be
+    // read out of AND for a valid managed assembly whose capability analysis threw — the more security-relevant case.
+    // Consumers must surface it verbatim and must not paraphrase it into a benign-sounding diagnosis.
+    string? SkipReason,
+    AssemblyMetadataInfo? Metadata,   // null if the metadata read failed or the assembly produced no analysis
+    ObfuscationReport? Obfuscation);   // null if obfuscation analysis failed or the assembly produced no analysis
 
 /// <summary>Aggregate, serializable scan result for one package (ADR 0002 pattern — strings/records only).</summary>
 public sealed record PackageCapabilityReport(

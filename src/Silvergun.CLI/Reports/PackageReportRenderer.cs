@@ -184,7 +184,8 @@ internal static class PackageReportRenderer
     private static IRenderable VulnerabilitiesWidget(
         bool rich, IReadOnlyList<VulnerabilityFinding> findings, VulnerabilityScanStatus status)
     {
-        // NotChecked (e.g. --no-vulns): dim, like other optional sections. Unavailable: a prominent warning that this is
+        // NotChecked (e.g. --no-vulns; also the DEFAULT of the field, so legacy JSON written before it existed
+        // deserializes to it): dim, like other optional sections. Unavailable: a prominent warning that this is
         // NOT the clean state. Completed: the existing table, or a green "(none)" when it ran and found nothing.
         if (status == VulnerabilityScanStatus.NotChecked)
             return new Markup("[grey](not checked)[/]");
@@ -316,8 +317,17 @@ internal static class PackageReportRenderer
             obf.AddNode(Esc($"{f.Kind} {f.DetectedAs}  {f.CallerType}.{f.CallerMethod}"));
     }
 
-    // Footer: total findings, per-capability counts, script findings by severity, and a clean/attention headline
-    // keyed on exactly what --strict gates (capability OR obfuscation OR script findings present).
+    // Footer: total findings, per-capability counts, script findings by severity, the IL coverage line, and the
+    // three-tier Findings / Not verified / Clean headline. "Not verified" comes from the shared
+    // CompletenessAssessment (ADR 0024).
+    //
+    // "Attention" is DELIBERATELY WIDER than the --strict gate, and must not be confused with it. It counts ANY
+    // script finding (report.ScriptFindings.Count > 0); the gate in Program.ScanPackageExitCode filters them to
+    // Source == ScriptFindingSource.Script. So a package whose only finding comes from the .nuspec
+    // (Source = PackageMetadata) prints "Findings present" here and still exits 0 under --strict. Both sides are
+    // correct: a human should see manifest findings, and per script-rule-precision they must not fail CI because
+    // nothing in a .nuspec executes. This is exactly why ADR 0024's invariant is an IMPLICATION — footer says
+    // "Clean" ⇒ exit 0 — and not a biconditional (see the "CORRECTED AGAIN" note in that ADR).
     private static void Footer(IAnsiConsole console, bool rich, PackageCapabilityReport report)
     {
         var allFindings = report.AllFindings.ToList();
@@ -364,26 +374,19 @@ internal static class PackageReportRenderer
                 ? "[grey]Transitive dependencies:[/] [yellow]coverage incomplete (not fully resolved)[/]"
                 : $"[grey]Transitive dependencies:[/] [green]{report.ResolvedDependencies.Count} resolved[/]");
 
+        // "Clean" requires the analysis to have been COMPLETE, not merely finding-free: an OSV outage/skip
+        // (Unavailable/NotChecked), a Partial transitive walk, methods that could not be analyzed, or a failed
+        // obfuscation analysis all mean the package was NOT fully verified. The caveats come from the SHARED
+        // CompletenessAssessment the exit code uses (ADR 0024), replacing the two inline locals this footer used to
+        // key on — so the footer and exit code can no longer disagree, and IL coverage is no longer a blind spot.
+        var assessment = CompletenessAssessment.ForPackage(report);
+        CompletenessFooter.WriteCoverage(console, assessment);
+
         var attention = allFindings.Count > 0 || report.ScriptFindings.Count > 0 || hasObfuscation
             || report.YaraFindings.Count > 0 || report.Vulnerabilities.Count > 0;
-        // "Clean" requires the vuln check to have actually completed AND transitive resolution to be complete — an OSV
-        // outage (Unavailable/NotChecked) or a Partial transitive walk means the package was NOT fully verified, so
-        // surface a distinct "not verified" headline naming each incomplete check rather than a false all-clear.
-        var vulnVerified = report.VulnerabilitiesStatus == VulnerabilityScanStatus.Completed;
-        var transitivePartial = report.DependencyResolution == DependencyResolutionStatus.Partial;
-        if (attention)
-            console.MarkupLine($"[bold red]{Esc(AlertGlyph(rich))} Findings present[/] [grey]{Dash(rich)} review recommended.[/]");
-        else if (!vulnVerified || transitivePartial)
-        {
-            var caveats = new List<string>();
-            if (!vulnVerified)
-                caveats.Add("the known-vulnerability check did not complete");
-            if (transitivePartial)
-                caveats.Add("transitive dependencies were not fully resolved (coverage incomplete)");
-            console.MarkupLine($"[yellow]{Esc(AlertGlyph(rich))} Not verified[/] [grey]{Dash(rich)} no findings, but {string.Join("; ", caveats)}.[/]");
-        }
-        else
-            console.MarkupLine($"[bold green]{Esc(CleanGlyph(rich))} Clean[/] [grey]{Dash(rich)} no capability, script, obfuscation, malware-signature, or known-vulnerability findings.[/]");
+        CompletenessFooter.WriteHeadline(
+            console, rich, attention, assessment,
+            "no capability, script, obfuscation, malware-signature, or known-vulnerability findings.");
     }
     #endregion
 }

@@ -5,7 +5,9 @@ using System.Collections.Generic;
 /// <summary>
 /// Whether the known-vulnerability (OSV.dev) check ran for a package (ADR 0017, 2026-07-17 amendment). Distinguishes a
 /// genuinely-clean result from an outage so a security-gating signal is never a false all-clear: <see cref="NotChecked"/>
-/// (skipped, e.g. <c>--no-vulns</c>), <see cref="Completed"/> (the check ran — findings may be empty = truly clean), and
+/// (skipped, e.g. <c>--no-vulns</c>; also the <b>default</b> value, so a report deserialized from legacy JSON written
+/// before the field existed lands here and names no cause), <see cref="Completed"/> (the check ran — findings may be
+/// empty = truly clean), and
 /// <see cref="Unavailable"/> (the check could not complete, so the package is NOT verified against known CVEs).
 /// </summary>
 public enum VulnerabilityScanStatus

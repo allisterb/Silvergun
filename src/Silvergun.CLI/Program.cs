@@ -20,8 +20,31 @@ using Silvergun.PackageAnalysis.NuGet.Yara;
 /// <see cref="AssemblyAnalyzer"/> + <see cref="CapabilityAnalysis"/> + <see cref="ObfuscationAnalysis"/> over a
 /// .NET assembly; the <c>scan-package</c> verb, which runs <see cref="PackageScanner"/> over a <c>.nupkg</c>;
 /// and the <c>check-squat</c> verb, which runs <see cref="SquatChecker"/> against a package id (network).
-/// Exit codes are part of the CI contract (ADR 0003): 0 = success, 1 = load/analysis failure or bad arguments,
-/// 2 = findings present under <c>--strict</c>.
+/// <para>
+/// Exit codes are part of the CI contract (ADR 0003, amended by ADR 0024):
+/// <list type="table">
+///   <item><term>0</term><description>ran fine <b>and</b> the report's assessment says "Clean" — nothing gated and
+///     the analysis was complete.</description></item>
+///   <item><term>1</term><description>operational error: bad arguments, could not load the input, could not emit the
+///     report. No verdict was produced.</description></item>
+///   <item><term>2</term><description><c>--strict</c> <b>and</b> a finding gate tripped. A policy verdict on a
+///     successful run — and it <b>beats 3</b>: a tripped gate is accurate and actionable even when coverage was
+///     partial (the caveats are still printed).</description></item>
+///   <item><term>3</term><description>analysis incomplete — one or more inputs could not be fully analysed (methods
+///     that could not be analyzed, a packaged file that could not be analysed, a failed obfuscation analysis, a
+///     failed assembly-metadata read, a partial transitive walk, vulnerability data not
+///     obtained). A method is counted as not analyzed when the per-method guard catches <b>any</b> throw — including
+///     the metadata reads that happen before its body is touched — so this contract names no cause beyond "could not
+///     be analyzed"; on hostile input a metadata-read failure is a more suspicious signal than a lifting failure, and
+///     CI must not read the count as the mundane case. <b>Not</b> gated on <c>--strict</c>: 1 and 3 both mean "the
+///     tool could not do its job", and only 2 is a policy verdict. <c>--allow-incomplete</c> downgrades 3 to 0 while
+///     still printing every caveat.</description></item>
+/// </list>
+/// <b>Any other code is a crash the OS chose, not one we return</b> — <c>Environment.FailFast</c> (which CCI's
+/// <c>Debug.Assert</c> routes to, ADR 0021) is measured at <b>35</b> in this project, and a stack overflow's code is
+/// not yet measured here. A killed process emits <b>no report at all</b>, so CI must treat an unknown exit code as a
+/// tooling incident and must <b>never</b> read a missing or empty findings file as clean.
+/// </para>
 /// </summary>
 internal static class Program
 {
@@ -59,6 +82,10 @@ internal static class Program
         var debugOption = new Option<bool>("--debug")
         {
             Description = "Enable verbose logging."
+        };
+        var allowIncompleteOption = new Option<bool>("--allow-incomplete")
+        {
+            Description = "Do not exit with code 3 when the analysis was incomplete (ADR 0024); the caveats are still reported."
         };
         var noResolveOption = new Option<bool>("--no-resolve")
         {
@@ -103,7 +130,7 @@ internal static class Program
 
         var analyzeCommand = new Command("analyze", "Analyze a .NET assembly for sensitive-API capabilities.")
         {
-            assemblyPathArgument, jsonOption, richOption, outputOption, strictOption, debugOption, noResolveOption
+            assemblyPathArgument, jsonOption, richOption, outputOption, strictOption, debugOption, noResolveOption, allowIncompleteOption
         };
         analyzeCommand.Validators.Add(RejectJsonWithRich);
         analyzeCommand.SetAction(parse => RunAnalyze(
@@ -113,11 +140,12 @@ internal static class Program
             parse.GetValue(outputOption),
             parse.GetValue(strictOption),
             parse.GetValue(debugOption),
-            parse.GetValue(noResolveOption)));
+            parse.GetValue(noResolveOption),
+            parse.GetValue(allowIncompleteOption)));
 
         var scanPackageCommand = new Command("scan-package", "Scan a .nupkg for sensitive-API capabilities.")
         {
-            nupkgPathArgument, jsonOption, richOption, outputOption, strictOption, debugOption, noResolveOption, healthOption, noYaraOption, noVulnsOption, depthOption
+            nupkgPathArgument, jsonOption, richOption, outputOption, strictOption, debugOption, noResolveOption, healthOption, noYaraOption, noVulnsOption, depthOption, allowIncompleteOption
         };
         scanPackageCommand.Validators.Add(RejectJsonWithRich);
         scanPackageCommand.SetAction(parse => RunScanPackage(
@@ -131,7 +159,8 @@ internal static class Program
             parse.GetValue(healthOption),
             parse.GetValue(noYaraOption),
             parse.GetValue(noVulnsOption),
-            parse.GetValue(depthOption)));
+            parse.GetValue(depthOption),
+            parse.GetValue(allowIncompleteOption)));
 
         // check-squat hits nuget.org, so its handler is async; the sync action bridges via GetAwaiter().GetResult()
         // to keep System.CommandLine's synchronous Invoke path (stdout purity handled by ConfigureLogging).
@@ -184,7 +213,7 @@ internal static class Program
         return root.Parse(args).Invoke();
     }
 
-    private static int RunAnalyze(string assemblyPath, bool json, bool rich, string? output, bool strict, bool debug, bool noResolve)
+    private static int RunAnalyze(string assemblyPath, bool json, bool rich, string? output, bool strict, bool debug, bool noResolve, bool allowIncomplete)
     {
         ConfigureLogging(json, output, debug);
 
@@ -208,25 +237,29 @@ internal static class Program
         var obfuscationResult = new ObfuscationAnalysis(cci).Analyze();
         var obfuscation = obfuscationResult.IsSuccess ? obfuscationResult.Value : null;
 
-        // Metadata read is best-effort — a failure leaves Metadata null and never changes the exit-code contract.
+        // Metadata read is best-effort — a failure leaves Metadata null. That null is a COMPLETENESS caveat (ADR 0024,
+        // same class as the failed obfuscation analysis above): the report cannot claim "Clean" when the identity facts
+        // it prints were never read, so it reaches the exit code as incompleteness (3), never as a finding (2).
         var metadataResult = AssemblyMetadata.Read(assemblyPath, !noResolve);
         var report = new AssemblyAnalysisReport(
             metadataResult.IsSuccess ? metadataResult.Value : null, reportResult.Value, obfuscation);
 
+        // The SAME assessment drives the report footer (via the renderer, which calls this same factory) and the exit
+        // code below — ADR 0024's load-bearing invariant is that exit 0 ⇔ the footer would say "Clean".
+        var completeness = CompletenessAssessment.ForAssembly(report);
+
         var emitted = json
-            ? TryEmit(report.ToJson(), output)
+            ? TryEmit(WithCompleteness(report.ToJson(), completeness), output)
             : EmitHumanReport(c => AssemblyReportRenderer.Render(c, report), output, rich);
         if (!emitted)
             return 1;
 
-        return ScanExitCode(
-            strict,
-            report.Capabilities.Findings.Count > 0,
-            (report.Obfuscation?.Findings.Count ?? 0) > 0,
-            hasScriptFindings: false);
+        ReportIncompleteness("analyze", completeness, allowIncomplete);
+
+        return AnalyzeExitCode(report, strict, allowIncomplete);
     }
 
-    private static int RunScanPackage(string nupkgPath, bool json, bool rich, string? output, bool strict, bool debug, bool noResolve, bool health, bool noYara, bool noVulns, int depth)
+    private static int RunScanPackage(string nupkgPath, bool json, bool rich, string? output, bool strict, bool debug, bool noResolve, bool health, bool noYara, bool noVulns, int depth, bool allowIncomplete)
     {
         ConfigureLogging(json, output, debug);
 
@@ -285,21 +318,50 @@ internal static class Program
             report = report with { Vulnerabilities = findings, VulnerabilitiesStatus = status };
         }
 
+        // As in RunAnalyze: one assessment, two projections (the footer via the renderer, the exit code below).
+        var completeness = CompletenessAssessment.ForPackage(report);
+
         var emitted = json
-            ? TryEmit(report.ToJson(), output)
+            ? TryEmit(WithCompleteness(report.ToJson(), completeness), output)
             : EmitHumanReport(c => PackageReportRenderer.Render(c, report, nupkgPath), output, rich);
         if (!emitted)
             return 1;
 
-        var hasObfuscation = report.Assemblies.Any(a => (a.Obfuscation?.Findings.Count ?? 0) > 0);
-        // Only findings from real script/build content gate --strict. Findings from the declarative package manifest
-        // (ScriptFindingSource.PackageMetadata) are advisory: still reported in full — human report, footer counts and
-        // --json are unchanged — but they never fail CI on their own, mirroring the ADR 0015 "advisory never gates"
-        // precedent. Nothing in a .nuspec executes, and code-oriented rules over prose are noise by construction
-        // (docs/agent/tasks/script-rule-precision.md).
-        var hasScriptFindings = report.ScriptFindings.Any(f => f.Source == ScriptFindingSource.Script);
-        return ScanExitCode(strict, report.AllFindings.Any(), hasObfuscation, hasScriptFindings, report.YaraFindings.Count > 0, report.Vulnerabilities.Count > 0);
+        ReportIncompleteness("scan-package", completeness, allowIncomplete);
+
+        return ScanPackageExitCode(report, strict, allowIncomplete);
     }
+
+    // The analyze verb's exit code, as ONE seam over the whole report (ADR 0024). This exists so the gate predicate —
+    // which findings gate, and how incompleteness is derived — is written exactly once: the run method above and the
+    // invariant tests both call this, instead of the tests keeping a hand-written third copy that can silently drift
+    // from what ships. Recomputing the assessment here (rather than taking it as a parameter) is deliberate: it is
+    // pure, and it makes the exit code derive from the report itself, exactly as the footer does.
+    internal static int AnalyzeExitCode(AssemblyAnalysisReport report, bool strict, bool allowIncomplete) =>
+        ScanExitCode(
+            strict,
+            report.Capabilities.Findings.Count > 0,
+            (report.Obfuscation?.Findings.Count ?? 0) > 0,
+            hasScriptFindings: false,
+            isIncomplete: !CompletenessAssessment.ForAssembly(report).IsComplete,
+            allowIncomplete: allowIncomplete);
+
+    // The scan-package verb's exit code, as ONE seam over the whole report (see AnalyzeExitCode).
+    // Only findings from real script/build content gate --strict. Findings from the declarative package manifest
+    // (ScriptFindingSource.PackageMetadata) are advisory: still reported in full — human report, footer counts and
+    // --json are unchanged — but they never fail CI on their own, mirroring the ADR 0015 "advisory never gates"
+    // precedent. Nothing in a .nuspec executes, and code-oriented rules over prose are noise by construction
+    // (docs/agent/tasks/script-rule-precision.md).
+    internal static int ScanPackageExitCode(PackageCapabilityReport report, bool strict, bool allowIncomplete) =>
+        ScanExitCode(
+            strict,
+            report.AllFindings.Any(),
+            report.Assemblies.Any(a => (a.Obfuscation?.Findings.Count ?? 0) > 0),
+            report.ScriptFindings.Any(f => f.Source == ScriptFindingSource.Script),
+            report.YaraFindings.Count > 0,
+            report.Vulnerabilities.Count > 0,
+            isIncomplete: !CompletenessAssessment.ForPackage(report).IsComplete,
+            allowIncomplete: allowIncomplete);
 
     // Best-effort OSV.dev known-vulnerability lookup for scan-package (default-on; ADR 0017). Builds queries from the
     // LOCAL nuspec identity (package@version + declared deps at their range floor), then sync-bridges the network call
@@ -473,12 +535,89 @@ internal static class Program
     internal static bool IsValidSource(string? source) =>
         source is null || source.Trim().ToLowerInvariant() is "nuget" or "librariesio";
 
-    // The --strict CI gate exit-code decision (ADR 0003): 2 when strict and any finding gate trips, else 0.
-    // Pure — the run methods pass the concrete gate inputs so this stays independently testable. YARA findings
-    // are high-confidence IOCs and gate too (ADR 0016); known vulnerabilities gate too (ADR 0017). The trailing
-    // defaults keep the existing non-package callers/tests unchanged.
-    internal static int ScanExitCode(bool strict, bool hasCapabilityFindings, bool hasObfuscation, bool hasScriptFindings, bool hasYaraFindings = false, bool hasVulnerabilities = false) =>
-        strict && (hasCapabilityFindings || hasObfuscation || hasScriptFindings || hasYaraFindings || hasVulnerabilities) ? 2 : 0;
+    // The CI gate exit-code decision (ADR 0003, amended by ADR 0024). Pure — the run methods pass the concrete gate
+    // inputs so this stays independently testable. YARA findings are high-confidence IOCs and gate too (ADR 0016);
+    // known vulnerabilities gate too (ADR 0017). The trailing defaults keep the existing non-package callers/tests
+    // unchanged.
+    //
+    // Precedence, exactly:
+    //   1. strict && any finding gate  => 2. A tripped gate is accurate and actionable, so 2 BEATS 3 even when the
+    //      analysis was incomplete — the incompleteness is a caveat in the report, not a reason to hide the verdict.
+    //   2. else isIncomplete && !allowIncomplete => 3. NOT gated on --strict: opting out of *findings* gating is not
+    //      opting out of being told coverage was partial.
+    //   3. else => 0, which (with --allow-incomplete off) means the report's footer says "Clean".
+    // --allow-incomplete only suppresses the GATE; the caveats are always disclosed (report + one stderr note).
+    internal static int ScanExitCode(
+        bool strict, bool hasCapabilityFindings, bool hasObfuscation, bool hasScriptFindings,
+        bool hasYaraFindings = false, bool hasVulnerabilities = false,
+        bool isIncomplete = false, bool allowIncomplete = false) =>
+        strict && (hasCapabilityFindings || hasObfuscation || hasScriptFindings || hasYaraFindings || hasVulnerabilities) ? 2
+        : isIncomplete && !allowIncomplete ? 3
+        : 0;
+
+    // Adds the completeness fields to a report's --json output ADDITIVELY, by TEXTUAL SPLICE: the report's own
+    // canonical JSON is carried over verbatim and one "Completeness" object is inserted before its final "}", so
+    // only the new block is ever serialized here. Existing properties therefore keep their names, values, order and
+    // exact BYTES by construction — not because two writers happen to agree. They do not: re-serializing through
+    // JsonNode round-trips a DateTimeOffset as a *string*, and Utf8JsonWriter.WriteStringValue(string) runs it
+    // through JavaScriptEncoder.Default, which rewrites the '+' of an ISO-8601 UTC offset (AnalyzedAt's "+00:00")
+    // into its \uXXXX escape, where WriteStringValue(DateTimeOffset) writes it literally. Relaxing the encoder is not the fix
+    // either — it would stop escaping '<', '>', '&' and '\'', which legitimately occur in pre-existing fields
+    // (generic type names in CalledApi), trading one silent corruption for another.
+    // Done over the text (rather than on the report records, which live in the analysis libraries) so the CLI owns
+    // its own projection.
+    // internal (not private) so its eight degenerate paths — empty/whitespace, non-object, "{}", compact single-line,
+    // LF vs CRLF, an unindented payload — are asserted by tests rather than by inspection.
+    internal static string WithCompleteness(string json, CompletenessAssessment completeness)
+    {
+        // Anything we cannot splice into safely is returned UNCHANGED: a corrupt report is worse than a missing
+        // completeness block. Covers empty/whitespace input, a payload that is not a top-level object, and "{}"
+        // (no property to append after, and no observed formatting to imitate).
+        var body = SplicableObjectBody(json);
+        if (body is null)
+            return json;
+
+        // Match the payload's own formatting: its line ending, and the indentation of a top-level property — the
+        // last line of the body is always one (a scalar property, or the closing brace/bracket of a nested value),
+        // so its leading spaces are that level (2 for the WriteIndented default).
+        var newline = body.Contains("\r\n", StringComparison.Ordinal) ? "\r\n"
+            : body.Contains('\n') ? "\n"
+            : Environment.NewLine;
+        var lastLine = body[(body.LastIndexOf(newline, StringComparison.Ordinal) + newline.Length)..];
+        var indent = lastLine.Length - lastLine.TrimStart(' ').Length is var width && width > 0
+            ? new string(' ', width)
+            : DefaultJsonIndent;
+
+        var block = completeness.ToJson().ReplaceLineEndings(newline + indent);
+        return $"{body},{newline}{indent}\"{CompletenessJsonProperty}\": {block}{newline}}}";
+    }
+
+    // The pre-existing bytes of a top-level JSON object, up to (excluding) its closing brace and any trailing
+    // whitespace — i.e. everything a new last property can be appended after. Null when the payload has no such
+    // shape (empty, not an object, or an object with no properties).
+    private static string? SplicableObjectBody(string? json)
+    {
+        var trimmed = json?.TrimEnd() ?? string.Empty;
+        if (trimmed.Length < 2 || trimmed[0] != '{' || trimmed[^1] != '}')
+            return null;
+
+        var body = trimmed[..^1].TrimEnd();
+        return body[^1] == '{' ? null : body;
+    }
+
+    // Discloses incompleteness on stderr in EVERY output mode (including --json and --output, where a human may never
+    // read the report), naming each specific gap. --allow-incomplete suppresses the exit-3 gate, never this note.
+    private static void ReportIncompleteness(string verb, CompletenessAssessment completeness, bool allowIncomplete)
+    {
+        if (completeness.IsComplete)
+            return;
+
+        Console.Error.WriteLine(
+            $"{verb}: analysis INCOMPLETE - {string.Join("; ", completeness.Caveats)}. " +
+            (allowIncomplete
+                ? "--allow-incomplete given; exit code NOT gated on this."
+                : "Exit code 3; pass --allow-incomplete to downgrade it to 0."));
+    }
 
     // Keep stdout machine-parseable: when JSON goes to stdout, log to file only.
     private static void ConfigureLogging(bool json, string? output, bool debug)
@@ -555,6 +694,14 @@ internal static class Program
     // Env var carrying the optional GitHub API token for project-health lookups (health verb, scan-package --health).
     // Presence raises the GitHub rate limit from ~60/hr to 5000/hr. Never emitted/logged (only its presence is).
     private const string GitHubTokenEnvVar = "SILVERGUN_GITHUB_TOKEN";
+
+    // Top-level --json property carrying the completeness projection (ADR 0024). Additive: every pre-existing
+    // property keeps its name, value and position; this one is appended.
+    private const string CompletenessJsonProperty = "Completeness";
+
+    // Fallback indentation for the spliced completeness block when the payload's own formatting cannot be observed
+    // (a compact, single-line report). Matches JsonSerializerOptions.WriteIndented's default.
+    private const string DefaultJsonIndent = "  ";
 
     // Deterministic report width used when not attached to a TTY (redirected stdout or a file), so default
     // (ASCII) output doesn't vary with the ambient terminal. A TTY may still be measured for wrapping.

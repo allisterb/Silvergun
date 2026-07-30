@@ -129,10 +129,16 @@ public sealed class ProgramTests
             Program.ScanExitCode(strict, cap, obf, script, yara),
             Program.ScanExitCode(strict, cap, obf, script, yara, hasVulnerabilities: false));
 
-    // OSV reachability (the new Unavailable status) is NOT a --strict gate: the gate is findings-only. An Unavailable
-    // check with NO findings (hasVulnerabilities:false) — the outage case — must still exit 0 under --strict, exactly
-    // like a completed-clean scan. ScanExitCode takes only hasVulnerabilities (not the status), so this documents that
-    // an outage never fabricates a non-zero exit; the "not verified" signal lives in the report/stderr, not the code.
+    // OSV reachability (the Unavailable status) is NOT a --strict FINDINGS gate: that gate is findings-only, so an
+    // Unavailable check with NO findings (hasVulnerabilities:false) never trips it — it returns 0 here, exactly like a
+    // completed-clean scan, and an outage can never fabricate a policy verdict (2).
+    //
+    // ⚠️ This is a statement about the FINDINGS gate only, NOT about the outage's overall exit code. Under ADR 0024
+    // that outage is incompleteness, so the real scan-package run exits 3: Program.ScanPackageExitCode derives
+    // isIncomplete from CompletenessAssessment.ForPackage, which treats Unavailable/NotChecked as "vulnerability data
+    // not obtained" (see CompletenessExitCodeTests.ScanPackage_WhenVulnerabilityDataNotObtained_ExitsThree). The
+    // assertion below is still exactly right because this is the PURE seam with isIncomplete defaulted to false — the
+    // pre-ADR-0024 claim that the signal "lives in the report/stderr, not the code" is what no longer holds.
     [Fact]
     public void ScanExitCode_StrictWithUnavailableStatusButNoFindings_ReturnsZero() =>
         Assert.Equal(0, Program.ScanExitCode(

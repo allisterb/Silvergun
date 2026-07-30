@@ -75,13 +75,17 @@ public sealed class CiSafetyReportTests
     [Fact]
     public void ScanPackage_DefaultMode_EmitsSevenBitAsciiOnly()
     {
-        // A benign minimal package (nuspec-only, no assemblies/scripts) yields a clean report. In default
+        // A benign minimal package (nuspec-only, no assemblies/scripts) yields a finding-free report. In default
         // (no --rich) mode its human rendering must be pure 7-bit ASCII with no ANSI (ADR 0014), and the
         // redirected/stdin-closed run must complete without hanging.
+        // --allow-incomplete keeps the SUBJECT of this test (ASCII output) unchanged under ADR 0024: --no-vulns leaves
+        // VulnerabilitiesStatus at NotChecked, which is legitimately an incomplete analysis and now exits 3. This test
+        // is about output encoding, not the exit-code contract (see CompletenessCliTests for that), so it opts out of
+        // the coverage gate rather than asserting a 0 the tool should no longer return.
         var nupkg = BuildMinimalNupkg();
         try
         {
-            var (exit, output, _, exited) = RunCli("scan-package", nupkg, "--no-vulns");
+            var (exit, output, _, exited) = RunCli("scan-package", nupkg, "--no-vulns", "--allow-incomplete");
 
             Assert.True(exited, "CLI did not exit within the timeout — a redirected run must never block on stdin.");
             Assert.Equal(0, exit);
@@ -101,10 +105,12 @@ public sealed class CiSafetyReportTests
     {
         // --rich may emit ANSI/Unicode when redirected (expected); the invariant here is only CI-safety:
         // scan-package must still complete promptly with stdin closed and produce a report (no interactive widgets).
+        // --allow-incomplete for the same reason as ScanPackage_DefaultMode_...: --no-vulns leaves the vulnerability
+        // check NotChecked, which now exits 3 (ADR 0024). Not hanging is the subject here, not the exit code.
         var nupkg = BuildMinimalNupkg();
         try
         {
-            var (exit, output, _, exited) = RunCli("scan-package", nupkg, "--no-vulns", "--rich");
+            var (exit, output, _, exited) = RunCli("scan-package", nupkg, "--no-vulns", "--allow-incomplete", "--rich");
 
             Assert.True(exited, "CLI did not exit within the timeout — a --rich run must never block on stdin.");
             Assert.Equal(0, exit);

@@ -219,8 +219,14 @@ public sealed class ReportRendererTests
     public void AssemblyRenderer_CleanReport_IndicatesCleanWithoutThrowing()
     {
         var (console, writer) = PlainConsole();
+        // FIXTURE CORRECTED for ADR 0024 (the assertion is unchanged): this previously passed Obfuscation: null and
+        // still expected "Clean" — i.e. it asserted a clean verdict on a report where the obfuscation analysis never
+        // completed, which is the false-clean ADR 0024 removes (all 3 methods analyzed, but one analysis did not run).
+        // A findings-free ObfuscationReport means "the analysis RAN and found nothing", which is what "clean" requires
+        // — the same pattern PackageRenderer_CleanReport_... already uses for VulnerabilitiesStatus: Completed.
         var caps = new CapabilityReport("Benign.dll", "/x/Benign.dll", Epoch, [], 3, 3, 0, []);
-        var report = new AssemblyAnalysisReport(Meta("Benign.dll"), caps, null);
+        var ranAndFoundNothing = new ObfuscationReport("Benign.dll", "/x/Benign.dll", Epoch, []);
+        var report = new AssemblyAnalysisReport(Meta("Benign.dll"), caps, ranAndFoundNothing);
 
         var ex = Record.Exception(() => AssemblyReportRenderer.Render(console, report));
 

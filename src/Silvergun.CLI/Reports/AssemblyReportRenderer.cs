@@ -41,7 +41,7 @@ internal static class AssemblyReportRenderer
         console.WriteLine();
 
         console.Write(Section(rich, "Assessment"));
-        Footer(console, rich, caps.Findings, report.Obfuscation);
+        Footer(console, rich, report);
     }
 
     private static Grid IdentityGrid(CapabilityReport caps)
@@ -120,11 +120,14 @@ internal static class AssemblyReportRenderer
         return table;
     }
 
-    // Qualitative footer: colored per-capability counts, obfuscation count, and a clean/attention headline
-    // derived from exactly what the --strict gate keys on (capability OR obfuscation findings present).
-    private static void Footer(IAnsiConsole console, bool rich, IReadOnlyList<ApiCallFinding> findings, ObfuscationReport? obfuscation)
+    // Qualitative footer: colored per-capability counts, obfuscation count, the IL coverage line, and the three-tier
+    // Findings / Not verified / Clean headline. "Attention" is exactly what the --strict gate keys on (capability OR
+    // obfuscation findings present); "not verified" comes from the SHARED CompletenessAssessment the exit code uses
+    // (ADR 0024) — so a run that skipped methods, or whose obfuscation analysis failed, can never read "Clean".
+    private static void Footer(IAnsiConsole console, bool rich, AssemblyAnalysisReport report)
     {
-        var obfuscationCount = obfuscation?.Findings.Count ?? 0;
+        var findings = report.Capabilities.Findings;
+        var obfuscationCount = report.Obfuscation?.Findings.Count ?? 0;
 
         if (findings.Count == 0)
             console.MarkupLine("[grey]Capabilities:[/] [green]none[/]");
@@ -139,10 +142,12 @@ internal static class AssemblyReportRenderer
             ? "[grey]Obfuscation:[/] [green]none[/]"
             : $"[grey]Obfuscation:[/] [orange1]{obfuscationCount} finding(s)[/]");
 
+        var assessment = CompletenessAssessment.ForAssembly(report);
+        CompletenessFooter.WriteCoverage(console, assessment);
+
         var attention = findings.Count > 0 || obfuscationCount > 0;
-        console.MarkupLine(attention
-            ? $"[bold red]{Esc(AlertGlyph(rich))} Findings present[/] [grey]{Dash(rich)} review recommended.[/]"
-            : $"[bold green]{Esc(CleanGlyph(rich))} Clean[/] [grey]{Dash(rich)} no sensitive-API or obfuscation findings.[/]");
+        CompletenessFooter.WriteHeadline(
+            console, rich, attention, assessment, "no sensitive-API or obfuscation findings.");
     }
     #endregion
 }
