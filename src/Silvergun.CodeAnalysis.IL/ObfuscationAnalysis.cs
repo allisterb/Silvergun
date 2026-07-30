@@ -48,7 +48,9 @@ public sealed class ObfuscationAnalysis(AssemblyAnalyzer assembly)
         {
             // Materialize inside the guard: enumerating assembly.Methods advances CCI's lazy type
             // resolution, which can throw on a corrupt/hostile module — the outer catch upholds the
-            // never-throws contract even for a top-level enumeration failure.
+            // never-throws contract even for a top-level enumeration failure. Method bodies are NOT read by
+            // that enumeration (see AssemblyAnalyzer.Methods): ScanMethod reads each one under its own guard,
+            // so one unreadable body loses that method's constants, not every finding in the assembly.
             var findings = assembly.Methods
                 .SelectMany(ScanMethod)
                 .Distinct()
@@ -78,16 +80,27 @@ public sealed class ObfuscationAnalysis(AssemblyAnalyzer assembly)
     }
 
     // Scans one method's CCI operations for ldstr constants and classifies each. Skips (never throws) any
-    // method whose scan throws; per-constant failures are isolated in Classify. The caller type is best-effort
-    // ("<unknown>" if unresolvable), matching the prior analysis-net semantics.
+    // method whose body cannot be read or whose scan throws; per-constant failures are isolated in Classify.
+    // The caller type is best-effort ("<unknown>" if unresolvable), matching the prior analysis-net semantics.
     private IReadOnlyList<ObfuscationFinding> ScanMethod(IMethodDefinition method)
     {
+        // Guarded body read: assembly.Methods yields body-read CANDIDATES, so the dereference a hostile module
+        // can make throw happens here, per method, and costs only this method's constants. A candidate with no
+        // body simply has no constants to scan.
+        var read = AssemblyAnalyzer.TryReadBody(method);
+        if (read.Body is null)
+        {
+            if (read.Error is { } error)
+                Runtime.Warn("Skipping obfuscation scan of method {0}: {1}", AssemblyAnalyzer.SafeName(method), error);
+            return [];
+        }
+
         try
         {
             var callerType = CallerType(method);
             var callerMethod = method.Name.Value;
 
-            return method.Body.Operations
+            return read.Body.Operations
                 .Where(op => op.OperationCode == OperationCode.Ldstr)
                 .Select(op => op.Value as string)
                 .Where(text => text is not null)
@@ -96,7 +109,9 @@ public sealed class ObfuscationAnalysis(AssemblyAnalyzer assembly)
         }
         catch (Exception ex)
         {
-            Runtime.Warn("Skipping obfuscation scan of method {0}: {1}", method.Name.Value, ex.Message);
+            // AssemblyAnalyzer.SafeName, not method.Name.Value: reading the name here can itself throw on a crafted
+            // module, and that throw would escape this per-method guard and fail the whole analysis.
+            Runtime.Warn("Skipping obfuscation scan of method {0}: {1}", AssemblyAnalyzer.SafeName(method), ex.Message);
             return [];
         }
     }

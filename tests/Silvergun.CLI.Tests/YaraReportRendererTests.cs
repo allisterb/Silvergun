@@ -99,7 +99,11 @@ public sealed class YaraReportRendererTests
         var output = writer.ToString();
         Assert.Contains("Malware signatures (YARA)", output);   // the section is always present
         Assert.Contains("(none)", output);                      // clean YARA renders the "(none)" placeholder
-        Assert.Contains("Clean", output);                       // and the report footer stays clean
+        // The footer's verdict as the whole headline LINE (see FooterHeadline), rather than a bare token that a
+        // rule name or scanned path containing "Clean" would satisfy on its own.
+        Assert.Equal(
+            FooterHeadline.Clean(console, FooterHeadline.PackageCleanDetail),
+            FooterHeadline.Of(writer));
     }
     #endregion
 

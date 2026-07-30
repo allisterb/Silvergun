@@ -67,6 +67,31 @@ public sealed class TargetFrameworkMatrixTests : IClassFixture<TargetFrameworkMa
     }
 
     /// <summary>
+    /// What makes the baseline above mean "bodied" rather than merely "candidate".
+    /// <see cref="AssemblyAnalyzer.Methods"/> is a body-read candidate set since
+    /// <c>docs/agent/tasks/per-method-body-read-granularity.md</c> — it no longer dereferences <c>Body</c> — so the
+    /// two sets are equal only as long as every candidate really does have a readable body. Measured equal on this
+    /// matrix (net472 13, net10.0 18 assembly-wide); pinning it here means a future divergence fails as <em>this</em>
+    /// test, naming the offending method, instead of silently changing what
+    /// <see cref="TargetFrameworkMatrixFixture.AuthoredBodiedMethods"/> counts underneath the shape baseline.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(TargetFrameworks))]
+    public void Analyze_EveryCandidateMethodHasAReadableBody(string targetFramework)
+    {
+        var candidates = fixture.CandidateMethods(targetFramework).ToArray();
+
+        var bodiless = candidates
+            .Where(m => AssemblyAnalyzer.TryReadBody(m).Body is null)
+            .Select(m => $"{AssemblyAnalyzer.TypeName(m.ContainingTypeDefinition)}.{AssemblyAnalyzer.SafeName(m)}")
+            .ToArray();
+
+        Assert.Empty(bodiless);
+        Assert.NotEmpty(candidates);
+        Assert.Equal(candidates.Length, fixture.BodiedMethods(targetFramework).Count());
+    }
+
+    /// <summary>
     /// The inventory above is a count; this names the shapes behind it, so a failure says <em>which</em>
     /// declaration went missing rather than only that a number moved. net472 carries the unguarded
     /// <c>[DllImport]</c>s and nothing else; net10.0 adds the guarded <c>[LibraryImport]</c> and

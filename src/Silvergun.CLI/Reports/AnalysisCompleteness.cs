@@ -19,8 +19,8 @@ using static Silvergun.CLI.Reports.ReportTheme;
 /// <para>
 /// This is a <b>projection</b> of signals the model already carries, not new analysis:
 /// <see cref="CapabilityReport.MethodsSkipped"/> (methods that could not be analyzed — the per-method guard in
-/// <c>CapabilityAnalysis.ScanMethod</c> counts a skip for <b>any</b> throw, including the metadata reads it does
-/// before the body is touched, so no single cause may be named here), a null
+/// <c>CapabilityAnalysis.ScanMethod</c> counts a skip for <b>any</b> throw, whether from the body read it does
+/// first or from the metadata reads that follow it, so no single cause may be named here), a null
 /// <see cref="ObfuscationReport"/> (best-effort analysis that failed), a null
 /// <see cref="AssemblyMetadataInfo"/> (best-effort metadata read that failed), a non-null
 /// <see cref="AssemblyScanResult.SkipReason"/> (an inventoried file that could not be analysed at all),
@@ -137,12 +137,20 @@ internal readonly record struct CompletenessAssessment(
 
     // "3 of 120 method(s) could not be analyzed", optionally naming where they live.
     // States only the fact, never a diagnosis: CapabilityAnalysis.ScanMethod counts a skip for ANY throw in its
-    // per-method guard, and the guard's first actions are metadata reads (TypeName, method.Name.Value) that happen
-    // before method.Body is touched — so a crafted module with an unreadable type name is skipped with no lifting
-    // involved. On hostile input that is the MORE suspicious case (lift failures are mundane), so naming the
-    // mundane cause here would steer a reviewer away from it. Measured 2026-07-29: a body that cannot be READ does
-    // not even reach this counter — AssemblyAnalyzer.Methods dereferences m.Body while building the method list, so
-    // that failure fails the whole assembly (exit 1, no report) instead of skipping one method.
+    // per-method guard. ScanMethod reads the BODY first, via AssemblyAnalyzer.TryReadBody, BEFORE entering that
+    // guard (a bodiless candidate has to drop out before a failed NAME read could turn it into a spurious skip and
+    // inflate MethodsTotal); the metadata reads (TypeName, method.Name.Value) follow inside it. A failure of either
+    // is counted identically, so a crafted module with an unreadable TYPE NAME and one with an unreadable BODY are
+    // indistinguishable at this counter — which is exactly why the text must not name one. On hostile input the
+    // metadata failure is the MORE suspicious case (an unreadable body reads as mundane corruption), so naming the
+    // mundane cause here would steer a reviewer away from it. The body case reaches this counter at all only
+    // because AssemblyAnalyzer.Methods is a candidate set built from metadata alone: the dereference happens per
+    // method, inside TryReadBody's own guard, before the consumer's try — so an unreadable body is skipped like any
+    // other throw instead of failing the whole assembly. Measured 2026-07-30 on Newtonsoft.Json 13.0.3,
+    // lib/net6.0: an out-of-range fat-header CodeSize on one method yields 4087/4086/1 with every other method's
+    // findings unchanged, where it previously produced no report at all. The denominator is version- and
+    // TFM-specific (13.0.4 gives 4107; netstandard2.0 gives 4064). This caveat is reachable, and it still must not
+    // name which of those causes fired.
     private static string SkippedMethodsCaveat(int skipped, int total, string? location) =>
         location is null
             ? $"{skipped} of {total} method(s) could not be analyzed"

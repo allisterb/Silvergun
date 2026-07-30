@@ -58,8 +58,12 @@ public sealed class TransitiveReportRendererTests
         Assert.Contains("Transitive dependencies (resolver-lite)", output);   // the section renders
         Assert.Contains("NOT fully resolved", output);                        // ... with the incomplete-coverage note
         Assert.Contains("coverage incomplete", output);
-        Assert.Contains("Not verified", output);                             // footer downgraded from clean ...
-        Assert.DoesNotContain("Clean", output);                             // ... never a false all-clear
+        // The footer's verdict as the whole headline LINE (see FooterHeadline): downgraded from clean, naming the
+        // partial walk. A bare-token pair could be satisfied — or defeated — by any dependency id the report echoes.
+        Assert.Equal(
+            FooterHeadline.NotVerified(
+                console, "transitive dependencies were not fully resolved (coverage incomplete)"),
+            FooterHeadline.Of(writer));
     }
 
     // A completed (Complete) walk with resolved nodes renders in the default mode as pure 7-bit ASCII with no ANSI and no

@@ -82,25 +82,33 @@ public sealed class CapabilityAnalysis(AssemblyAnalyzer assembly)
     {
         try
         {
-            // Materialize inside the guard: enumerating assembly.Methods advances CCI's lazy type
-            // resolution, which can throw on a corrupt/hostile module — the outer catch upholds the
-            // never-throws contract even for a top-level enumeration failure.
-            var methods = assembly.Methods.ToArray();
+            // Enumerating assembly.Methods advances CCI's lazy type resolution, which can throw on a
+            // corrupt/hostile module — the outer catch upholds the never-throws contract for that
+            // genuinely assembly-wide failure. Method BODIES are read one at a time inside ScanMethod's
+            // guard (never from the enumeration itself), so one unreadable body costs one method instead
+            // of the whole assembly. The counts therefore come from the outcomes, not from a
+            // pre-materialized array: a candidate with no body at all is neither analyzed nor skipped.
             var findings = new List<ApiCallFinding>();
             var skipped = new List<string>();
+            var analyzed = 0;
 
-            foreach (var method in methods)
+            foreach (var method in assembly.Methods)
             {
-                var result = ScanMethod(method);
+                if (ScanMethod(method) is not { } result)
+                    continue;
+
                 if (result.Skip is not null)
                     skipped.Add(result.Skip);
                 else
+                {
+                    analyzed++;
                     findings.AddRange(result.Findings);
+                }
             }
 
             // Interop declarations live in metadata, not in IL: a P/Invoke is an external method with no body,
-            // so it never appears in assembly.Methods (which requires one) and the operation walk cannot see it
-            // at all. Scan the full type/method set separately for the pinvokeimpl flag and for
+            // so it never appears in assembly.Methods (which excludes external methods) and the operation walk
+            // cannot see it at all. Scan the full type/method set separately for the pinvokeimpl flag and for
             // [UnmanagedCallersOnly]. This adds only NativeImport/NativeExport findings and does not touch the
             // method-count bookkeeping, so it can never double-count a real call site.
             findings.AddRange(ScanInteropDeclarations());
@@ -118,8 +126,8 @@ public sealed class CapabilityAnalysis(AssemblyAnalyzer assembly)
                 assembly.AssemblyPath,
                 DateTimeOffset.UtcNow,
                 ordered,
-                MethodsTotal: methods.Length,
-                MethodsAnalyzed: methods.Length - skipped.Count,
+                MethodsTotal: analyzed + skipped.Count,
+                MethodsAnalyzed: analyzed,
                 MethodsSkipped: skipped.Count,
                 SkippedMethods: skipped);
 
@@ -131,24 +139,37 @@ public sealed class CapabilityAnalysis(AssemblyAnalyzer assembly)
         }
     }
 
-    // Scans one method's CCI operations. Returns either its findings or a skip reason ("Type.Method: reason").
-    // A method is skipped only when deriving the caller name or enumerating the body throws (a crafted or corrupt
-    // body) — never fatally. Per-operation matching is per-op try/catch, so one throwing call site is dropped
-    // individually while its siblings' findings are kept and the method still counts as analyzed (ADR 0005).
-    private (IReadOnlyList<ApiCallFinding> Findings, string? Skip) ScanMethod(IMethodDefinition method)
+    // Scans one method's CCI operations. Returns null for a candidate with no IL body at all (excluded from the
+    // method counts entirely, exactly as the old body-dereferencing filter excluded it), or else either its
+    // findings or a skip reason ("Type.Method: reason"). A method is skipped only when reading the body,
+    // deriving the caller name, or enumerating the operations throws (a crafted or corrupt body) — never
+    // fatally. Per-operation matching is per-op try/catch, so one throwing call site is dropped individually
+    // while its siblings' findings are kept and the method still counts as analyzed (ADR 0005).
+    private (IReadOnlyList<ApiCallFinding> Findings, string? Skip)? ScanMethod(IMethodDefinition method)
     {
+        // Guarded body read first, before any name read: a bodyless candidate must drop out before a failure to
+        // read its NAME could turn it into a spurious skip, which would inflate MethodsTotal over the old filter.
+        var read = AssemblyAnalyzer.TryReadBody(method);
+        if (read.IsMissing)
+            return null;
+
         // The seed qualifier is itself a metadata read that can throw on a crafted module, so it goes through
-        // SafeName: reading method.Name.Value here directly would let the failure escape the per-method guard and
-        // fail the whole analysis instead of skipping this one method. The name is re-read inside the guard below
-        // to refine the qualifier to "Type.Method" for a well-formed method.
-        string qualifier = SafeName(method);
+        // AssemblyAnalyzer.SafeName: reading method.Name.Value here directly would let the failure escape the
+        // per-method guard and fail the whole analysis instead of skipping this one method. The name is re-read
+        // inside the guard below to refine the qualifier to "Type.Method" for a well-formed method.
+        string qualifier = AssemblyAnalyzer.SafeName(method);
         try
         {
             var callerType = AssemblyAnalyzer.TypeName(method.ContainingTypeDefinition);
             var callerMethod = method.Name.Value;
             qualifier = $"{callerType}.{callerMethod}";
 
-            var findings = method.Body.Operations
+            // An unreadable body is a counted skip, named as precisely as the metadata allows — the names are
+            // resolved above first so the entry reads "Type.Method" rather than degrading with the body.
+            if (read.Body is null)
+                return Skip(qualifier, "scan threw: " + read.Error);
+
+            var findings = read.Body.Operations
                 .SelectMany(op => ScanOperation(op, callerType, callerMethod))
                 .ToArray();
 
@@ -204,7 +225,10 @@ public sealed class CapabilityAnalysis(AssemblyAnalyzer assembly)
     // failure is caught and the declaration dropped individually — the scan never throws.
     private static IReadOnlyList<ApiCallFinding> PlatformInvokeFinding(IMethodDefinition method)
     {
-        var name = SafeName(method);
+        // Captured up front through the SafeName seam so the catch below can name the offender without a metadata
+        // read of its own: evaluating method.Name.Value inside the catch would let a failure to read the name
+        // escape the per-declaration guard and fail the whole analysis. Same at NativeExportFinding.
+        var name = AssemblyAnalyzer.SafeName(method);
         try
         {
             if (!method.IsPlatformInvoke)
@@ -243,7 +267,7 @@ public sealed class CapabilityAnalysis(AssemblyAnalyzer assembly)
     // failure is caught and the declaration dropped individually — the scan never throws.
     private static IReadOnlyList<ApiCallFinding> NativeExportFinding(IMethodDefinition method)
     {
-        var name = SafeName(method);
+        var name = AssemblyAnalyzer.SafeName(method);
         try
         {
             var attribute = method.Attributes?.FirstOrDefault(IsUnmanagedCallersOnly);
@@ -258,21 +282,6 @@ public sealed class CapabilityAnalysis(AssemblyAnalyzer assembly)
         {
             Runtime.Warn("Skipping [UnmanagedCallersOnly] declaration {0}: {1}", name, ex.Message);
             return Array.Empty<ApiCallFinding>();
-        }
-    }
-
-    // The name is itself a metadata read that can throw on a crafted module. Capture it up front so the catch
-    // blocks above can name the offender without re-reading it: evaluating method.Name.Value inside a catch would
-    // let a failure to read the name escape the per-declaration guard and fail the whole analysis.
-    private static string SafeName(IMethodDefinition method)
-    {
-        try
-        {
-            return method.Name.Value;
-        }
-        catch
-        {
-            return UnreadableName;
         }
     }
 
@@ -360,6 +369,5 @@ public sealed class CapabilityAnalysis(AssemblyAnalyzer assembly)
     private const string UnmanagedCallersOnlyAttribute = "System.Runtime.InteropServices.UnmanagedCallersOnlyAttribute";
     private const string EntryPointArgument = "EntryPoint";
     private const string ManagedExportModule = "<managed>";
-    private const string UnreadableName = "<unreadable>";
     #endregion
 }

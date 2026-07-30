@@ -40,7 +40,12 @@ public sealed class CompletenessCliTests
 
             Assert.True(exited, "CLI did not exit within the timeout.");
             Assert.Equal(3, exit);
-            Assert.Contains("Not verified", stdout);
+            // The whole verdict LINE (see FooterHeadline), in the plain-ASCII form NO_COLOR selects: this states the
+            // headline itself reads "Not verified" and names the gap, where Contains("Not verified") was a statement
+            // about stdout as a whole.
+            Assert.Equal(
+                FooterHeadline.NotVerified(rich: false, "the known-vulnerability check did not run"),
+                FooterHeadline.Of(stdout));
             // The stderr disclosure is exact (it is not width-wrapped like the report), so it pins the wording.
             Assert.Contains(
                 "scan-package: analysis INCOMPLETE - the known-vulnerability check did not run.", stderr);
@@ -64,7 +69,9 @@ public sealed class CompletenessCliTests
 
             Assert.True(exited, "CLI did not exit within the timeout.");
             Assert.Equal(0, exit);
-            Assert.Contains("Not verified", stdout);                                       // disclosure in the report
+            Assert.Equal(                                                                   // disclosure in the report
+                FooterHeadline.NotVerified(rich: false, "the known-vulnerability check did not run"),
+                FooterHeadline.Of(stdout));
             Assert.Contains("the known-vulnerability check did not run", stderr);          // ... and on stderr
             Assert.Contains("--allow-incomplete given; exit code NOT gated on this.", stderr);
         }
@@ -88,8 +95,12 @@ public sealed class CompletenessCliTests
 
             Assert.True(exited, "CLI did not exit within the timeout.");
             Assert.Equal(3, exit);
-            Assert.Contains("Not verified", stdout);
-            Assert.DoesNotContain("Clean", stdout);
+            // Two caveats (the unanalysable file AND --no-vulns) make this headline longer than the report width, so
+            // it wraps and cannot be compared whole; the verdict is asserted on the single glyph-prefixed line
+            // instead of by DoesNotContain("Clean"), which the caveat's own file path could defeat.
+            Assert.True(
+                FooterHeadline.IsNotVerified(FooterHeadline.Of(stdout)),
+                "the scan-package footer's verdict is not 'Not verified'.");
             Assert.Contains("1 of 1 file(s) could not be analysed", stderr);
         }
         finally
@@ -118,8 +129,9 @@ public sealed class CompletenessCliTests
 
             Assert.True(exited, "CLI did not exit within the timeout.");
             Assert.Equal(1, exit);
-            Assert.DoesNotContain("Clean", stdout);
-            Assert.DoesNotContain("Not verified", stdout);
+            // No verdict of ANY kind was printed — a stronger statement than "the words Clean / Not verified are
+            // absent from stdout", and one the rejected file's own path cannot trip.
+            Assert.Empty(FooterHeadline.AllIn(stdout));
             Assert.DoesNotContain("Assessment", stdout);          // no footer, because there is no report
             Assert.Contains("not a valid CLR module or assembly", stderr);
         }

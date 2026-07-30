@@ -22,10 +22,23 @@ using static Silvergun.CLI.Tests.AnalysisCompletenessTests;
 /// exit 3, and — the highest-value test in the set — the <b>mechanical invariant</b> that stops the exit code and the
 /// report footer drifting apart.
 /// <para>
-/// <b>Why the analyze scenarios construct a <see cref="CapabilityReport"/> directly:</b> measured 2026-07-29,
-/// <c>MethodsSkipped &gt; 0</c> is not reachable from any fixture assembly — <c>AssemblyAnalyzer.Methods</c>
-/// dereferences <c>m.Body</c> while building the method list, so a body that cannot be read fails the whole assembly
-/// (exit 1, no report) instead of counting one skipped method. The per-method state therefore has to be built as data.
+/// <b>Why the analyze scenarios construct a <see cref="CapabilityReport"/> directly.</b> ⚠️ The original rationale
+/// here — "<c>MethodsSkipped &gt; 0</c> is not reachable from any fixture assembly, because
+/// <c>AssemblyAnalyzer.Methods</c> dereferences <c>m.Body</c> while building the method list, so a body that cannot
+/// be read fails the whole assembly (exit 1, no report)" — was true when measured on 2026-07-29 and is <b>no longer
+/// true</b>. <c>docs/agent/tasks/per-method-body-read-granularity.md</c> made <c>Methods</c> a metadata-only
+/// candidate set and moved the body read into each consumer's per-method guard
+/// (<c>AssemblyAnalyzer.TryReadBody</c>), so an unreadable body is now counted and skipped rather than fatal, and
+/// <c>MethodsSkipped &gt; 0</c> <b>is</b> reachable — from an assembly with an out-of-range fat-header
+/// <c>CodeSize</c>, patched at test time and driven end-to-end in <see cref="UnreadableMethodBodyCliTests"/>
+/// (measured 2026-07-30: exit 3, "Not verified", <c>2/3 (1 not analyzed)</c>).
+/// </para>
+/// <para>
+/// Constructed report data remains the right shape <b>for these particular tests</b>, on different grounds: they
+/// pin the <em>truth table</em> of a pure predicate over arbitrary <c>(MethodsTotal, MethodsSkipped)</c> pairs and
+/// flag combinations. Driving that from real analysis would tie the table to whatever one fixture happens to
+/// measure, make the numbers move whenever a fixture gains a method, and cost a child process per row. The
+/// reachability of the state these tests describe is covered where it belongs — end to end, in the CLI tests above.
 /// </para>
 /// <para>
 /// <b>NOTE ON SHAPE:</b> these tests call the SHIPPED seams <see cref="Program.AnalyzeExitCode"/> and
@@ -124,10 +137,12 @@ public sealed class CompletenessExitCodeTests
         AssemblyReportRenderer.Render(console, report);
 
         Assert.Equal(0, exit);
-        var output = writer.ToString();
-        Assert.Contains("Not verified", output);
-        Assert.Contains("3 of 120 method(s) could not be analyzed", output);
-        Assert.Contains("117/120", output);
+        // The disclosure, asserted as the whole verdict LINE (see FooterHeadline): the exit code was un-gated, the
+        // headline still reads "Not verified" and still names the gap.
+        Assert.Equal(
+            FooterHeadline.NotVerified(console, "3 of 120 method(s) could not be analyzed"),
+            FooterHeadline.Of(writer));
+        Assert.Contains("117/120", writer.ToString());
     }
 
     // Precedence end-to-end on the analyze call site: a tripped --strict gate reports 2 even though the analysis was
@@ -188,10 +203,9 @@ public sealed class CompletenessExitCodeTests
         AssemblyReportRenderer.Render(console, report);
 
         Assert.Equal(0, exit);
-        var output = writer.ToString();
-        Assert.Contains("Not verified", output);
-        Assert.Contains("the assembly metadata could not be read", output);
-        Assert.DoesNotContain("Clean", output);
+        Assert.Equal(
+            FooterHeadline.NotVerified(console, "the assembly metadata could not be read"),
+            FooterHeadline.Of(writer));
     }
     #endregion
 
@@ -334,8 +348,17 @@ public sealed class CompletenessExitCodeTests
         // The footer half of the same predicate: "Clean" exactly when complete and nothing gated, "Not verified"
         // exactly when finding-free but incomplete. Under (strict, !allow) these two assertions together ARE
         // "exit 0 <=> the footer says Clean".
-        Assert.Equal(isComplete && !attention, output.Contains("Clean"));
-        Assert.Equal(!isComplete && !attention, output.Contains("Not verified"));
+        //
+        // Asserted on the ONE verdict headline, not on the whole report: a substring test would be satisfied (or
+        // defeated) by the token appearing in any caveat, path or table cell, and FooterHeadline.Of also states that
+        // the report printed exactly one verdict — two verdicts in one report would be a defect of its own.
+        var headline = FooterHeadline.Of(output);
+        Assert.True(
+            (isComplete && !attention) == FooterHeadline.IsClean(headline),
+            $"footer headline '{headline}' disagrees with a Clean verdict for {because}.");
+        Assert.True(
+            (!isComplete && !attention) == FooterHeadline.IsNotVerified(headline),
+            $"footer headline '{headline}' disagrees with a Not-verified verdict for {because}.");
     }
 
     private static AssemblyAnalysisReport AssemblyShape(string shape) => shape switch

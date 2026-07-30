@@ -9,6 +9,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Shared with Silvergun.CLI.Tests (linked, not project-referenced): both suites need to corrupt one method
+         body identically, and a second copy of the PE offset arithmetic is exactly the kind of duplicate that
+         drifts. See tests/Shared/FatHeaderPatcher.cs. -->
+    <Compile Include="..\Shared\FatHeaderPatcher.cs" Link="Shared\FatHeaderPatcher.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />

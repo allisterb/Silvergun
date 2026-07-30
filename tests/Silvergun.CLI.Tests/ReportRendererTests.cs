@@ -231,7 +231,11 @@ public sealed class ReportRendererTests
         var ex = Record.Exception(() => AssemblyReportRenderer.Render(console, report));
 
         Assert.Null(ex);
-        Assert.Contains("Clean", writer.ToString());   // stable footer headline the renderer emits
+        // The whole headline LINE (see FooterHeadline), with the ASSEMBLY verb's cleanDetail tail: the bare token
+        // would also be satisfied by an assembly path or type name that merely contains "Clean".
+        Assert.Equal(
+            FooterHeadline.Clean(console, FooterHeadline.AssemblyCleanDetail),
+            FooterHeadline.Of(writer));
     }
 
     [Fact]
@@ -247,7 +251,11 @@ public sealed class ReportRendererTests
         var ex = Record.Exception(() => PackageReportRenderer.Render(console, report, "Benign.nupkg"));
 
         Assert.Null(ex);
-        Assert.Contains("Clean", writer.ToString());
+        // The PACKAGE verb's cleanDetail tail is a different sentence from the assembly one, so the expected line is
+        // built per renderer rather than shared.
+        Assert.Equal(
+            FooterHeadline.Clean(console, FooterHeadline.PackageCleanDetail),
+            FooterHeadline.Of(writer));
     }
 
     [Fact]

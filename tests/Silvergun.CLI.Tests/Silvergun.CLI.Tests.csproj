@@ -15,8 +15,19 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Shared with Silvergun.CodeAnalysis.IL.Tests (linked, not project-referenced): both suites corrupt one
+         method body the same way, and a second copy of the PE offset arithmetic would drift.
+         See tests/Shared/FatHeaderPatcher.cs. -->
+    <Compile Include="..\Shared\FatHeaderPatcher.cs" Link="Shared\FatHeaderPatcher.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\Silvergun.Intel\Silvergun.Intel.csproj" />
     <ProjectReference Include="..\..\src\Silvergun.CLI\Silvergun.CLI.csproj" />
+    <!-- A findings-free assembly to analyze end-to-end. Referenced (not merely built) so its dll lands in this
+         project's output directory, where UnreadableMethodBodyCliTests copies and corrupts it. Nothing compiles
+         against its types — it is located by file name at test time. -->
+    <ProjectReference Include="..\Silvergun.CLI.Tests.BenignFixture\Silvergun.CLI.Tests.BenignFixture.csproj" />
   </ItemGroup>
 
 </Project>

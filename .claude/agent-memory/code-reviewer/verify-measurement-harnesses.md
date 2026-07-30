@@ -53,3 +53,16 @@ capability 5,128→5,128 byte-identical modulo a BOM sort artifact, non-terminat
 important case**: when there's no doc to "just re-read," check the scratchpad anyway before assuming
 the claimed numbers are unverifiable — they're often still sitting there, and re-deriving them directly
 is exactly what closes the gap a missing doc leaves.
+
+**Fourth case (2026-07-30, `per-method-body-read-granularity` review) — a pinned number in a *source
+comment* whose subject assembly is unnamed.** `src/Silvergun.CLI/Reports/AnalysisCompleteness.cs` gained
+"Measured 2026-07-30: an out-of-range fat-header CodeSize yields 4087/4086/1" without saying on what. No
+harness in scratch this time. Cheap recipe that worked: sweep the local NuGet cache with the built CLI —
+`Silvergun.CLI.exe analyze <dll> --json` and grep `MethodsTotal` across `~/.nuget/packages/<pkg>/*/lib/*/`
+— to attribute the denominator (it was `Newtonsoft.Json 13.0.3/net6.0`, exactly 4087; 13.0.4 is 4107,
+netstandard2.0 is 4064, so the number is version+TFM specific). Then rebuilt the fixture corruption in a
+~40-line scratch console app using in-box `System.Reflection.Metadata` (find the method's RVA → section
+file offset → check low two bits of the header byte == 0b11 → overwrite the 4 bytes at header+4) and
+reran the CLI: 4087/4086/1, exit 3, capability findings byte-identical to the clean run. **How to apply:**
+when a comment pins a measurement but not its input, the input is usually recoverable by brute-force sweep
+— don't downgrade it to "unverifiable, nit". Run the analyzed binary through a child process (ADR-0021).

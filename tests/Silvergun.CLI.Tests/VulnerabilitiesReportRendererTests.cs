@@ -126,7 +126,11 @@ public sealed class VulnerabilitiesReportRendererTests
         var output = writer.ToString();
         Assert.Contains("Known vulnerabilities (OSV)", output);   // the section is always present
         Assert.Contains("(none)", output);                        // clean OSV renders the "(none)" placeholder
-        Assert.Contains("Clean", output);                         // and the report footer stays clean
+        // The footer's verdict, as the whole headline LINE (see FooterHeadline): Contains("Clean", output) could be
+        // satisfied by the token appearing in any package/assembly path the report echoes.
+        Assert.Equal(
+            FooterHeadline.Clean(console, FooterHeadline.PackageCleanDetail),
+            FooterHeadline.Of(writer));
     }
 
     // An UNAVAILABLE check (OSV outage) must render distinctly from clean: a prominent "not verified"/"unavailable"
@@ -145,7 +149,10 @@ public sealed class VulnerabilitiesReportRendererTests
         Assert.Contains("Known vulnerabilities (OSV)", output);
         Assert.Contains("unavailable", output);          // the outage is surfaced prominently
         Assert.Contains("not verified", output);         // ... and clearly labelled NOT verified (footer, lower-case)
-        Assert.DoesNotContain("Clean", output);          // and the footer never claims a clean bill of health
+        // ... and the verdict headline itself names the outage instead of claiming a clean bill of health.
+        Assert.Equal(
+            FooterHeadline.NotVerified(console, "the known-vulnerability check did not complete"),
+            FooterHeadline.Of(writer));
     }
 
     // The same Unavailable report through the --rich path renders without throwing and carries the warning text.
@@ -174,7 +181,9 @@ public sealed class VulnerabilitiesReportRendererTests
         var output = writer.ToString();
         Assert.Contains("Known vulnerabilities (OSV)", output);
         Assert.Contains("(not checked)", output);        // the skip is surfaced as its own state
-        Assert.DoesNotContain("Clean", output);          // and the footer does not claim clean
+        Assert.Equal(                                    // and the verdict headline names the skip, never "Clean"
+            FooterHeadline.NotVerified(console, "the known-vulnerability check did not run"),
+            FooterHeadline.Of(writer));
     }
 
     // The same NotChecked report through the --rich path renders without throwing and carries the "(not checked)" line.

@@ -36,10 +36,13 @@ public sealed class CompletenessFooterTests
 
         AssemblyReportRenderer.Render(console, AssemblyReport(methodsTotal: 120, methodsSkipped: 3));
 
-        var output = writer.ToString();
-        Assert.Contains("Not verified", output);
-        Assert.DoesNotContain("Clean", output);                                   // no false all-clear ...
-        Assert.Contains("3 of 120 method(s) could not be analyzed", output);       // ... and the gap is named
+        // Whole-line equality on the ONE verdict headline (see FooterHeadline): it states in a single assertion that
+        // the report says "Not verified", that it names the gap, and that it is therefore not the Clean line — where
+        // DoesNotContain("Clean") was a statement about the whole report, which these caveats can defeat by merely
+        // embedding an assembly path that contains the token.
+        Assert.Equal(
+            FooterHeadline.NotVerified(console, "3 of 120 method(s) could not be analyzed"),
+            FooterHeadline.Of(writer));
     }
 
     [Fact]
@@ -49,10 +52,9 @@ public sealed class CompletenessFooterTests
 
         AssemblyReportRenderer.Render(console, AssemblyReport(methodsTotal: 5, methodsSkipped: 0, obfuscation: false));
 
-        var output = writer.ToString();
-        Assert.Contains("Not verified", output);
-        Assert.DoesNotContain("Clean", output);
-        Assert.Contains("the obfuscation analysis did not complete", output);
+        Assert.Equal(
+            FooterHeadline.NotVerified(console, "the obfuscation analysis did not complete"),
+            FooterHeadline.Of(writer));
     }
 
     // The sixth caveat source in the footer. This is where the metadata gap is visible to a human: the report prints
@@ -67,10 +69,9 @@ public sealed class CompletenessFooterTests
 
         AssemblyReportRenderer.Render(console, AssemblyReport(methodsTotal: 5, methodsSkipped: 0, metadata: false));
 
-        var output = writer.ToString();
-        Assert.Contains("Not verified", output);
-        Assert.DoesNotContain("Clean", output);
-        Assert.Contains("the assembly metadata could not be read", output);
+        Assert.Equal(
+            FooterHeadline.NotVerified(console, "the assembly metadata could not be read"),
+            FooterHeadline.Of(writer));
     }
 
     // The complement: an assembly whose analyses all ran and found nothing is the ONE shape allowed to read "Clean".
@@ -81,9 +82,11 @@ public sealed class CompletenessFooterTests
 
         AssemblyReportRenderer.Render(console, AssemblyReport(methodsTotal: 5, methodsSkipped: 0));
 
-        var output = writer.ToString();
-        Assert.Contains("Clean", output);
-        Assert.DoesNotContain("Not verified", output);
+        // The assembly verb's own cleanDetail tail — the package footer's is a different sentence, so the expected
+        // line is built per renderer rather than shared.
+        Assert.Equal(
+            FooterHeadline.Clean(console, FooterHeadline.AssemblyCleanDetail),
+            FooterHeadline.Of(writer));
     }
 
     // Findings win the HEADLINE (that verdict is accurate and actionable), but incompleteness is still DISCLOSED on
@@ -98,12 +101,12 @@ public sealed class CompletenessFooterTests
 
         AssemblyReportRenderer.Render(console, report);
 
-        var output = writer.ToString();
-        Assert.Contains("Findings present", output);
-        Assert.Contains("Analysis incomplete", output);
-        Assert.Contains("4 of 10 method(s) could not be analyzed", output);
-        Assert.Contains("there may be more", output);
-        Assert.DoesNotContain("Clean", output);
+        // The verdict line is the findings one ...
+        Assert.Equal(FooterHeadline.FindingsPresent(console), FooterHeadline.Of(writer));
+        // ... and the caveat is still disclosed, whole, on its own line.
+        Assert.Equal(
+            FooterHeadline.Incomplete(console, "4 of 10 method(s) could not be analyzed"),
+            FooterHeadline.DisclosureOf(writer));
     }
 
     // Spec criterion 5: the coverage numbers were computed and invisible before ADR 0024 — a reviewer cannot judge a
@@ -146,10 +149,9 @@ public sealed class CompletenessFooterTests
 
         PackageReportRenderer.Render(console, report, "Some.Package.1.0.0.nupkg");
 
-        var output = writer.ToString();
-        Assert.Contains("Not verified", output);
-        Assert.DoesNotContain("Clean", output);
-        Assert.Contains("2 of 30 method(s) could not be analyzed in lib/net10.0/B.dll", output);
+        Assert.Equal(
+            FooterHeadline.NotVerified(console, "2 of 30 method(s) could not be analyzed in lib/net10.0/B.dll"),
+            FooterHeadline.Of(writer));
     }
 
     // A package whose only content is a binary nothing could be read out of used to read "Clean" — native payloads
@@ -162,10 +164,10 @@ public sealed class CompletenessFooterTests
 
         PackageReportRenderer.Render(console, report, "Native.Package.1.0.0.nupkg");
 
-        var output = writer.ToString();
-        Assert.Contains("Not verified", output);
-        Assert.DoesNotContain("Clean", output);
-        Assert.Contains("1 of 1 file(s) could not be analysed", output);
+        Assert.Equal(
+            FooterHeadline.NotVerified(
+                console, "1 of 1 file(s) could not be analysed: runtimes/win-x64/native/n.dll"),
+            FooterHeadline.Of(writer));
     }
 
     [Theory]
@@ -178,10 +180,7 @@ public sealed class CompletenessFooterTests
 
         PackageReportRenderer.Render(console, PackageWith(vulnStatus: status), "Some.Package.1.0.0.nupkg");
 
-        var output = writer.ToString();
-        Assert.Contains("Not verified", output);
-        Assert.DoesNotContain("Clean", output);
-        Assert.Contains(caveat, output);
+        Assert.Equal(FooterHeadline.NotVerified(console, caveat), FooterHeadline.Of(writer));
     }
 
     [Fact]
@@ -192,10 +191,9 @@ public sealed class CompletenessFooterTests
 
         PackageReportRenderer.Render(console, report, "Some.Package.1.0.0.nupkg");
 
-        var output = writer.ToString();
-        Assert.Contains("Not verified", output);
-        Assert.DoesNotContain("Clean", output);
-        Assert.Contains("the assembly metadata could not be read for 1 assembly", output);
+        Assert.Equal(
+            FooterHeadline.NotVerified(console, "the assembly metadata could not be read for 1 assembly"),
+            FooterHeadline.Of(writer));
     }
 
     [Fact]
@@ -206,10 +204,9 @@ public sealed class CompletenessFooterTests
 
         PackageReportRenderer.Render(console, report, "Some.Package.1.0.0.nupkg");
 
-        var output = writer.ToString();
-        Assert.Contains("Not verified", output);
-        Assert.DoesNotContain("Clean", output);
-        Assert.Contains("the obfuscation analysis did not complete for 1 assembly", output);
+        Assert.Equal(
+            FooterHeadline.NotVerified(console, "the obfuscation analysis did not complete for 1 assembly"),
+            FooterHeadline.Of(writer));
     }
 
     [Fact]
@@ -222,9 +219,11 @@ public sealed class CompletenessFooterTests
             Package(Analyzed("lib/net10.0/A.dll", methodsTotal: 7, methodsSkipped: 0)),
             "Some.Package.1.0.0.nupkg");
 
-        var output = writer.ToString();
-        Assert.Contains("Clean", output);
-        Assert.DoesNotContain("Not verified", output);
+        // The package verb's cleanDetail tail lists all five of its finding sources — a different sentence from the
+        // assembly footer's, which is why the expected line is parameterised on the renderer under test.
+        Assert.Equal(
+            FooterHeadline.Clean(console, FooterHeadline.PackageCleanDetail),
+            FooterHeadline.Of(writer));
     }
 
     [Fact]
@@ -259,7 +258,9 @@ public sealed class CompletenessFooterTests
             "Some.Package.1.0.0.nupkg");
 
         var output = writer.ToString();
-        Assert.Contains("Not verified", output);
+        // Four caveats at once, so this headline WRAPS at the console width — the verdict is asserted on the (single)
+        // glyph-prefixed line rather than by whole-line equality, which a wrapped line cannot satisfy.
+        Assert.True(FooterHeadline.IsNotVerified(FooterHeadline.Of(output)), "the footer's verdict is not 'Not verified'.");
         Assert.False(output.Contains((char)27), "output must contain no ANSI escape byte (0x1b)");
         var offender = output.FirstOrDefault(c => c > (char)0x7f);
         Assert.True(offender == '\0', $"default output must be 7-bit ASCII; found char U+{(int)offender:x4}.");
@@ -282,12 +283,14 @@ public sealed class CompletenessFooterTests
         var (console, writer) = PlainConsole();
 
         var ex = Record.Exception(() => CompletenessFooter.WriteHeadline(
-            console, rich: false, attention: false, default, "no sensitive-API or obfuscation findings."));
+            console, rich: false, attention: false, default, FooterHeadline.AssemblyCleanDetail));
 
         Assert.Null(ex);
-        var output = writer.ToString();
-        Assert.DoesNotContain("Clean", output);
-        Assert.Contains("Not verified", output);
+        // rich:false is passed explicitly here (the footer is driven directly, not through a renderer), so the ASCII
+        // form is the expected one regardless of the console's own mode. The empty caveat join is the awkward
+        // "no findings, but ." sentence the comment above accepts — pinned verbatim so a future grammar fix is a
+        // deliberate change, not a silent one.
+        Assert.Equal(FooterHeadline.NotVerified(rich: false), FooterHeadline.Of(writer));
     }
 
     // The findings-present branch joins the caveats too, so it needs the same null-safety proof.
@@ -297,12 +300,10 @@ public sealed class CompletenessFooterTests
         var (console, writer) = PlainConsole();
 
         var ex = Record.Exception(() => CompletenessFooter.WriteHeadline(
-            console, rich: false, attention: true, default, "no sensitive-API or obfuscation findings."));
+            console, rich: false, attention: true, default, FooterHeadline.AssemblyCleanDetail));
 
         Assert.Null(ex);
-        var output = writer.ToString();
-        Assert.DoesNotContain("Clean", output);
-        Assert.Contains("Findings present", output);
+        Assert.Equal(FooterHeadline.FindingsPresent(rich: false), FooterHeadline.Of(writer));
     }
 
     [Fact]

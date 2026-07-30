@@ -101,7 +101,14 @@ public sealed class CanonicalNameLayersFixture : IDisposable
         disassembler.Dispose();
     }
 
-    // Every bodied method definition, plus every call/callvirt/newobj/ldftn/ldvirtftn operand.
+    // Every method definition whose body can actually be READ, plus every call/callvirt/newobj/ldftn/ldvirtftn
+    // operand in it. AssemblyAnalyzer.Methods yields body-read CANDIDATES (!IsAbstract && !IsExternal, no Body
+    // dereference — see docs/agent/tasks/per-method-body-read-granularity.md), so the body must be taken through
+    // TryReadBody rather than dereferenced here. The guard comes BEFORE the definition is recorded so a candidate
+    // with no readable body contributes neither a definition nor a call site: that is the set the Model side walks
+    // (it enumerates bodied methods), and admitting a bodiless method on the CCI side only would break parity
+    // silently — Dummy.MethodBody.Operations is empty, so the extra definition would arrive with no call sites and
+    // no exception to point at it.
     private static LayerNames FromCci(AssemblyAnalyzer assembly)
     {
         var definitions = new List<MethodIdentity>();
@@ -109,9 +116,12 @@ public sealed class CanonicalNameLayersFixture : IDisposable
 
         foreach (var method in assembly.Methods)
         {
+            if (AssemblyAnalyzer.TryReadBody(method) is not { Body: { } body })
+                continue;
+
             definitions.Add(CciNames.Of(method));
 
-            foreach (var operation in method.Body.Operations)
+            foreach (var operation in body.Operations)
             {
                 if (IsCallSite(operation.OperationCode) && operation.Value is Cci.IMethodReference callee)
                     callSites.Add(CciNames.Of(callee));

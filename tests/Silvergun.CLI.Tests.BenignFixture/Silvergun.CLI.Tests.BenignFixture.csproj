@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <!-- The whole point of this assembly is that `analyze` reports it Clean, so nothing here may reference a
+         sensitive BCL API. Keeping it dependency-free is what makes that property inspectable by reading one file. -->
+  </PropertyGroup>
+
+</Project>

@@ -8,7 +8,7 @@
 - [Isolating FailFast re-verification](feedback_isolate-failfast-child-process.md) — actually revert/rebuild/run FailFast regression tests as a Bash child process, then restore and diff-check
 - [PlatformTypes.Void fix status](project_platformtypes_void_fix.md) — void fix now superseded by the general `BasicType.Equals` corlib-unification (2026-07-27); spoof residual pinned by a test, not just a comment.
 - [analysis-net review workflow](project_analysisnet_workflow.md) — spike-doc pattern, re-verify claims by reverting, ADR-0021 FailFast isolation
-- [Re-run scratchpad measurement harnesses to verify docs/agent/measurements claims](verify-measurement-harnesses.md) — don't just re-read the doc's tables, rebuild+rerun the Probe if it's still in scratch; even useful with **no doc at all**.
+- [Re-run scratchpad measurement harnesses to verify docs/agent/measurements claims](verify-measurement-harnesses.md) — rebuild+rerun the Probe rather than re-reading tables; works with **no doc at all**, and for numbers pinned only in a source comment.
 - [TypeInferenceAnalysis / dataflow track readiness](typeinferenceanalysis-readiness.md) — `PlatformTypes` mscorlib-pinning item now fixed (`BasicType.Equals` widened); still unreached from src/.
 - [ext/ comments explaining non-obvious design rationale are acceptable](ext-comment-proportionality.md) — weigh merge-conflict cost against the alternative of the reasoning being lost.
 - [CLI exit code vs report footer predicate](project_exit-code-footer-predicate.md) — ADR-0024's invariant has one accepted counterexample (PackageMetadata script findings); `attention` is copied across 4+ sites.
