@@ -41,6 +41,14 @@
          it as a child process by path (see ChildProcessProbe / TypedReferencePointerRegressionTests) — the
          same mechanism Silvergun.CLI.Tests uses for the CLI apphost. -->
     <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.PathologicalSignatureProbe\Silvergun.CodeAnalysis.IL.Tests.PathologicalSignatureProbe.csproj" />
+    <!-- Fixture for the reference-side naming invariant and the self-referential enum
+         (docs/agent/measurements/ilspy-provider-spike.md §0.3 and §7). Its assembly is COPIED, never loaded
+         from here: once alone into an empty directory so nothing it references resolves, and once with its
+         value__ signatures patched into a cycle. typeof(ThreeApis) is only used to locate the file. -->
+    <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.MetadataShapesFixture\Silvergun.CodeAnalysis.IL.Tests.MetadataShapesFixture.csproj" />
+    <!-- Exe, so the plain ProjectReference copies its apphost next to this test assembly and the cyclic-enum
+         test can spawn it by path (same mechanism as the PathologicalSignatureProbe above). -->
+    <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.CyclicEnumProbe\Silvergun.CodeAnalysis.IL.Tests.CyclicEnumProbe.csproj" />
     <!-- Regression fixture for the TAC void-return fix in ext/analysis-net's Disassembler - see
          docs/agent/measurements/tac-platformtypes-spike.md. Also multi-targeted (net472;net10.0), so the
          same "normal reference + forced-build reference" pair as the MatrixFixture entries above is needed:

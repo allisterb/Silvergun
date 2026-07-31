@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <IsPackable>false</IsPackable>
+    <!-- Every declaration here exists to be READ as metadata, never executed: unused locals, undisposed
+         HttpClients and unreferenced enum members are the point, so the usual "you never used this" analyzers
+         would only produce noise. -->
+    <NoWarn>$(NoWarn);CA1416;CS0649;SYSLIB0014</NoWarn>
+  </PropertyGroup>
+
+</Project>

@@ -12,6 +12,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="ICSharpCode.Decompiler" Version="10.1.1.8388" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\ext\analysis-net\Backend\Backend.NET6.csproj" />
     <ProjectReference Include="..\..\ext\analysis-net\CCIProvider\CCIProvider.NET6.csproj" />
     <ProjectReference Include="..\..\ext\analysis-net\cci\NET6\Microsoft.Cci\Microsoft.Cci.NET6.csproj" />

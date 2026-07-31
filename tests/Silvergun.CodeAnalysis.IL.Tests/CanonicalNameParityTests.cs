@@ -176,6 +176,76 @@ public sealed class CanonicalNameParityTests : IClassFixture<CanonicalNameLayers
     }
 
     /// <summary>
+    /// KNOWN DEFECT, pinned deliberately — <b><see cref="CciNames"/> renders <c>`N</c> with fewer than <em>N</em>
+    /// generic arguments.</b> This is the same rendering the test above pins verbatim, but asserted as the
+    /// self-inconsistency it is rather than as a string: the middle link of
+    /// <c>GenericOuter&lt;int&gt;.Inner.Innermost&lt;bool&gt;</c> is not itself instantiated, so it contributes no
+    /// argument, yet the arity still counts its container's parameter — arity <b>2</b>, arguments <b>1</b>. The
+    /// non-instantiated <c>GenericOuter&lt;int&gt;.Inner</c> is the same defect at arity 1 / 0 arguments, and
+    /// <c>Inner&lt;string&gt;</c> (both links instantiated) is the consistent control at 2 / 2.
+    /// <para>
+    /// Measured: <b>294 divergences in 415,057 paired entities (0.071 %)</b>, all from this one cause, and ILSpy
+    /// — which flattens <c>TypeArguments</c> over the whole chain — is the correct side in all 294
+    /// (<c>docs/agent/measurements/ilspy-provider-spike.md</c> §1.4 category 1 and §1.10 item 2).
+    /// <c>CciNames.GenericArguments</c> reproduces this on purpose, because
+    /// <c>CCIProvider.TypeExtractor.ExtractGenericType</c> does it and <c>Model</c> cannot recover the dropped
+    /// argument; that bug-compatibility is what keeps the two layers equal, so "fixing" one side alone would
+    /// split the call graph. Do not change either renderer without deciding the cross-layer contract first
+    /// (§1.9).
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>This is a <see cref="CanonicalName.NodeId(MethodIdentity)"/> concern only.</b>
+    /// <see cref="CanonicalName.ClassificationKey(MethodIdentity)"/> — the seam the capability map and catalog
+    /// key on — diverged <b>0 / 415,057</b>, because arity and arguments never render into it. The last block
+    /// below asserts exactly that, so this pin can never be read as evidence that classification is affected.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void KnownDefect_NodeIdOfANonInstantiatedNestingLink_RendersHigherArityThanItHasGenericArguments()
+    {
+        // The three renderings really are what both layers produce — otherwise the arithmetic below would be
+        // about constants rather than about behaviour.
+        foreach (var layer in Layers)
+        {
+            var signature = Assert.Single(
+                layer.DefinitionNodeIds,
+                id => id.StartsWith(Prefix + "CanonicalShapes.TakesNestedGenericInstantiations(", StringComparison.Ordinal));
+
+            Assert.Equal(NestedGenericSignature, signature);
+        }
+
+        // THE DEFECT: `2 carried by one argument. 1 < 2 is the whole finding.
+        Assert.Equal(2, ArityOf(InnermostInstantiated));
+        Assert.Equal(new[] { "System.Boolean" }, ArgumentsOf(InnermostInstantiated));
+        Assert.True(
+            ArgumentsOf(InnermostInstantiated).Count < ArityOf(InnermostInstantiated),
+            $"'{InnermostInstantiated}' no longer under-reports its arguments. If CciNames was fixed, this test "
+                + "must be rewritten to assert the correct rendering (…Innermost`2<System.Int32,System.Boolean>) "
+                + "and the cross-layer contract re-decided — not deleted.");
+
+        // The same defect one link out: arity 1, no arguments at all.
+        Assert.Equal(1, ArityOf(InnerUninstantiated));
+        Assert.Empty(ArgumentsOf(InnerUninstantiated));
+
+        // The control, so the assertions above are not simply "the parser always reports fewer": an instantiation
+        // whose every link is instantiated renders arity and arguments consistently.
+        Assert.Equal(2, ArityOf(InnerInstantiated));
+        Assert.Equal(new[] { "System.Int32", "System.String" }, ArgumentsOf(InnerInstantiated));
+
+        // ...and the classification key of the very same method carries neither arity nor arguments, on either
+        // layer — the measured 0/415,057 for ClassificationKey. The defect cannot reach the capability seam.
+        foreach (var layer in Layers)
+        {
+            var key = Assert.Single(
+                layer.DefinitionKeys,
+                k => k == Prefix + "CanonicalShapes.TakesNestedGenericInstantiations");
+
+            Assert.DoesNotContain("`", key, StringComparison.Ordinal);
+            Assert.DoesNotContain("<", key, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
     /// Compiler-generated names (closures, the <c>&lt;&gt;c</c> singleton, async and iterator state machines,
     /// and the async <b>local function</b> shape <c>&lt;&lt;X&gt;g__Y|N&gt;d</c>) are carried verbatim by both
     /// layers. Matched by fragment because the compiler's ordinal suffixes are not part of the contract.
@@ -332,6 +402,24 @@ public sealed class CanonicalNameParityTests : IClassFixture<CanonicalNameLayers
 
         Assert.Null(exception);
     }
+
+    // The CLR arity a rendering claims (`N before its argument list), or 0 when it claims none. Deliberately
+    // parsed out of the rendered string rather than read from the identity: the defect above is that the two
+    // disagree, so the assertion has to look at what a consumer of the node id actually sees.
+    private static int ArityOf(string rendered)
+    {
+        var end = rendered.IndexOf('<') is var open && open >= 0 ? open : rendered.Length;
+        var tick = rendered.LastIndexOf('`', end - 1);
+
+        return tick < 0 ? 0 : int.Parse(rendered[(tick + 1)..end]);
+    }
+
+    // The generic arguments a rendering actually carries. Only flat argument lists occur in the three shapes this
+    // is used on, so a plain split is exact; a nested instantiation would need a depth-aware scan.
+    private static IReadOnlyList<string> ArgumentsOf(string rendered) =>
+        rendered.IndexOf('<') is var open && open < 0
+            ? []
+            : rendered[(open + 1)..^1].Split(',');
 
     #endregion
 
