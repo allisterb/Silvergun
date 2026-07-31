@@ -59,6 +59,27 @@ existing tests" split **cannot** leave the suite green — the baselines break b
 construction. Either let phase 1 own the baseline update, or tell it the red tests are
 expected. Do not ask a subagent for both.
 
+**⚠️ 2026-07-30/31 — A SECOND, DISTINCT FAILURE SHAPE: asserting ENVIRONMENTAL facts in dispatch
+prompts.** The entries above are wrong claims about *behaviour*. Five more this session were wrong
+claims about *what exists*, each stated confidently in a task prompt and each caught by the subagent:
+
+- *"`InternalsVisibleTo` is already on the assembly"* — **it was not.** Had the agent not checked,
+  `internal` would have been a no-op and a security fix would have shipped unfalsifiable by its suite.
+- *"ILSpy raises a typed `EnumUnderlyingTypeResolveException` on cyclic enums"* — it raises nothing;
+  it degrades silently. (The *structural* half of the claim was right, the signal half wrong.)
+- *"CCI's `GetFullName` defects are what `CciNames` must avoid reproducing"* — those defects live in
+  analysis-net's `Model/Extensions.cs`, which `CciNames.Walk` never calls. Wrong layer.
+- *"Cecil's `DefaultAssemblyResolver` throws on missing dependencies"* — on the read path it never
+  throws; it **over-reaches**, binding refs to files in the analyzer's own output directory.
+- *"Reader-resolution asymmetry is likely the largest source of naming divergence"* — measured **0**.
+
+**The shape: I pattern-match from neighbouring code and state the result as fact.** Four of the five
+would have caused real damage if believed. **How to apply: an environmental claim in a dispatch
+prompt — does this file/attribute/API exist, is this configured — costs one `grep` to verify and I
+should verify it, OR mark it explicitly as unverified so the agent checks.** The line
+*"if the code contradicts this prompt, the code wins — say so plainly"* is what surfaced all five;
+keep it in every dispatch.
+
 **How to apply:** for anything touching `ext/`, metadata reading, or compiler-generated
 shapes, write a spike spec whose deliverable is *a table of measured numbers plus a
 verdict*, and say explicitly that **a negative result is a successful spike**. Prefer

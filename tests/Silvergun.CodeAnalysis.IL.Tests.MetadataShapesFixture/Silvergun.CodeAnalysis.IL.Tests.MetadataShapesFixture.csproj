@@ -5,6 +5,9 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>disable</Nullable>
     <IsPackable>false</IsPackable>
+    <!-- ElementTypeConstructions carries an `int*` field: C# requires unsafe for a pointer type, and a pointer
+         field is the only way to get a real IPointerTypeReference out of CCI without hand-building one. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- Every declaration here exists to be READ as metadata, never executed: unused locals, undisposed
          HttpClients and unreferenced enum members are the point, so the usual "you never used this" analyzers
          would only produce noise. -->

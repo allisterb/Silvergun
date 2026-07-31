@@ -352,15 +352,62 @@ public sealed class CapabilityAnalysis(AssemblyAnalyzer assembly)
             _ => null,
         };
 
-    // The capability of the first catalog entry matching the callee, or null if none match.
+    // The capability of the first catalog entry matching the callee, or null if none match — and null outright
+    // when the callee is declared on a constructed-from-element type, which must never reach the catalog.
     private static Capability? Match(IMethodReference callee)
     {
+        if (IsElementTypeConstruction(callee.ContainingType))
+            return null;
+
         var typeName = AssemblyAnalyzer.TypeName(callee.ContainingType);
         var entry = Catalog.FirstOrDefault(api =>
             typeName.StartsWith(api.TypePrefix, StringComparison.Ordinal) &&
             (api.Method is null || api.Method == callee.Name.Value));
         return entry?.Capability;
     }
+
+    // Whether a declaring type is CONSTRUCTED ON AN ELEMENT TYPE — an array, a pointer or a managed (by-ref)
+    // pointer — in which case it must not be prefix-matched against the catalog at all.
+    //
+    // AssemblyAnalyzer.TypeName renders all three as elementTypeName + a suffix ("[]", "[,]", "*", "&"), so the
+    // element type's full name survives as a PREFIX of the rendering and every catalog entry naming that element
+    // type matches spuriously: "System.Diagnostics.Process[,]".StartsWith("System.Diagnostics.Process") is true,
+    // so an array-element read would be reported as ProcessExecution. An array of Process is not a Process.
+    //
+    // EXCLUDE, DO NOT UNWRAP. The only methods declared on these types are the runtime-provided array accessors
+    // (Get/Set/Address/.ctor) plus inherited System.Array members; none of them is capability-relevant, and
+    // matching the ELEMENT type instead would reinstate exactly the false positive this removes.
+    //
+    // Generic instances are deliberately NOT excluded and must keep working: List<Process> renders as
+    // System.Collections.Generic.List<System.Diagnostics.Process>, whose prefix is the CONTAINER, so the
+    // catalogued name can only appear inside the "<...>" argument list where StartsWith cannot reach it (pinned
+    // by CapabilityMatcherSeamTests).
+    //
+    // Unreachable through CCI today — it rewrites multi-dimensional array accessors to synthetic Array_* opcodes
+    // whose operand is an IArrayTypeReference rather than an IMethodReference, so Callee never sees them
+    // (MultiDimensionalArrayCallSiteGapTests). This is a guard for any future reader or call-site seam that does
+    // surface them; measured at 4 real false positives on the fixture assembly with a reader that does
+    // (docs/agent/measurements/ilspy-provider-spike.md §C.3).
+    //
+    // IModifiedTypeReference is deliberately NOT unwrapped, so a modifier-wrapped construction
+    // (modopt(...) Process[,]) is not excluded here. We found no reachable case to exercise such an unwrap
+    // against: the custom modifiers CCI surfaces sit in signature positions, not on a method reference's
+    // ContainingType, and CciNames.TypeName's own comment records modified types as unreachable in the corpus
+    // measured. Should a modifier ever reach a ContainingType, what this needs is a depth-bounded unwrap here
+    // mirroring CciNames.Definition.
+    //
+    // The capabilities.cm map path needs no equivalent guard: it keys on
+    // CanonicalName.ClassificationKey(MethodIdentity), and CciNames.Of degrades every non-named CCI reference
+    // (array, pointer, managed pointer, function pointer) to TypeIdentity.Unknown, so such a declaring type
+    // renders as "<unknown>" and carries no element-type name to match on at all.
+    /// <summary>
+    /// Whether <paramref name="type"/> is an array, pointer or managed-pointer construction, per the exclusion
+    /// described above. Internal rather than private solely so that exclusion can be asserted directly: CCI does
+    /// not route such a declaring type to a call site, so no fixture assembly can reach this predicate through
+    /// <see cref="Match"/>, and a test that goes through an assembly cannot tell the three arms apart.
+    /// </summary>
+    internal static bool IsElementTypeConstruction(ITypeReference? type) =>
+        type is IArrayTypeReference or IPointerTypeReference or IManagedPointerTypeReference;
 
     private static string CalledApi(IMethodReference callee) => $"{AssemblyAnalyzer.TypeName(callee.ContainingType)}.{callee.Name.Value}";
     #endregion
