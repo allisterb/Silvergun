@@ -171,10 +171,12 @@ public sealed class CapabilityAnalysisTests : IClassFixture<AssemblyAnalyzerFixt
     // CapabilityMapDataTests.Default_RepresentsEveryCapabilityInTheTaxonomy. Only the legacy-catalog guard
     // below belongs in this class.
 
-    // Case 7b — the legacy catalog is FROZEN pending phase 2 (which wires CapabilityAnalysis onto the map),
-    // so it is deliberately scoped to the nine capabilities that predate the map and must not be asserted to
-    // cover the two appended ones. Keeping this guard means phase 2's "no lost findings" gate still has a
-    // concrete before-state to preserve: every one of these nine must still be produced after the switch.
+    // Case 7b — POST-PHASE-2. The catalog is no longer the matcher: call sites are classified by
+    // CapabilityMap.Default (capabilities.cm). It is retained verbatim as the FIXED REFERENCE SET the map is
+    // checked against by CapabilityMapDataTests.Default_RepresentsEveryLegacyCatalogEntryWithTheSameCapability,
+    // and that check is only a real guard while this list stays INDEPENDENT of capabilities.cm — projecting the
+    // catalog from the map would make it vacuous while looking like cleanup. It is therefore deliberately scoped
+    // to the nine capabilities that predate the map and must not be asserted to cover the two appended ones.
     [Fact]
     public void Catalog_IsNonEmpty_AndStillCoversThePreMapCapabilities()
     {
@@ -189,6 +191,64 @@ public sealed class CapabilityAnalysisTests : IClassFixture<AssemblyAnalyzerFixt
 
         Assert.All(preMap, capability =>
             Assert.Contains(CapabilityAnalysis.Catalog, e => e.Capability == capability));
+    }
+
+    // Case 7c — "FROZEN" MADE MECHANICAL. The guard above only asks that each of nine capabilities appears
+    // SOMEWHERE, so deleting an entry — or a whole row such as System.Net.Dns — passed every test in the repo,
+    // hollowing out the reference set exactly as a future "cleanup" would while every map test stayed green.
+    // The catalog is a closed historical record of the pre-map matcher, not a living list, so it is pinned as an
+    // exact set: 32 entries, asserted by their (Capability, TypePrefix, Method) triples so a failure names the
+    // row that moved. THIS IS NOT A BASELINE TO REFRESH — a diff here means either a genuine deletion (a
+    // regression: the map's coverage gate just lost a case) or a deliberate, reviewed rewrite of what "the
+    // legacy catalog" means. Trailing dots are load-bearing: they are the two SUBTREE entries of the old
+    // StartsWith matcher. Asserted IN ORDER, which is part of the record rather than incidental — the pre-map
+    // matcher took the FIRST matching entry, so the sequence is what the frozen behaviour actually was.
+    [Fact]
+    public void Catalog_IsTheFrozen32EntryPreMapReferenceSet()
+    {
+        string[] expected =
+        [
+            "FileSystem|System.IO.File|",
+            "FileSystem|System.IO.Directory|",
+            "FileSystem|System.IO.FileInfo|",
+            "FileSystem|System.IO.DirectoryInfo|",
+            "FileSystem|System.IO.FileStream|",
+            "Network|System.Net.Http.HttpClient|",
+            "Network|System.Net.WebClient|",
+            "Network|System.Net.WebRequest|",
+            "Network|System.Net.Dns|",
+            "Network|System.Net.Sockets.|",
+            "ProcessExecution|System.Diagnostics.Process|",
+            "Registry|Microsoft.Win32.Registry|",
+            "EnvironmentProbe|System.Environment|GetEnvironmentVariable",
+            "EnvironmentProbe|System.Environment|GetEnvironmentVariables",
+            "EnvironmentProbe|System.Environment|GetFolderPath",
+            "EnvironmentProbe|System.Environment|get_UserName",
+            "EnvironmentProbe|System.Environment|get_MachineName",
+            "EnvironmentProbe|System.Environment|get_UserDomainName",
+            "DynamicCodeLoading|System.Reflection.Assembly|Load",
+            "DynamicCodeLoading|System.Reflection.Assembly|LoadFrom",
+            "DynamicCodeLoading|System.Reflection.Assembly|LoadFile",
+            "DynamicCodeLoading|System.Reflection.Assembly|UnsafeLoadFrom",
+            "DynamicCodeLoading|System.Activator|CreateInstance",
+            "DynamicCodeLoading|System.Activator|CreateInstanceFrom",
+            "DynamicCodeLoading|System.Reflection.Emit.|",
+            "DynamicCodeLoading|System.Linq.Expressions.Expression|Compile",
+            "ReflectionInvocation|System.Reflection.MethodBase|Invoke",
+            "ReflectionInvocation|System.Reflection.MethodInfo|Invoke",
+            "ReflectionInvocation|System.Delegate|DynamicInvoke",
+            "NativeInterop|System.Runtime.InteropServices.Marshal|",
+            "NativeInterop|System.Runtime.InteropServices.NativeLibrary|",
+            "Cryptography|System.Security.Cryptography.|",
+        ];
+
+        // Count first: a set comparison alone would not distinguish a duplicated row from a lost one.
+        Assert.Equal(32, CapabilityAnalysis.Catalog.Count);
+        Assert.Equal(expected.Length, CapabilityAnalysis.Catalog.Count);
+
+        Assert.Equal(
+            expected,
+            CapabilityAnalysis.Catalog.Select(api => $"{api.Capability}|{api.TypePrefix}|{api.Method}").ToArray());
     }
 
     // Case 8 (ADR 0005, the crux) — EH-heavy regression. DownloadInTryCatchAsync compiles to an async

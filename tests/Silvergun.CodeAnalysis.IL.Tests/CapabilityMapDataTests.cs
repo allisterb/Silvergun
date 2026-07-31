@@ -1,6 +1,9 @@
 namespace Silvergun.CodeAnalysis.IL.Tests;
 
 using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 
 using Silvergun.CodeAnalysis.IL;
 
@@ -48,6 +51,104 @@ public sealed class CapabilityMapDataTests
         Assert.True(stats.SafeEntries > 0, "The built-in map has no safe entries (the allowlist is missing).");
         Assert.True(stats.UnspecifiedEntries > 0, "The built-in map has no unspecified entries (carve-outs are missing).");
         Assert.Equal(stats.CapabilityEntries + stats.SafeEntries + stats.UnspecifiedEntries + stats.UnanalyzedEntries, stats.TotalEntries);
+    }
+
+    // THE SILENT-OVERRIDE GUARD, and the reason it is derived rather than a literal count. Entries are stored in
+    // a dictionary keyed by pattern, so writing the same pattern twice does not reject anything and does not warn
+    // - the second line simply wins and the first vanishes. A stale hard-coded total would not catch that either
+    // (it moves the moment anyone adds an entry, which the allowlist-curation follow-up will do constantly), so
+    // the expectation is COUNTED FROM THE EMBEDDED FILE ITSELF, per directive, and compared with what the parser
+    // built. A mismatch means duplicate patterns collapsed - name them.
+    [Fact]
+    public void Default_EntryCountPerDirective_MatchesTheEmbeddedFileWithNoSilentlyCollapsedDuplicates()
+    {
+        // The arity filter is not defensive noise: DirectiveLines applies no filter of its own, so a single-token
+        // junk line - precisely the input the parser's reject machinery exists to absorb - would make the
+        // projection below die with IndexOutOfRangeException instead of producing the failure message this test
+        // was written to produce. Under-length lines are asserted on separately, immediately below.
+        var patterns = DirectiveLines()
+            .Where(tokens => tokens.Length >= 2)
+            .Select(tokens => (Directive: tokens[0].ToLowerInvariant(), Pattern: tokens[1]))
+            .Where(entry => entry.Directive != "ignore-edge")
+            .ToArray();
+
+        var duplicates = patterns
+            .GroupBy(entry => entry.Pattern, StringComparer.Ordinal)
+            .Where(group => group.Count() > 1)
+            .Select(group => $"'{group.Key}' x{group.Count()}")
+            .ToArray();
+
+        Assert.True(
+            duplicates.Length == 0,
+            "Resources/capabilities.cm repeats a pattern; the later line silently replaces the earlier one and "
+                + $"the earlier entry detects nothing: {string.Join(", ", duplicates)}");
+
+        var stats = CapabilityMap.Default.Stats;
+
+        Assert.Equal(patterns.Count(e => e.Directive == "capability"), stats.CapabilityEntries);
+        Assert.Equal(patterns.Count(e => e.Directive == "safe"), stats.SafeEntries);
+        Assert.Equal(patterns.Count(e => e.Directive == "unspecified"), stats.UnspecifiedEntries);
+        Assert.Equal(patterns.Count(e => e.Directive == "unanalyzed"), stats.UnanalyzedEntries);
+        Assert.Equal(patterns.Length, stats.TotalEntries);
+    }
+
+    // The arity precondition the count comparison above now filters on, asserted in its own right rather than
+    // silently skipped: every directive line carries at least a directive and a pattern. A one-token line is not
+    // a harmless typo — the parser rejects it, so it is an entry that detects nothing, and
+    // Default_ParsesTheEmbeddedResourceWithNoRejectedLines would fail too. Named here so the diagnosis reads
+    // "line N is too short" rather than only "something was rejected".
+    [Fact]
+    public void Default_EveryDirectiveLine_CarriesADirectiveAndAPattern()
+    {
+        var underLength = DirectiveLines()
+            .Where(tokens => tokens.Length < 2)
+            .Select(tokens => $"'{string.Join(' ', tokens)}'")
+            .ToArray();
+
+        Assert.True(
+            underLength.Length == 0,
+            "Resources/capabilities.cm has directive lines with fewer than two tokens; each is rejected by the "
+                + $"parser and detects nothing: {string.Join(", ", underLength)}");
+    }
+
+    // ADR decision 1 of the phase-2 measurement (capability-map.md, 2026-07-31): CoreLib's INTERNAL filesystem
+    // helper System.IO.FileSystem was caught by the legacy prefix purely by accident -
+    // "System.IO.FileSystem".StartsWith("System.IO.File") - but the finding is semantically CORRECT, so the map
+    // needed an entry of its own or 99 real detections would have been lost. Asserted alongside the near-miss it
+    // is NOT: FileNotFoundException came in through the same accident and is an accepted removal, because an
+    // exception type is not a filesystem capability.
+    [Theory]
+    [InlineData("System.IO.FileSystem.CopyFile")]
+    [InlineData("System.IO.FileSystem.DeleteFile")]
+    [InlineData("System.IO.FileSystem.CreateDirectory")]
+    public void Default_InternalCoreLibFileSystemHelper_ClassifiesAsFileSystem(string key)
+    {
+        Assert.Equal(
+            new CapabilityVerdict(CapabilityClass.Capability, Capability.FileSystem),
+            CapabilityMap.Default.Classify(key));
+    }
+
+    // ...and the siblings the same legacy prefix also swallowed stay unclassified: these are the accepted
+    // false-positive removals of the phase-2 known-delta table, and re-widening System.IO.File to a subtree
+    // would silently bring every one of them back.
+    //
+    // The last two are the three true-lost rows the architect's hand enumeration missed and the review gate
+    // recovered by recomputing from the TSVs (MarshalAsAttribute x2, MarshalDirectiveException x1: 480 lost, not
+    // 477). They belong to the same System.Runtime.InteropServices.Marshal prefix over-match as the Marshalling.*
+    // row — an attribute type and an exception type are not NativeInterop — and are listed here so the delta's
+    // membership is asserted rather than recorded only in prose.
+    [Theory]
+    [InlineData("System.IO.FileNotFoundException..ctor")]
+    [InlineData("System.IO.FileLoadException..ctor")]
+    [InlineData("System.IO.DirectoryNotFoundException..ctor")]
+    [InlineData("System.Net.DnsEndPoint..ctor")]
+    [InlineData("System.Diagnostics.ProcessModule.get_FileName")]
+    [InlineData("System.Runtime.InteropServices.Marshalling.Utf8StringMarshaller.ManagedToUnmanagedIn.FromManaged")]
+    [InlineData("System.Runtime.InteropServices.MarshalAsAttribute..ctor")]
+    [InlineData("System.Runtime.InteropServices.MarshalDirectiveException..ctor")]
+    public void Default_TypesTheLegacyPrefixOverMatched_AreNotClassified(string key)
+    {
+        Assert.Equal(CapabilityVerdict.None, CapabilityMap.Default.Classify(key));
     }
 
     // Every value of the (append-only) Capability enum must be producible by the map. A value nothing can
@@ -456,6 +557,32 @@ public sealed class CapabilityMapDataTests
         api.Method is { } method ? $"{api.TypePrefix}.{method}"
         : api.TypePrefix.EndsWith('.') ? $"{api.TypePrefix}SomeType.SomeMember"
         : $"{api.TypePrefix}.SomeMember";
+
+    // Every non-blank, non-comment line of the embedded capabilities.cm, tokenized the way the parser tokenizes
+    // it. Read from the SAME embedded resource CapabilityMap.Default loads, so the two sides of the count
+    // comparison above cannot drift apart by reading different files.
+    private static string[][] DirectiveLines()
+    {
+        var assembly = typeof(CapabilityMap).Assembly;
+        var name = Assert.Single(
+            assembly.GetManifestResourceNames(),
+            n => n.EndsWith(".Resources.capabilities.cm", StringComparison.Ordinal));
+
+        using var stream = assembly.GetManifestResourceStream(name);
+        Assert.NotNull(stream);
+        using var reader = new StreamReader(stream!);
+
+        var lines = new List<string[]>();
+        for (var line = reader.ReadLine(); line is not null; line = reader.ReadLine())
+        {
+            var text = line.IndexOf('#') is var comment && comment >= 0 ? line[..comment] : line;
+            if (text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries) is { Length: > 0 } tokens)
+                lines.Add(tokens);
+        }
+
+        Assert.NotEmpty(lines);
+        return [.. lines];
+    }
 
     private static string Describe(CapabilityVerdict verdict) =>
         verdict.Capability is { } capability ? $"{verdict.Class}/{capability}" : verdict.Class.ToString();

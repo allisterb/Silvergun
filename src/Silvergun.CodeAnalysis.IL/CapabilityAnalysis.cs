@@ -7,14 +7,14 @@ using System.Linq;
 using Microsoft.Cci;
 
 /// <summary>
-/// Scans an assembly for references to sensitive BCL APIs (per the static <see cref="Catalog"/>) and produces a
-/// serializable <see cref="CapabilityReport"/>. Detection is catalog-driven and records capability presence, not
-/// reachability — see ADR 0002. It reads CCI directly from a <see cref="AssemblyAnalyzer"/> (ADR 0009) — the same
-/// bytecode-level view the TAC lifter chokes on for exception-handling-heavy IL (ADR 0005) — so no lifting is
-/// involved.
+/// Scans an assembly for references to sensitive BCL APIs (per the data-driven <see cref="CapabilityMap.Default"/>)
+/// and produces a serializable <see cref="CapabilityReport"/>. Detection is map-driven and records capability
+/// presence, not reachability — see ADR 0002. It reads CCI directly from a <see cref="AssemblyAnalyzer"/>
+/// (ADR 0009) — the same bytecode-level view the TAC lifter chokes on for exception-handling-heavy IL (ADR 0005)
+/// — so no lifting is involved.
 /// <para>Detection has two seams:</para>
 /// <list type="number">
-/// <item><description><b>Call sites.</b> Each method's <em>CCI IL operations</em> are matched against the catalog:
+/// <item><description><b>Call sites.</b> Each method's <em>CCI IL operations</em> are matched against the map:
 /// constructor use (<c>newobj</c>), direct calls (<c>call</c>/<c>callvirt</c>) and method-pointer loads
 /// (<c>ldftn</c>/<c>ldvirtftn</c>) are each surfaced with a distinct <see cref="ApiCallKind"/>.</description></item>
 /// <item><description><b>Metadata and attributes.</b> <see cref="ScanInteropDeclarations"/> reads the interop
@@ -27,7 +27,13 @@ using Microsoft.Cci;
 public sealed class CapabilityAnalysis(AssemblyAnalyzer assembly)
 {
     #region Properties
-    /// <summary>The default sensitive-API catalog. Public for transparency and tests; immutable.</summary>
+    /// <summary>
+    /// The legacy, pre-map sensitive-API catalog. <b>No longer the matcher</b> — call sites are classified by
+    /// <see cref="CapabilityMap.Default"/> (capability-map phase 2). It is retained verbatim, and deliberately
+    /// frozen, as the fixed reference set the map is checked against: the "no lost findings" guarantee is only
+    /// meaningful while this list is independent of <c>capabilities.cm</c>, so projecting it from the map would
+    /// make its coverage test vacuous. Public for transparency and tests; immutable.
+    /// </summary>
     public static IReadOnlyList<SensitiveApi> Catalog { get; } =
     [
         new(Capability.FileSystem, "System.IO.File"),
@@ -69,7 +75,8 @@ public sealed class CapabilityAnalysis(AssemblyAnalyzer assembly)
     /// <summary>
     /// Runs both detection seams. First the <b>call-site</b> pass: scans <see cref="AssemblyAnalyzer.Methods"/> by
     /// reading each method's CCI <see cref="IMethodBody.Operations"/> and matching every call site
-    /// (<c>call</c>/<c>callvirt</c>/<c>newobj</c>/<c>ldftn</c>/<c>ldvirtftn</c>) against <see cref="Catalog"/>; a
+    /// (<c>call</c>/<c>callvirt</c>/<c>newobj</c>/<c>ldftn</c>/<c>ldvirtftn</c>) against
+    /// <see cref="CapabilityMap.Default"/>; a
     /// method whose scan throws is skipped with a reason and a warning, never fatally (should be ~0 now — no
     /// disassembler). Then the <b>metadata/attribute</b> pass (<see cref="ScanInteropDeclarations"/>) over the
     /// module's full method set, which finds <c>[DllImport]</c>/<c>[LibraryImport]</c> declarations via
@@ -352,22 +359,41 @@ public sealed class CapabilityAnalysis(AssemblyAnalyzer assembly)
             _ => null,
         };
 
-    // The capability of the first catalog entry matching the callee, or null if none match — and null outright
-    // when the callee is declared on a constructed-from-element type, which must never reach the catalog.
-    private static Capability? Match(IMethodReference callee)
-    {
-        if (IsElementTypeConstruction(callee.ContainingType))
-            return null;
+    // The capability of the most-specific capabilities.cm entry matching the callee, or null when nothing
+    // matches or the matching entry is not a sink. Safe/Unspecified/Unanalyzed are honoured by the map but have
+    // no finding-level effect yet — they exist for the reachability walk (ADR 0019).
+    private static Capability? Match(IMethodReference callee) =>
+        CapabilityMap.Default.Classify(ClassificationKey(callee)) is
+            { Class: CapabilityClass.Capability, Capability: { } capability }
+            ? capability
+            : null;
 
-        var typeName = AssemblyAnalyzer.TypeName(callee.ContainingType);
-        var entry = Catalog.FirstOrDefault(api =>
-            typeName.StartsWith(api.TypePrefix, StringComparison.Ordinal) &&
-            (api.Method is null || api.Method == callee.Name.Value));
-        return entry?.Capability;
-    }
+    // The map's key for a callee: the DECLARING TYPE's classification key plus the verbatim method name.
+    //
+    // Built from the TYPE, never from the method reference — this is a hard requirement, not a style choice.
+    // CciNames.Of(IMethodReference) eagerly renders the parameter list, which drives CCI's signature parser into
+    // GetTypeReference, whose unhandled TypedReference case calls Debug.Fail — Environment.FailFast, an
+    // UNCATCHABLE process kill reachable from plain `unsafe` C# in any hostile package (ADR 0021). Keying on the
+    // method identity would newly expose that path on every callee of every scanned assembly. A classification
+    // key is signature-free by design, so the parameters are pointless work as well as fatal.
+    //
+    // Composed through MethodIdentity rather than by string concatenation so the single formatter stays in
+    // charge of the separator and of degrading an unreadable name to CanonicalName.UnknownPart — an empty
+    // method name must never render as a bare trailing dot.
+    private static string ClassificationKey(IMethodReference callee) =>
+        CanonicalName.ClassificationKey(
+            new MethodIdentity(CciNames.Of(callee.ContainingType), callee.Name?.Value ?? string.Empty, 0, []));
 
     // Whether a declaring type is CONSTRUCTED ON AN ELEMENT TYPE — an array, a pointer or a managed (by-ref)
-    // pointer — in which case it must not be prefix-matched against the catalog at all.
+    // pointer — in which case it must not be PREFIX-matched against a type name at all.
+    //
+    // NO LONGER ON THE LIVE PATH, AND DELIBERATELY RETAINED. Match consults the capabilities.cm map, which is
+    // structurally immune to this false positive (see the last paragraph below), so nothing in this file calls
+    // this predicate any more. It stays because the hazard is a property of PREFIX matching over
+    // AssemblyAnalyzer.TypeName, not of the old catalog: any future seam that prefix-matches a rendered type
+    // name needs exactly this exclusion, and the tests that pin the hazard (ElementTypeConstructionExclusionTests,
+    // MultiDimensionalArrayCallSiteGapTests) assert against it directly. Measured to fire ZERO times over the
+    // 144,192 call sites of the phase-2 corpus, so removing it from Match cost no finding.
     //
     // AssemblyAnalyzer.TypeName renders all three as elementTypeName + a suffix ("[]", "[,]", "*", "&"), so the
     // element type's full name survives as a PREFIX of the rendering and every catalog entry naming that element
@@ -396,15 +422,16 @@ public sealed class CapabilityAnalysis(AssemblyAnalyzer assembly)
     // measured. Should a modifier ever reach a ContainingType, what this needs is a depth-bounded unwrap here
     // mirroring CciNames.Definition.
     //
-    // The capabilities.cm map path needs no equivalent guard: it keys on
-    // CanonicalName.ClassificationKey(MethodIdentity), and CciNames.Of degrades every non-named CCI reference
-    // (array, pointer, managed pointer, function pointer) to TypeIdentity.Unknown, so such a declaring type
-    // renders as "<unknown>" and carries no element-type name to match on at all.
+    // The capabilities.cm map path needs no equivalent guard, which is why Match no longer calls this: the map
+    // keys on CanonicalName.ClassificationKey(MethodIdentity), and CciNames.Of degrades every non-named CCI
+    // reference (array, pointer, managed pointer, function pointer) to TypeIdentity.Unknown — CciNames.Walk only
+    // accumulates INamedTypeReference links — so such a declaring type renders as "<unknown>" and carries no
+    // element-type name to match on at all. Do not add an equivalent guard to the map path.
     /// <summary>
     /// Whether <paramref name="type"/> is an array, pointer or managed-pointer construction, per the exclusion
     /// described above. Internal rather than private solely so that exclusion can be asserted directly: CCI does
-    /// not route such a declaring type to a call site, so no fixture assembly can reach this predicate through
-    /// <see cref="Match"/>, and a test that goes through an assembly cannot tell the three arms apart.
+    /// not route such a declaring type to a call site, so no fixture assembly can reach this predicate through a
+    /// scan, and a test that goes through an assembly cannot tell the three arms apart.
     /// </summary>
     internal static bool IsElementTypeConstruction(ITypeReference? type) =>
         type is IArrayTypeReference or IPointerTypeReference or IManagedPointerTypeReference;

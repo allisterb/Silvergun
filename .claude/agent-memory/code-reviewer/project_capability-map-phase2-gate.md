@@ -1,26 +1,36 @@
 ---
 name: capability-map-phase2-gate
-description: Open decision for capability-map phase 2 — the legacy catalog's StartsWith over-matches produce findings the v2 map has no entry for, and phase 1's tests structurally cannot catch it.
+description: Capability-map phase 2 landed 2026-07-31 — the recipe that actually verified its 5,131 -> 7,958 finding delta, reusable for any future detection-seam switch.
 metadata:
   type: project
 ---
 
-Phase 2 of the capability map (wiring `CapabilityAnalysis.Match` onto `CapabilityMap`) will **lose
-findings** for types the legacy catalog only matched by accident, via
-`typeName.StartsWith(api.TypePrefix)`. Raised in the 2026-07-25 phase-1 review; not yet resolved.
+Phase 2 (wiring `CapabilityAnalysis.Match` onto `CapabilityMap.Default`) **landed and reviewed clean
+2026-07-31**. The over-match concern this memory used to track was resolved deliberately: 417
+`Marshalling.*`, 58 exception/sibling and 3 `Marshal*` attribute/exception findings accepted as FP
+removals, 2 state-machine `..ctor` accepted, 99 `System.IO.FileSystem` restored by one new map entry.
 
-Concretely, `System.IO.File` / `System.IO.Directory` / `System.Net.Dns` / `System.Diagnostics.Process`
-as `StartsWith` prefixes also match `FileNotFoundException`, `FileLoadException`, `FileStreamOptions`,
-`DirectoryNotFoundException`, `DnsEndPoint`, `ProcessModule(Collection)`, `ProcessThread(Collection)` —
-none of which have `capabilities.cm` entries. `throw new FileNotFoundException(...)` is a `newobj` on a
-very common type, so this is not theoretical.
+**Why this is still worth keeping:** the verification recipe generalises to any future matcher swap,
+and it is far stronger than reading the implementer's classification table.
 
-**Why:** the phase-2 acceptance gate in `docs/agent/tasks/capability-map.md` says a disappeared finding
-"must be explained, never accepted". The phase-1 data test
-(`CapabilityMapDataTests.RepresentativeKey`) synthesizes its probe key *from the catalog entry itself*,
-so it can only prove the literal entry text is represented and is blind to over-matches by construction.
+**How to apply** — with `capmap-before.tsv` / `capmap-after.tsv` / `capmap-keys.tsv` in
+`docs/agent/measurements/` (gitignored), all in PowerShell, no repo edits:
 
-**How to apply:** when reviewing phase 2, do not accept "all IL tests green" as evidence the gate held —
-require the actual before/after finding diff on a real assembly, and check these specific types. The
-resolution is a deliberate choice (add explicit entries, or list them as accepted false-positive
-removals), not a test tweak. Related: [[canonical-name-parity]].
+1. Key each finding on `(assembly, Kind, CallerType, CallerMethod, CalledApi)` and diff — do not
+   trust the reported lost/new/changed counts, recompute them.
+2. **Re-derive every after-finding's capability from `capabilities.cm` independently**, implementing
+   the map's own precedence (exact type+method > exact type > longest `.*` prefix, generics stripped
+   from `CalledApi`). 0 mismatches over all 7,958 findings is what actually proves the wiring, not a
+   green suite.
+3. Cross-check the Step-1 divergence file the same way: for every differing
+   `TypeName` vs `ClassificationKey` pair, confirm the *map verdict* is unchanged. 0 differences
+   means no entry silently stops matching.
+4. Re-measure numbers pinned in source comments rather than believing them. Both of phase 2's
+   ("144,192 call sites", "`IsElementTypeConstruction` fires 0 times") were independently confirmed
+   with a scratch console that walks each corpus assembly in its own child process.
+
+Corpus was 6 assemblies: the netstandard2.0 Fixture, MatrixFixture net472+net10.0, BenchmarkDotNet
+0.15.8/net8.0, and System.Net.Sockets + System.Private.CoreLib from
+`microsoft.netcore.app.runtime.win-x64` 9.0.11. Related:
+[[canonical-name-parity]], [[feedback_isolate-failfast-child-process]],
+[[verify-measurement-harnesses]].

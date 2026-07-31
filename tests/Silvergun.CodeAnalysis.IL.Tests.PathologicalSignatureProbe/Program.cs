@@ -32,6 +32,31 @@ public static class PathologicalShapes
     /// <c>TypedReference*</c> arm. Declared, never called.
     /// </summary>
     public static void Clean(string value) { }
+
+    /// <summary>
+    /// SUBJECT — ADR-0021 Tier 1 at the <b>call-site scanner</b>, added for capability-map phase 2. The shapes
+    /// above are only ever reached as <em>method definitions</em>; this one puts <see cref="TypedReferencePointer"/>
+    /// on the other side of a <c>call</c> instruction, so <c>CapabilityAnalysis</c>'s operation walk hands its
+    /// <see cref="System.Reflection.MethodBase"/>-equivalent CCI reference — <b>a callee whose signature contains
+    /// <c>TypedReference*</c></b> — to <c>Match</c>.
+    /// <para>
+    /// <b>Scope, so this is not read as more than it is.</b> Since ADR-0022 Stage 0 taught CCI's
+    /// <c>GetTypeReference()</c> the <c>ElementType.TypedReference</c> case, this shape no longer reaches the
+    /// <c>Debug.Fail</c> default — the phase-2 review gate measured the <em>forbidden</em> composition
+    /// (<c>CanonicalName.ClassificationKey(CciNames.Of(callee))</c>) over this very assembly and it exited 0. So a
+    /// clean run here does <b>not</b> prove <c>Match</c> keys on the callee's <c>ContainingType</c> rather than on
+    /// the method reference; that is pinned architecturally, out of the compiled IL, by
+    /// <c>CapabilityKeyCompositionArchitectureTests</c>. What this shape does prove is that a scan whose operation
+    /// walk meets a <c>TypedReference*</c>-signatured callee runs to completion — i.e. the Stage 0 decoder fix
+    /// holds at the call-site scanner. Should that regress, the failure is an uncatchable
+    /// <c>Environment.FailFast</c>, observable only as this process's exit code and never as an exception a test
+    /// could catch. Declared and reachable; the enclosing method is itself never invoked.
+    /// </para>
+    /// </summary>
+    public static unsafe void CallsTypedReferencePointer()
+    {
+        TypedReferencePointer(null);
+    }
 }
 
 /// <summary>

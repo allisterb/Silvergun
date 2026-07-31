@@ -1,6 +1,12 @@
 namespace Silvergun.CodeAnalysis.IL.Tests;
 
 using System;
+using System.Linq;
+
+using Microsoft.Cci;
+
+using Silvergun;
+using Silvergun.CodeAnalysis.IL;
 
 using Xunit;
 
@@ -90,10 +96,77 @@ public sealed class TypedReferencePointerRegressionTests
         Assert.DoesNotContain("LOAD-FAILED", result.StandardOutput + result.StandardError, StringComparison.Ordinal);
         Assert.DoesNotContain("CAPABILITY-ANALYSIS-FAILED", result.StandardOutput + result.StandardError, StringComparison.Ordinal);
         Assert.Contains("CAPABILITY-ANALYSIS-OK", result.StandardOutput, StringComparison.Ordinal);
-        // Neither fixture declaration calls a catalogued sensitive API, so the capability scan over this
-        // assembly must be finding-free - pins that the pathological shapes are metadata-only fixtures with no
-        // accidental capability noise of their own.
+        // No fixture declaration calls a sensitive API, so the capability scan over this assembly must be
+        // finding-free - pins that the pathological shapes are metadata-only fixtures with no accidental
+        // capability noise of their own.
         Assert.Contains("CAPABILITY-ANALYSIS-OK 0", result.StandardOutput, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// DEFENCE IN DEPTH, and scoped accordingly — read this before trusting it as ADR-0021 coverage.
+    /// <see cref="PathologicalSignatureProbe.PathologicalShapes.CallsTypedReferencePointer"/> puts a
+    /// <c>TypedReference*</c>-signatured method on the far side of a real <c>call</c> instruction, so a full
+    /// <c>CapabilityAnalysis</c> scan of the probe assembly really does hand that callee to <c>Match</c>. What is
+    /// asserted is exactly that: <b>the scan completes</b> over an assembly carrying the shape.
+    /// <para>
+    /// <b>It does NOT discriminate the ADR-0021 key composition.</b> ADR-0022 Stage 0 added
+    /// <c>case ElementType.TypedReference</c> to CCI's <c>GetTypeReference()</c> switch
+    /// (<c>ext/analysis-net/cci/PEReaderAndWriter/PEReader/PEFileToObjectModel.cs</c>), so this shape no longer
+    /// reaches the <c>Debug.Fail</c> default at all — the phase-2 review gate confirmed by measurement that running
+    /// the <em>forbidden</em> composition (<c>CanonicalName.ClassificationKey(CciNames.Of(callee))</c>) over this
+    /// same probe prints every key and exits 0. This test therefore passes identically whether <c>Match</c> keys on
+    /// the containing type or on the method reference. The guard that does tell those apart is
+    /// <see cref="CapabilityKeyCompositionArchitectureTests"/>, which reads the composition out of our own compiled
+    /// IL; this one pins the layer beneath it — that the Stage 0 decoder fix holds at the scanner, so an assembly
+    /// carrying the shape is scannable at all.
+    /// </para>
+    /// <para>
+    /// <b>Still asserted as an exit code, not as an exception, and that is not a stylistic choice.</b> Should the
+    /// Stage 0 fix regress, the failure mode is <c>Debug.Fail</c> → <c>Environment.FailFast</c>: no managed
+    /// exception, no <c>catch</c>, no <c>finally</c>. <c>Assert.Throws</c>/<c>Record.Exception</c> can never see it,
+    /// and running the path in-process would kill the xUnit host and every other result in the run. For that failure
+    /// the child's exit code is the only observable.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Probe_ScanningACalleeWithATypedReferenceSignature_CompletesWithoutAFailFast()
+    {
+        var result = RunProbe();
+
+        Assert.True(result.ExitedCleanly, $"Probe did not exit cleanly - {result.Describe()}");
+
+        // The scan reached its end rather than dying part-way: both markers, and in this order.
+        Assert.Contains("CAPABILITY-ANALYSIS-OK", result.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("DONE", result.StandardOutput, StringComparison.Ordinal);
+
+        // Non-vacuity, half one: the pathological signature really is in this assembly. Without it the clean
+        // exit could just mean the shape was never compiled.
+        Assert.Contains("PARAM TypedReferencePointer 0 System.TypedReference*", result.StandardOutput, StringComparison.Ordinal);
+
+        // Non-vacuity, half two: and it really is on the far side of a CALL, so the scan's operation walk hands
+        // that reference to Match. Read the same way Match reads it — callee name and containing type only,
+        // never Parameters — so this check cannot itself trip the defect it exists to guard.
+        Assert.Contains(nameof(PathologicalSignatureProbe.PathologicalShapes.TypedReferencePointer), CalleeNamesOfTheCallingShape());
+    }
+
+    // The callee names of PathologicalShapes.CallsTypedReferencePointer, read in-process from the probe assembly
+    // that sits next to this test assembly. Safe in-process precisely because it reads no parameter list.
+    private static string[] CalleeNamesOfTheCallingShape()
+    {
+        Runtime.Initialize("Silvergun", "TESTS");
+
+        var create = AssemblyAnalyzer.Load(ProbeAssembly);
+        Assert.True(create.IsSuccess, create.Message);
+        using var cci = create.Value;
+
+        var method = Assert.Single(
+            cci.Methods,
+            m => m.Name.Value == nameof(PathologicalSignatureProbe.PathologicalShapes.CallsTypedReferencePointer));
+
+        var body = AssemblyAnalyzer.TryReadBody(method).Body;
+        Assert.NotNull(body);
+
+        return [.. body!.Operations.Select(op => op.Value).OfType<IMethodReference>().Select(m => m.Name.Value)];
     }
 
     // Spawns the probe apphost, which the ProjectReference in this project's .csproj copies next to this test
@@ -104,6 +177,10 @@ public sealed class TypedReferencePointerRegressionTests
     #region Fields
     private static readonly string ProbeExe =
         ApphostPath.Resolve(AppContext.BaseDirectory, "Silvergun.CodeAnalysis.IL.Tests.PathologicalSignatureProbe");
+
+    /// <summary>The probe's managed assembly, copied next to this one by the ProjectReference.</summary>
+    private static readonly string ProbeAssembly =
+        typeof(PathologicalSignatureProbe.PathologicalShapes).Assembly.Location;
 
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
     #endregion

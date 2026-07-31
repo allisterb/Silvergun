@@ -26,3 +26,13 @@ same underlying FailFast, which is exactly why the test's own assertion (`Exited
 few minutes to revert -> rebuild -> run -> observe both output and host survival -> restore ->
 diff-check the restore, rather than accepting "the implementer reported X" as given. This is
 "verify, don't accept" applied specifically to uncatchable-crash regression tests.
+
+**Corollary — a FailFast fixture goes blunt once the crash it names is point-fixed.** A *new*
+test that reuses an existing pathological shape to guard a *different* property is often
+non-discriminating, because the shape no longer crashes anything. Seen 2026-07-31 on
+capability-map phase 2: a child-process test claimed to guard "`Match` must key on
+`ContainingType`, never `IMethodReference.Parameters`" using the `TypedReference*` fixture — but
+ADR-0022 Stage 0 had already added `case ElementType.TypedReference`, so the forbidden
+composition runs clean too. Verify by building a throwaway console in the scratchpad that
+performs the *forbidden* operation on the same fixture and checking its exit code; if it exits 0,
+the test is a smoke test, not a regression detector, and its doc comment must say so.

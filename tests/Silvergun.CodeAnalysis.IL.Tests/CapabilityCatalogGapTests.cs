@@ -54,9 +54,13 @@ public sealed class CapabilityCatalogGapTests : IClassFixture<AssemblyAnalyzerFi
         Assert.Equal("System.Delegate.DynamicInvoke", finding.CalledApi);
     }
 
-    // 2a — Expression<TDelegate>.Compile surfaces a DynamicCodeLoading Call finding. The callee type is the
-    // generic Expression instance, which still starts with the catalog's "System.Linq.Expressions.Expression"
-    // prefix; the expression-tree builder calls (Constant/Lambda) do NOT match (method name isn't "Compile").
+    // 2a — Expression<TDelegate>.Compile surfaces a DynamicCodeLoading Call finding. The mechanism is the map,
+    // not the retired StartsWith prefix: the callee's declaring type is the closed generic instance
+    // Expression<Func<int>>, and ClassificationKey strips every bit of generic decoration, so the key is exactly
+    // "System.Linq.Expressions.Expression.Compile" — the method entry in capabilities.cm. The expression-tree
+    // builder calls (Constant/Lambda) share that declaring type but not that method name, and there is no type
+    // entry for Expression, so they classify as None. (The CalledApi below keeps the generic rendering; that it
+    // differs from the key is pinned by CapabilityMapWiringTests.)
     [Fact]
     public void Analyze_ExpressionCompile_SurfacesSingleDynamicCodeLoadingCall()
     {

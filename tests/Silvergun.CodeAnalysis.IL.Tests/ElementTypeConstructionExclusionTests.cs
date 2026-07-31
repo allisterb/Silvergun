@@ -12,9 +12,20 @@ using Xunit;
 
 /// <summary>
 /// Pins <c>CapabilityAnalysis.IsElementTypeConstruction</c> — the guard that keeps an <b>array, pointer or
-/// managed-pointer declaring type</b> out of the capability catalog's prefix match.
+/// managed-pointer declaring type</b> out of a <b>prefix</b> match against a rendered type name.
 /// <para>
-/// <b>The false positive it removes.</b> The catalog matches
+/// <b>⚠ THE GUARD IS NO LONGER ON THE LIVE PATH, AND THAT IS THE FIRST THING TO KNOW ABOUT THIS CLASS.</b>
+/// Capability-map phase 2 replaced <c>CapabilityAnalysis.Match</c>'s <c>StartsWith</c> scan over
+/// <see cref="CapabilityAnalysis.Catalog"/> with <c>CapabilityMap.Default.Classify(ClassificationKey)</c>, so
+/// nothing in <c>src/</c> calls <c>IsElementTypeConstruction</c> any more. It is retained deliberately, and so
+/// are these tests: the hazard belongs to <b>prefix matching over <c>AssemblyAnalyzer.TypeName</c></b>, not to
+/// the old catalog, and any future seam that prefix-matches a rendered type name needs exactly this exclusion.
+/// What these tests assert is therefore the <em>predicate's</em> contract, plus — in
+/// <see cref="MapPath_ForAnElementTypeConstruction_DegradesToUnknownAndClassifiesAsNothing"/> — the separate,
+/// structural reason the live map path needs no equivalent guard.
+/// </para>
+/// <para>
+/// <b>The false positive the predicate removes.</b> A prefix matcher compares
 /// <c>AssemblyAnalyzer.TypeName(callee.ContainingType).StartsWith(prefix)</c>, and <c>TypeName</c> renders all
 /// three constructions as the element type plus a suffix — <c>[]</c>, <c>[,]</c>, <c>*</c>, <c>&amp;</c>. So
 /// <c>"System.Diagnostics.Process[,]".StartsWith("System.Diagnostics.Process")</c> is <b>true</b> and an array
@@ -27,13 +38,14 @@ using Xunit;
 /// <c>Array_Get</c>/<c>Array_Set</c>/<c>Array_Addr</c>/<c>Array_Create</c> opcodes whose operand is the array
 /// <em>type</em> and not an <see cref="IMethodReference"/> (pinned by
 /// <see cref="MultiDimensionalArrayCallSiteGapTests"/>), and C# vectors use dedicated IL instructions with no
-/// call site at all. No fixture assembly can therefore reach the guard through <c>Match</c>, and a test that
+/// call site at all. No fixture assembly can therefore reach the guard through a scan, and a test that
 /// went through an assembly could not tell the three arms apart. That is why the predicate is
 /// <c>internal</c> rather than <c>private</c> (<c>src/Silvergun.CodeAnalysis.IL/Properties/AssemblyInfo.cs</c>
 /// carries the <c>InternalsVisibleTo</c>); without this class the guard is unfalsifiable by the suite —
 /// <b>the rest of the tests prove only that adding it broke nothing.</b> Measured at 4 real false positives on
 /// the fixture assembly with a reader that does surface those call sites:
-/// <c>docs/agent/measurements/ilspy-provider-spike.md</c> §C.3.
+/// <c>docs/agent/measurements/ilspy-provider-spike.md</c> §C.3, and at <b>0</b> firings over the 144,192 call
+/// sites of the phase-2 corpus, which is why removing it from <c>Match</c> cost no finding.
 /// </para>
 /// <para>
 /// <b>Every reference asserted on here comes from a real loaded assembly</b>
@@ -124,7 +136,7 @@ public sealed class ElementTypeConstructionExclusionTests : IClassFixture<Elemen
     /// <summary>
     /// NOT EXCLUDED — the plain named type <see cref="System.Diagnostics.Process"/> itself, taken from a real
     /// call site's <c>ContainingType</c>: exactly the reference <c>CapabilityAnalysis.Match</c> is handed when it
-    /// classifies <c>Process.Start</c>. If this were ever excluded the detector would stop detecting.
+    /// classifies <c>Process.Start</c>. If this were ever excluded a prefix seam would stop detecting.
     /// </summary>
     [Fact]
     public void IsElementTypeConstruction_ForAPlainNamedType_ReturnsFalse()
@@ -155,7 +167,7 @@ public sealed class ElementTypeConstructionExclusionTests : IClassFixture<Elemen
     }
 
     /// <summary>
-    /// NOT EXCLUDED — <c>null</c>. <c>Match</c> reads <c>callee.ContainingType</c>, which a hostile or truncated
+    /// NOT EXCLUDED — <c>null</c>. Any caller reads <c>callee.ContainingType</c>, which a hostile or truncated
     /// reference can leave null, and the guard must answer rather than throw: a throw there would be attributed
     /// to the whole method as a skip, turning a naming edge case into lost coverage (ADR-0024).
     /// </summary>
@@ -202,6 +214,58 @@ public sealed class ElementTypeConstructionExclusionTests : IClassFixture<Elemen
             CapabilityAnalysis.Catalog,
             api => ListOfProcess.StartsWith(api.TypePrefix, StringComparison.Ordinal));
     }
+
+    /// <summary>
+    /// <b>THE LIVE PATH'S IMMUNITY, and it is a different mechanism entirely — assert it, do not infer it from
+    /// the guard above.</b> <c>CapabilityAnalysis.Match</c> no longer prefix-matches: it keys on
+    /// <c>CanonicalName.ClassificationKey(CciNames.Of(callee.ContainingType))</c>. <c>CciNames</c>' walk only
+    /// accumulates <see cref="INamedTypeReference"/> links, so an array, pointer or managed-pointer reference
+    /// degrades to <see cref="TypeIdentity.Unknown"/> and renders as <c>&lt;unknown&gt;</c> — carrying <b>no
+    /// element-type name at all</b>. There is nothing left for a catalogued name to match, which is why the map
+    /// path needs no equivalent guard and why <c>src/</c> deliberately does not add one.
+    /// <para>
+    /// Both halves are asserted: the degradation itself, and that the resulting key for the array accessors
+    /// (<c>Get</c>/<c>Set</c>/<c>Address</c>/<c>.ctor</c>) classifies as nothing.
+    /// </para>
+    /// </summary>
+    [Theory]
+    [InlineData(nameof(ElementTypeConstructions.ProcessVector))]
+    [InlineData(nameof(ElementTypeConstructions.ProcessMatrix))]
+    [InlineData(nameof(ElementTypeConstructions.PointerCell))]
+    [InlineData(nameof(ElementTypeConstructions.ManagedPointerCell))]
+    public void MapPath_ForAnElementTypeConstruction_DegradesToUnknownAndClassifiesAsNothing(string fieldName)
+    {
+        var construction = fixture.FieldType(fieldName);
+
+        // The rendering the RETIRED prefix seam saw still carries the element type's name...
+        Assert.Contains(AssemblyAnalyzer.TypeName(construction), RenderedConstructions);
+
+        // ...but the key the LIVE seam builds does not carry it at all.
+        var key = CanonicalName.ClassificationKey(CciNames.Of(construction));
+
+        Assert.Equal(CanonicalName.UnknownPart, key);
+        Assert.All(
+            AccessorNames,
+            accessor => Assert.Equal(CapabilityVerdict.None, CapabilityMap.Default.Classify($"{key}.{accessor}")));
+    }
+
+    /// <summary>
+    /// The negative control for the immunity above, and the reason it is a statement about element-type
+    /// constructions rather than about <c>CciNames</c> degrading everything: a <em>plain named</em> declaring
+    /// type keys normally and still classifies.
+    /// </summary>
+    [Fact]
+    public void MapPath_ForAPlainNamedDeclaringType_KeysNormallyAndStillClassifies()
+    {
+        var named = fixture.CalleeContainingType(nameof(ThreeApis.StartsProcess));
+
+        var key = CanonicalName.ClassificationKey(CciNames.Of(named));
+
+        Assert.Equal(ProcessPrefix, key);
+        Assert.Equal(
+            new CapabilityVerdict(CapabilityClass.Capability, Capability.ProcessExecution),
+            CapabilityMap.Default.Classify($"{key}.Start"));
+    }
     #endregion
 
     #region Fields
@@ -210,6 +274,16 @@ public sealed class ElementTypeConstructionExclusionTests : IClassFixture<Elemen
     private const string ProcessMatrix = "System.Diagnostics.Process[,]";
     private const string ProcessByRef = "System.Diagnostics.Process&";
     private const string ListOfProcess = "System.Collections.Generic.List<System.Diagnostics.Process>";
+
+    /// <summary>The only methods an element-type construction can declare — none of them capability-relevant.</summary>
+    private static readonly string[] AccessorNames = ["Get", "Set", "Address", ".ctor"];
+
+    /// <summary>
+    /// How <c>AssemblyAnalyzer.TypeName</c> renders the four constructions the fixture carries: the element
+    /// type's own name plus a suffix, which is exactly what made a prefix seam vulnerable.
+    /// </summary>
+    private static readonly string[] RenderedConstructions =
+        [ProcessVector, ProcessMatrix, "System.Int32*", ProcessByRef];
 
     private readonly ElementTypeConstructionFixture fixture;
     #endregion

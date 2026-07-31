@@ -48,6 +48,12 @@ capability System.IO.Directory                              FileSystem
 capability System.IO.Directory.GetCurrentDirectory          EnvironmentProbe
 capability System.IO.DirectoryInfo                          FileSystem
 capability System.IO.FileStream                             FileSystem
+# CoreLib's INTERNAL filesystem helper (FileSystem.CopyFile/DeleteFile/CreateDirectory/...). The legacy prefix
+# matcher caught it by accident — "System.IO.FileSystem".StartsWith("System.IO.File") — but the finding is
+# semantically CORRECT, so losing it would be a real detection loss rather than one of the accepted FP removals.
+# The type is internal to System.Private.CoreLib, so this entry can only ever fire when CoreLib itself is in the
+# corpus; it is inert everywhere else.
+capability System.IO.FileSystem                             FileSystem
 capability System.IO.FileSystemInfo                         FileSystem
 capability System.IO.FileSystemWatcher                      FileSystem
 capability System.IO.DriveInfo                              FileSystem

@@ -16,10 +16,11 @@ using System.Runtime.Loader;
 #endif
 
 // This fixture is built for the whole target matrix — net472 and net10.0 — so the CAPABILITY seam
-// (CapabilityAnalysis) can be read against a call site compiled by EACH flavour of the toolchain. Detection today
-// is driven entirely by the legacy in-code 32-entry Catalog (src/Silvergun.CodeAnalysis.IL/CapabilityAnalysis.cs);
-// capabilities.cm is parsed but NOT YET consulted by this seam — it stays inert until capability-map phase 2 wires
-// it in (see docs/agent/tasks/capability-map.md). Today that seam is only ever exercised on the netstandard2.0
+// (CapabilityAnalysis) can be read against a call site compiled by EACH flavour of the toolchain. Since
+// capability-map phase 2, detection is driven entirely by the data-driven map
+// (src/Silvergun.CodeAnalysis.IL/Resources/capabilities.cm) via CapabilityMap.Default.Classify; the in-code
+// 32-entry Catalog is frozen reference data and is no longer the matcher. All ten shapes below are detected.
+// Today that seam is only ever exercised on the netstandard2.0
 // fixture (tests/Silvergun.CodeAnalysis.IL.Tests.Fixture) — there is no net472 or net10.0 assembly anywhere in the repo
 // with, say, a Process.Start call site, so a TFM-sensitive regression in detection would go uncaught.
 // One representative call site per capability is enough: catalog BREADTH is already covered on netstandard2.0;
@@ -39,14 +40,13 @@ using System.Runtime.Loader;
 
 /// <summary>
 /// One representative call site per <c>Capability</c> value, present on every TFM where the underlying API
-/// exists. Eight are actually detected by <c>CapabilityAnalysis</c>'s legacy <c>Catalog</c> today —
-/// <c>FileSystem</c>, <c>Network</c>, <c>ProcessExecution</c>, <c>EnvironmentProbe</c>,
-/// <c>DynamicCodeLoading</c>, <c>ReflectionInvocation</c>, <c>NativeInterop</c>, <c>Cryptography</c> — and are
-/// asserted as detected. <c>RuntimeControl</c> (<c>GC</c>/<c>AssemblyLoadContext</c>) and <c>UnsafeMemory</c>
-/// (<c>Unsafe</c>) have shapes here too, deliberately guarded and asserted as NOT-YET-detected: their APIs are
-/// absent from the legacy <c>Catalog</c> and exist only in <c>capabilities.cm</c>, which this seam does not
-/// consult until capability-map phase 2. Every method returns the call's result rather than discarding it, so
-/// the compiler cannot fold or elide the call — nothing here is ever invoked.
+/// exists. Eight were reachable from the legacy 32-entry <c>Catalog</c> — <c>FileSystem</c>, <c>Network</c>,
+/// <c>ProcessExecution</c>, <c>EnvironmentProbe</c>, <c>DynamicCodeLoading</c>, <c>ReflectionInvocation</c>,
+/// <c>NativeInterop</c>, <c>Cryptography</c>. The remaining shapes — <c>RuntimeControl</c>
+/// (<c>GC</c>/<c>AssemblyLoadContext</c>), <c>UnsafeMemory</c> (<c>Unsafe</c>) and the Framework-only
+/// <c>NetDataContractSerializer</c> — exist ONLY in <c>capabilities.cm</c>, so their findings are the
+/// mechanical proof that capability-map phase 2 really wired the map in. Every method returns the call's result
+/// rather than discarding it, so the compiler cannot fold or elide the call — nothing here is ever invoked.
 /// </summary>
 public static class CapabilityShapes
 {

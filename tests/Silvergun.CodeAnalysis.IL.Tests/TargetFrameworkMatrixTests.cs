@@ -185,38 +185,69 @@ public sealed class TargetFrameworkMatrixTests : IClassFixture<TargetFrameworkMa
     }
 
     /// <summary>
-    /// The spec's exact statement: net472's finding set is <em>exactly</em> the subset of net10.0's whose
-    /// caller is an unguarded declaration. Both directions are asserted — a net472 finding missing from
-    /// net10.0 would mean the old target invents something, and an unguarded net10.0 finding missing from
-    /// net472 would mean the old target loses something.
+    /// The spec's statement: net472's <em>unguarded</em> finding set is <em>exactly</em> the unguarded subset
+    /// of net10.0's, and a proper subset of net10.0's findings as a whole. Both directions are asserted — a
+    /// net472 finding missing from net10.0 would mean the old target invents something, and an unguarded
+    /// net10.0 finding missing from net472 would mean the old target loses something.
+    /// <para>
+    /// <b>The left-hand side is filtered too, and that changed with capability-map phase 2.</b> While every
+    /// <c>#if</c>-guarded declaration in the fixture was net5+/net7+-only, net472's guarded partition was empty
+    /// and filtering it was a no-op, so this compared net472's <em>whole</em> finding set. The guard set is now
+    /// two-sided: <c>CapabilityShapes.CreatesNetDataContractSerializer</c> is <c>#if NETFRAMEWORK</c>, i.e.
+    /// guarded to net472, and phase 2 made it produce a finding. Comparing net472's whole set against net10.0's
+    /// unguarded subset would therefore demand net10.0 produce a Framework-only shape it cannot compile. The
+    /// invariant this class exists for is about <em>unguarded</em> declarations on both sides; the guarded
+    /// partitions are asserted separately below.
+    /// </para>
     /// </summary>
     [Fact]
     public void Analyze_Net472Findings_AreExactlyTheUnguardedSubsetOfTheModernFindings()
     {
-        var legacy = Tuples(fixture.Report(Legacy).Findings);
+        var legacy = Tuples(fixture.Report(Legacy).Findings.Where(IsUnguarded));
         var modern = fixture.Report(Modern).Findings;
 
         var unguardedModern = Tuples(modern.Where(IsUnguarded));
 
         Assert.True(
             legacy.SetEquals(unguardedModern),
-            Difference($"{Legacy} findings vs the unguarded subset of {Modern}", unguardedModern, legacy));
+            Difference($"unguarded {Legacy} findings vs the unguarded subset of {Modern}", unguardedModern, legacy));
 
         // ...and the subset is proper, so the comparison above is not the trivial "both sets are everything".
         Assert.True(legacy.IsProperSubsetOf(Tuples(modern)));
     }
 
     /// <summary>
-    /// The partition the invariant above rests on, pinned from the other side: net472 compiles <em>no</em>
-    /// guarded declaration, so its guarded partition is empty, while net10.0's is not. Without this, an
-    /// <see cref="IsUnguarded"/> that accidentally matched everything would make the invariant vacuous.
+    /// The partition the invariant above rests on, pinned from the other side, so an
+    /// <see cref="IsUnguarded"/> that accidentally matched everything cannot make the invariant vacuous: each
+    /// flavour's guarded partition is non-empty and carries only <em>its own</em> framework-specific shapes.
+    /// <para>
+    /// net472's guarded partition used to be empty — every guarded declaration was net5+/net7+-only — and the
+    /// original form of this test asserted exactly that. It stopped being true when capability-map phase 2 made
+    /// the <c>#if NETFRAMEWORK</c> shape <c>CreatesNetDataContractSerializer</c> produce a finding: net472 now
+    /// has a guarded partition of its own, of exactly that one declaration, and net10.0 must not contain it.
+    /// </para>
     /// </summary>
     [Fact]
-    public void Analyze_GuardedDeclarations_AreAbsentFromNet472AndPresentOnTheModernTarget()
+    public void Analyze_GuardedDeclarations_AreDisjointBetweenTheTwoTargetFrameworks()
     {
-        Assert.DoesNotContain(fixture.Report(Legacy).Findings, f => !IsUnguarded(f));
-        Assert.Contains(fixture.Report(Modern).Findings, f => !IsUnguarded(f));
+        var legacyGuarded = GuardedCallers(Legacy);
+        var modernGuarded = GuardedCallers(Modern);
+
+        // net472's whole guarded partition: the single #if NETFRAMEWORK declaration in CapabilityShapes.
+        Assert.Equal(["CreatesNetDataContractSerializer"], legacyGuarded);
+
+        // net10.0's is non-empty (so IsUnguarded is not matching everything) and shares nothing with it.
+        Assert.NotEmpty(modernGuarded);
+        Assert.Empty(modernGuarded.Intersect(legacyGuarded, StringComparer.Ordinal));
     }
+
+    // The distinct caller methods of one flavour's GUARDED findings, ordered so a failure reads as a set.
+    private string[] GuardedCallers(string targetFramework) =>
+        [.. fixture.Report(targetFramework).Findings
+            .Where(f => !IsUnguarded(f))
+            .Select(f => f.CallerMethod)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)];
 
     // ---------------------------------------------------------------------------------------------------
     // C — sanitization equivalence across the matrix.
@@ -406,6 +437,22 @@ public sealed class TargetFrameworkMatrixTests : IClassFixture<TargetFrameworkMa
     /// <c>[LibraryImport]</c> is <c>NET7_0_OR_GREATER</c> and <c>[UnmanagedCallersOnly]</c> is
     /// <c>NET5_0_OR_GREATER</c>. Everything else the fixture declares is unguarded and must behave identically
     /// everywhere.
+    /// <para>
+    /// <b>Guarded means "the source is <c>#if</c>-guarded", not "it produces no finding".</b> The last three
+    /// entries were guarded in <c>CapabilityShapes</c> from the day that file was written but produced no
+    /// findings at all until capability-map phase 2 wired <c>CapabilityAnalysis.Match</c> onto
+    /// <c>capabilities.cm</c>; they passed the invariant vacuously, on both sides of an empty set. Now that they
+    /// fire, they are genuinely divergent by design and belong here — see the
+    /// <c>Analyze_NetDataContractSerializerShape_IsDynamicCodeLoadingOnNet472Only</c> and
+    /// <c>Analyze_ModernOnlyMapShape_IsDetectedOnNet10Only</c> assertions in
+    /// <see cref="CapabilityShapesAcrossTfmsTests"/>, which pin the divergence itself.
+    /// </para>
+    /// <para>
+    /// <b><c>TriggersGarbageCollection</c> is deliberately NOT here</b>, although it too was newly lit up by
+    /// phase 2. It is unguarded in the fixture source and <c>System.GC.Collect</c>/<c>CollectionCount</c> exist
+    /// on both flavours, so it produces byte-identical findings on net472 and net10.0 — measured, not assumed.
+    /// Adding it would silently remove a real cross-TFM assertion in exchange for nothing.
+    /// </para>
     /// </summary>
     private static readonly string[] GuardedDeclarations =
     [
@@ -419,6 +466,11 @@ public sealed class TargetFrameworkMatrixTests : IClassFixture<TargetFrameworkMa
         "BangInExportEntryPoint",
         "ControlCharactersInExportEntryPoint",
         "OnlyControlCharactersInExportEntryPoint",
+        // CapabilityShapes, #if NETFRAMEWORK
+        "CreatesNetDataContractSerializer",
+        // CapabilityShapes, #if NET5_0_OR_GREATER
+        "GetsDefaultAssemblyLoadContext",
+        "SizeOfInt32",
     ];
 
     /// <summary>

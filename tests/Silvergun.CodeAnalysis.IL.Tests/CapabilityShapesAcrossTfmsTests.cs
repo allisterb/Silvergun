@@ -60,13 +60,14 @@ public sealed class CapabilityShapesAcrossTfmsTests : IClassFixture<TargetFramew
 
     /// <summary>
     /// <see cref="CapabilityShapes"/> really does contribute findings on every discovered flavour (not vacuous),
-    /// and — as the class remarks document — every one of those findings is already covered by the pre-existing
-    /// <c>TargetFrameworkMatrixTests</c> cross-TFM subset invariant with no change needed there. The one thing
-    /// that invariant does NOT yet police: if a future change makes any of the three TFM-divergent guarded shapes
-    /// (<c>CreatesNetDataContractSerializer</c>, <c>GetsDefaultAssemblyLoadContext</c>, <c>SizeOfInt32</c>) start
-    /// producing a finding (see the known-gap fact below — today none of them do), those method names would need
-    /// adding to <c>TargetFrameworkMatrixTests.GuardedDeclarations</c>, or the invariant would wrongly demand
-    /// net472 and net10.0 agree on a shape that is deliberately framework-divergent.
+    /// and every one of those findings is covered by the <c>TargetFrameworkMatrixTests</c> cross-TFM subset
+    /// invariant. That invariant needed one change when capability-map phase 2 landed, exactly as this comment
+    /// used to predict: the three TFM-divergent guarded shapes (<c>CreatesNetDataContractSerializer</c>,
+    /// <c>GetsDefaultAssemblyLoadContext</c>, <c>SizeOfInt32</c>) started producing findings, so their method
+    /// names are now in <c>TargetFrameworkMatrixTests.GuardedDeclarations</c> — otherwise the invariant would
+    /// wrongly demand net472 and net10.0 agree on a shape that is deliberately framework-divergent.
+    /// <c>TriggersGarbageCollection</c> also started producing findings and was deliberately NOT added there: it
+    /// fires identically on both flavours, so guarding it would remove a genuine cross-TFM assertion.
     /// </summary>
     [Fact]
     public void Analyze_CapabilityShapesFindings_AreNonEmptyAndAlreadyCoveredByTheExistingUnguardedInvariant()
@@ -79,16 +80,16 @@ public sealed class CapabilityShapesAcrossTfmsTests : IClassFixture<TargetFramew
     // ---------------------------------------------------------------------------------------------------
     // Item 1 (spec) — per-TFM capability presence, driven from MatrixFixtureAssemblies.ByTargetFramework.
     //
-    // Scoped to the 8 representative shapes CapabilityAnalysis actually detects TODAY. RuntimeControl
-    // (TriggersGarbageCollection / System.GC.Collect) is deliberately excluded here — see the known-gap fact
-    // below for why, and why asserting its detection would be asserting something false rather than reporting
-    // it honestly.
+    // Scoped to the 8 shapes that produce exactly ONE finding each, so Assert.Single below names the shape on
+    // failure. TriggersGarbageCollection is excluded only because it contributes TWO call sites (GC.Collect and
+    // GC.CollectionCount) and so does not fit that one-finding form — it is asserted, in full, by
+    // Analyze_GarbageCollectionShape_IsRuntimeControlOnEveryTargetFramework below.
     // ---------------------------------------------------------------------------------------------------
 
     /// <summary>
-    /// Every capability the legacy <see cref="CapabilityAnalysis.Catalog"/> can actually reach today is detected,
-    /// with the expected <see cref="Capability"/>, <see cref="ApiCallKind"/> and <c>CalledApi</c>, on every
-    /// discovered target framework — never a hardcoded TFM list.
+    /// Every single-call-site capability shape is detected, with the expected <see cref="Capability"/>,
+    /// <see cref="ApiCallKind"/> and <c>CalledApi</c>, on every discovered target framework — never a hardcoded
+    /// TFM list.
     /// </summary>
     [Theory]
     [MemberData(nameof(TargetFrameworkMatrixTests.TargetFrameworks), MemberType = typeof(TargetFrameworkMatrixTests))]
@@ -180,43 +181,108 @@ public sealed class CapabilityShapesAcrossTfmsTests : IClassFixture<TargetFramew
     }
 
     // ---------------------------------------------------------------------------------------------------
-    // KNOWN GAP — not introduced by this task; pre-existing and tracked in docs/agent/tasks/capability-map.md.
+    // THE MAP-ONLY SHAPES — the phase-2 payoff (docs/agent/tasks/capability-map.md, "Inputs from
+    // capability-shapes-across-tfms", item 1).
     //
-    // CapabilityAnalysis today matches call sites ONLY against the legacy 32-entry Catalog
-    // (CapabilityAnalysis.Catalog) — it does not yet consult capabilities.cm / CapabilityMap
-    // (docs/agent/tasks/capability-map.md, "Phase 2 Ready", not started as of this writing). The Catalog has NO
-    // entry at all for System.GC, System.Runtime.Serialization.NetDataContractSerializer,
-    // System.Runtime.Loader.AssemblyLoadContext, or System.Runtime.CompilerServices.Unsafe. So — even though every
-    // one of these shapes genuinely exists in the compiled IL of the flavour(s) it targets (proven above,
-    // independent of detection) — NONE of TriggersGarbageCollection (RuntimeControl), CreatesNetDataContractSerializer
-    // (DynamicCodeLoading), GetsDefaultAssemblyLoadContext (RuntimeControl) or SizeOfInt32 (UnsafeMemory) produces
-    // a CapabilityAnalysis finding TODAY, on either target framework.
+    // These four APIs — System.GC, System.Runtime.Serialization.NetDataContractSerializer,
+    // System.Runtime.Loader.AssemblyLoadContext and System.Runtime.CompilerServices.Unsafe — have NO entry in the
+    // legacy 32-entry CapabilityAnalysis.Catalog and exist only in capabilities.cm. Until phase 2 they produced no
+    // finding at all, and this section pinned that true negative as a red-on-success canary; phase 2 wired
+    // CapabilityAnalysis.Match onto CapabilityMap.Default and the canary fired, so it has been REPLACED by the
+    // positive assertions below. They are the only mechanical proof in the suite that map-only entries — and in
+    // particular the Framework-only NetDataContractSerializer entry — actually fire on a real, compiled assembly
+    // of the target flavour, rather than merely being present in the map file.
     //
-    // This directly affects two of the spec's stated goals: item 1's claim that "every capability in the table is
-    // detected" does not hold for RuntimeControl, and items 3/4's claim that NetDataContractSerializer/
-    // AssemblyLoadContext/Unsafe are "detected" (vs. merely present in IL) does not hold either — asserting
-    // detection here would assert something false. This fact pins today's true (negative) behaviour instead, as a
-    // canary: it must start FAILING — and be revisited, replaced by the positive assertions the original spec
-    // items describe — the day capability-map.md Phase 2 wires CapabilityAnalysis onto the map.
+    // Each shape's IL-level EXISTENCE is proven separately above (Analyze_NetDataContractSerializerShape_...,
+    // Analyze_ModernOnlyShapes_ExistOnlyInNet10Il) straight from CCI, so a failure here is a failure of DETECTION
+    // and can never be a failure of the fixture to compile the shape.
     // ---------------------------------------------------------------------------------------------------
 
     /// <summary>
-    /// Pins today's actual (negative) capability-detection behaviour for the four map-only shapes, on every
-    /// discovered target framework, so a reader — and this suite — knows exactly which findings are still missing
-    /// and why, rather than silently assuming the spec's aspirational claim already holds.
+    /// <c>TriggersGarbageCollection</c> is the one map-only shape that is <b>unguarded</b>, so it must be detected
+    /// identically on every discovered target framework: two <see cref="Capability.RuntimeControl"/> call findings,
+    /// <c>System.GC.Collect</c> and <c>System.GC.CollectionCount</c>, from the <c>capability System.GC
+    /// RuntimeControl</c> type entry. Because both TFMs agree, it is deliberately <em>not</em> in
+    /// <c>TargetFrameworkMatrixTests.GuardedDeclarations</c> — guarding it would weaken the cross-TFM invariant for
+    /// a shape that never diverges.
     /// </summary>
     [Fact]
-    public void Analyze_MapOnlyCapabilities_AreNotYetDetectedByTheLegacyCatalog_KnownGapPendingCapabilityMapPhase2()
+    public void Analyze_GarbageCollectionShape_IsRuntimeControlOnEveryTargetFramework()
     {
         Assert.All(MatrixFixtureAssemblies.ByTargetFramework.Keys, targetFramework =>
         {
-            var findings = ShapesFindings(targetFramework);
+            var findings = ShapesFindings(targetFramework)
+                .Where(f => f.CallerMethod == "TriggersGarbageCollection")
+                .Select(Render)
+                .Order(StringComparer.Ordinal);
 
-            Assert.DoesNotContain(findings, f => f.CallerMethod == "TriggersGarbageCollection");
-            Assert.DoesNotContain(findings, f => f.CallerMethod == "CreatesNetDataContractSerializer");
-            Assert.DoesNotContain(findings, f => f.CallerMethod == "GetsDefaultAssemblyLoadContext");
-            Assert.DoesNotContain(findings, f => f.CallerMethod == "SizeOfInt32");
+            Assert.Equal(
+                [
+                    "RuntimeControl,Call,TriggersGarbageCollection,System.GC.Collect",
+                    "RuntimeControl,Call,TriggersGarbageCollection,System.GC.CollectionCount",
+                ],
+                findings);
         });
+    }
+
+    /// <summary>
+    /// <see cref="Capability.DynamicCodeLoading"/> from the Framework-only
+    /// <c>System.Runtime.Serialization.NetDataContractSerializer</c> map entry, on the one flavour where the type
+    /// exists. Asserted on both sides: present on net472, absent from net10.0 — the deliberate TFM divergence that
+    /// puts this method into <c>TargetFrameworkMatrixTests.GuardedDeclarations</c>.
+    /// </summary>
+    [Fact]
+    public void Analyze_NetDataContractSerializerShape_IsDynamicCodeLoadingOnNet472Only()
+    {
+        var finding = Assert.Single(ShapesFindings(Legacy), f => f.CallerMethod == "CreatesNetDataContractSerializer");
+
+        Assert.Equal(Capability.DynamicCodeLoading, finding.Capability);
+        Assert.Equal(ApiCallKind.Construct, finding.Kind);
+        Assert.Equal("System.Runtime.Serialization.NetDataContractSerializer..ctor", finding.CalledApi);
+
+        Assert.DoesNotContain(ShapesFindings(Modern), f => f.CallerMethod == "CreatesNetDataContractSerializer");
+    }
+
+    /// <summary>
+    /// The modern-only counterparts, each from its own map entry:
+    /// <c>System.Runtime.Loader.AssemblyLoadContext.get_Default</c> falls through to the
+    /// <c>capability System.Runtime.Loader.AssemblyLoadContext RuntimeControl</c> type entry (the
+    /// <c>LoadFrom*</c> carve-outs to <see cref="Capability.DynamicCodeLoading"/> do not name it), and
+    /// <c>System.Runtime.CompilerServices.Unsafe.SizeOf</c> comes from the
+    /// <see cref="Capability.UnsafeMemory"/> type entry. Absent from net472, where neither shape compiles.
+    /// </summary>
+    [Theory]
+    [InlineData("GetsDefaultAssemblyLoadContext", Capability.RuntimeControl, "System.Runtime.Loader.AssemblyLoadContext.get_Default")]
+    [InlineData("SizeOfInt32", Capability.UnsafeMemory, "System.Runtime.CompilerServices.Unsafe.SizeOf")]
+    public void Analyze_ModernOnlyMapShape_IsDetectedOnNet10Only(string callerMethod, Capability expected, string calledApi)
+    {
+        var finding = Assert.Single(ShapesFindings(Modern), f => f.CallerMethod == callerMethod);
+
+        Assert.Equal(expected, finding.Capability);
+        Assert.Equal(ApiCallKind.Call, finding.Kind);
+        Assert.Equal(calledApi, finding.CalledApi);
+
+        Assert.DoesNotContain(ShapesFindings(Legacy), f => f.CallerMethod == callerMethod);
+    }
+
+    /// <summary>
+    /// What makes the four facts above statements about <b>the map</b> rather than about the catalog: not one of
+    /// the four declaring types is reachable from <see cref="CapabilityAnalysis.Catalog"/>, under the legacy
+    /// <c>StartsWith</c> rule the catalog was matched with. So the findings asserted above can only have come from
+    /// <c>capabilities.cm</c> — if the catalog were ever widened to cover them, this fails and the proof above
+    /// stops being a proof.
+    /// </summary>
+    [Theory]
+    [InlineData("System.GC.Collect")]
+    [InlineData("System.Runtime.Serialization.NetDataContractSerializer..ctor")]
+    [InlineData("System.Runtime.Loader.AssemblyLoadContext.get_Default")]
+    [InlineData("System.Runtime.CompilerServices.Unsafe.SizeOf")]
+    public void MapOnlyCalledApi_IsUnreachableFromTheLegacyCatalog(string calledApi)
+    {
+        Assert.NotEmpty(CapabilityAnalysis.Catalog);
+        Assert.DoesNotContain(
+            CapabilityAnalysis.Catalog,
+            api => calledApi.StartsWith(api.TypePrefix, StringComparison.Ordinal));
     }
 
     private ApiCallFinding[] ShapesFindings(string targetFramework) =>
@@ -244,10 +310,10 @@ public sealed class CapabilityShapesAcrossTfmsTests : IClassFixture<TargetFramew
     ];
 
     /// <summary>
-    /// The representative shapes <see cref="CapabilityAnalysis.Catalog"/> actually reaches today, measured
-    /// against the fixture rather than assumed from <c>capabilities.cm</c>. <c>RuntimeControl</c>
-    /// (<c>TriggersGarbageCollection</c> / <c>System.GC.Collect</c>) is deliberately absent — see the
-    /// known-gap fact.
+    /// The representative shapes that contribute exactly one finding each, measured against the fixture rather
+    /// than assumed from <c>capabilities.cm</c>. <c>TriggersGarbageCollection</c> is absent because it
+    /// contributes two (<c>System.GC.Collect</c> and <c>System.GC.CollectionCount</c>); it has its own,
+    /// stricter set-equality assertion.
     /// </summary>
     private static readonly CapabilityShape[] DetectedSharedShapes =
     [

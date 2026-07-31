@@ -46,6 +46,18 @@ using Xunit;
 /// merely recover missed capabilities — it would <em>manufacture</em> false ones out of ordinary element reads.
 /// Read those two tests before changing the reader.
 /// </para>
+/// <para>
+/// <b>Scope correction after capability-map phase 2.</b> The latent false positive above is a property of
+/// <b>prefix matching over <c>AssemblyAnalyzer.TypeName</c></b>, which is the matcher <c>CapabilityAnalysis</c>
+/// used to run and no longer does: <c>Match</c> now keys on
+/// <c>CanonicalName.ClassificationKey(CciNames.Of(callee.ContainingType))</c>. That path is immune for a
+/// completely different and <em>structural</em> reason — <c>CciNames</c> degrades a non-named reference to
+/// <c>TypeIdentity.Unknown</c>, so an array declaring type carries no element-type name into the key at all.
+/// <see cref="LatentFalsePositive_TheLiveMapPath_CarriesNoElementTypeNameIntoItsKey"/> asserts that directly, so
+/// a reader that recovers these accessors inherits immunity from the map but would still need the explicit
+/// exclusion (<c>CapabilityAnalysis.IsElementTypeConstruction</c>, pinned by
+/// <see cref="ElementTypeConstructionExclusionTests"/>) for any prefix seam it feeds.
+/// </para>
 /// </summary>
 public sealed class MultiDimensionalArrayCallSiteGapTests : IClassFixture<AssemblyAnalyzerFixture>
 {
@@ -199,8 +211,10 @@ public sealed class MultiDimensionalArrayCallSiteGapTests : IClassFixture<Assemb
     /// <para>
     /// <b>Anyone changing the reader must read this.</b> A reader that recovers these accessors — the ILSpy
     /// provider of the spike does, seeing 75 call sites CCI does not — has to exclude array declaring types
-    /// <em>explicitly</em>. Inheriting the coverage silently turns a matrix of <see cref="System.Diagnostics.Process"/>
-    /// into a <see cref="Capability.ProcessExecution"/> finding.
+    /// <em>explicitly</em> from any <b>prefix</b> seam it feeds. Inheriting the coverage silently turns a matrix
+    /// of <see cref="System.Diagnostics.Process"/> into a <see cref="Capability.ProcessExecution"/> finding.
+    /// The live map path is immune by construction instead — see
+    /// <see cref="LatentFalsePositive_TheLiveMapPath_CarriesNoElementTypeNameIntoItsKey"/>.
     /// </para>
     /// </summary>
     [Fact]
@@ -255,6 +269,47 @@ public sealed class MultiDimensionalArrayCallSiteGapTests : IClassFixture<Assemb
         Assert.Equal(DeclaringType, finding.CallerType);
 
         Assert.DoesNotContain(report.Findings, f => f.CalledApi.StartsWith(ProcessMatrix, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// THE LATENT FALSE POSITIVE, measured against the matcher that actually ships today. The rendering
+    /// <c>System.Diagnostics.Process[,]</c> prefix-matches the catalog (asserted in the test above), but the key
+    /// <c>CapabilityAnalysis.Match</c> builds from the very same CCI reference does not carry the element type's
+    /// name at all: <c>CciNames</c>' walk accumulates only <see cref="INamedTypeReference"/> links, so an
+    /// <see cref="IArrayTypeReference"/> degrades to <c>TypeIdentity.Unknown</c> and keys as
+    /// <c>&lt;unknown&gt;.Get</c>. That is the <em>structural</em> reason the live path needs no exclusion — a
+    /// different mechanism from <c>IsElementTypeConstruction</c>, and the one that would still hold if a future
+    /// reader started surfacing these accessors as ordinary call sites.
+    /// <para>
+    /// The array references come from real accessor operations in the fixture, not from a stub, so this states
+    /// what CCI actually hands the scanner for the exact shapes the class documents.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void LatentFalsePositive_TheLiveMapPath_CarriesNoElementTypeNameIntoItsKey()
+    {
+        var arrays = OperationsOf(nameof(MultiDimArrayOps.CopiesProcessMatrixCellsAndStartsOne))
+            .Where(op => IsArrayAccessor(op.OperationCode))
+            .Select(op => op.Value)
+            .OfType<IArrayTypeReference>()
+            .ToArray();
+
+        Assert.NotEmpty(arrays);
+
+        Assert.All(arrays, array =>
+        {
+            // The prefix seam's view: the catalogued element-type name is right there at the front.
+            Assert.Equal(ProcessMatrix, AssemblyAnalyzer.TypeName(array));
+
+            // The map seam's view: no element-type name survives, so nothing can match it.
+            var key = CanonicalName.ClassificationKey(CciNames.Of(array));
+
+            Assert.Equal(CanonicalName.UnknownPart, key);
+            Assert.DoesNotContain("Process", key, StringComparison.Ordinal);
+            Assert.All(
+                AccessorNames,
+                accessor => Assert.Equal(CapabilityVerdict.None, CapabilityMap.Default.Classify($"{key}.{accessor}")));
+        });
     }
 
     // The method under test, located by name so nothing here depends on load order.
