@@ -1,0 +1,40 @@
+# Benign corpus - pinned manifest (id,version), one package per line.
+#
+# WHAT THIS IS: a set of widely-used, ordinary NuGet packages whose label is "overwhelmingly not
+# malware" by virtue of their download counts. Scanning them tells us which capabilities are so
+# ubiquitous in benign code that they carry no gating signal. It is NOT a malware corpus and it is
+# NOT proof of benignity - see ADR-0021: benign by assumption is not benign by proof.
+#
+# WHY VERSIONS ARE PINNED: the harness's first acceptance criterion is that two runs of the same
+# manifest produce byte-identical output. A floating version would silently change the numbers a
+# risk-scoring ADR is calibrated against. Changing a pin changes the manifest hash recorded in the
+# report, which is how a reader tells two measurements apart.
+#
+# Blank lines and lines starting with '#' are ignored. Order is significant: --take N keeps the
+# first N entries, so append rather than insert if you want older runs to stay comparable.
+
+Newtonsoft.Json,13.0.3
+Serilog,4.2.0
+NLog,5.3.4
+AutoMapper,13.0.1
+FluentValidation,11.11.0
+Polly,8.5.0
+Dapper,2.1.35
+CsvHelper,33.0.1
+HtmlAgilityPack,1.11.71
+RestSharp,112.1.0
+MediatR,12.4.1
+Humanizer.Core,2.14.1
+Castle.Core,5.1.1
+Moq,4.20.72
+NUnit,4.2.2
+System.Text.Json,9.0.0
+Microsoft.Extensions.Logging.Abstractions,9.0.0
+Microsoft.Extensions.DependencyInjection,9.0.0
+Microsoft.Extensions.Configuration,9.0.0
+Microsoft.Bcl.AsyncInterfaces,9.0.0
+protobuf-net,3.2.30
+YamlDotNet,16.2.1
+SharpZipLib,1.4.2
+MimeKit,4.8.0
+Spectre.Console,0.49.1
