@@ -418,7 +418,7 @@ public sealed class ScriptRuleScanner : Runtime
             var rules = new RuleSet();
             var assembly = typeof(ScriptRuleScanner).Assembly;
             var resourceNames = assembly.GetManifestResourceNames()
-                .Where(n => n.Contains(RuleResourceMarker) && n.EndsWith(".json", StringComparison.OrdinalIgnoreCase));
+                .Where(n => RuleResourceMarkers.Any(n.Contains) && n.EndsWith(".json", StringComparison.OrdinalIgnoreCase));
 
             var loaded = 0;
             foreach (var resource in resourceNames)
@@ -480,8 +480,10 @@ public sealed class ScriptRuleScanner : Runtime
     private const Confidence ConfidenceFloor = Confidence.Low | Confidence.Medium | Confidence.High;
     private const Severity SeverityFloor = Severity.Critical | Severity.Important | Severity.Moderate;
 
-    // Substring identifying the embedded backdoor ruleset resources under Resources/BackdoorRules.
-    private const string RuleResourceMarker = ".Resources.BackdoorRules.";
+    // Substrings identifying the embedded ruleset resources: the OSSGadget MIT rules under
+    // Resources/BackdoorRules (ADR 0012) and the Silvergun-owned rules under Resources/SilvergunRules
+    // (docs/agent/tasks/silvergun-script-ruleset.md). A resource matching any marker is loaded.
+    private static readonly string[] RuleResourceMarkers = [".Resources.BackdoorRules.", ".Resources.SilvergunRules."];
 
     // The one element and attribute whose value is blanked inside a start tag; the rationale is on RedactProse.
     private const string RepositoryElement = "repository";

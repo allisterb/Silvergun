@@ -164,6 +164,65 @@ public sealed class AssemblyAnalyzer : Runtime, IDisposable
         host.Dispose();
         disposed = true;
     }
+
+    /// <summary>
+    /// The shared <c>ldstr</c>-extraction seam: every string constant loaded across every method body, paired
+    /// with its best-effort caller type/method. Factored out of <see cref="ObfuscationAnalysis"/> (which did this
+    /// exact walk inline) so <c>IndicatorAnalysis</c> and any future consumer read the same guarded loop rather
+    /// than a second copy of it — duplicating a hostile-input body-read loop is the defect class that motivated
+    /// this seam: a guard fixed on one copy and not the other.
+    /// <para>
+    /// Same per-method guard semantics as <see cref="TryReadBody"/>: an unreadable body costs one method, never
+    /// the assembly (skipped and reported via <see cref="Runtime.Warn"/> using <see cref="SafeName"/>), and a
+    /// per-method operations-enumeration failure is caught the same way. Never throws; a top-level enumeration
+    /// failure (advancing CCI's lazy type resolution) is the caller's outer-catch responsibility, exactly as for
+    /// <see cref="Methods"/> itself.
+    /// </para>
+    /// </summary>
+    public IEnumerable<StringConstant> StringConstants() =>
+        Methods.SelectMany(ScanMethodConstants);
+
+    // Guarded per-method ldstr scan backing StringConstants(): reads the body under TryReadBody's guard (a
+    // hostile body costs this method's constants, not the assembly) and walks read.Body.Operations for
+    // OperationCode.Ldstr the same way ObfuscationAnalysis.ScanMethod did before this seam replaced its copy.
+    private static IReadOnlyList<StringConstant> ScanMethodConstants(IMethodDefinition method)
+    {
+        var read = TryReadBody(method);
+        if (read.Body is null)
+        {
+            if (read.Error is { } error)
+                Warn("Skipping constant scan of method {0}: {1}", SafeName(method), error);
+            return [];
+        }
+
+        try
+        {
+            var callerType = CallerTypeName(method);
+            var callerMethod = method.Name.Value;
+
+            return read.Body.Operations
+                .Where(op => op.OperationCode == OperationCode.Ldstr)
+                .Select(op => op.Value as string)
+                .Where(text => text is not null)
+                .Select(text => new StringConstant(text!, callerType, callerMethod))
+                .ToArray();
+        }
+        catch (Exception ex)
+        {
+            // SafeName, not method.Name.Value: reading the name here can itself throw on a crafted module, and
+            // that throw would escape this per-method guard and fail the whole extraction.
+            Warn("Skipping constant scan of method {0}: {1}", SafeName(method), ex.Message);
+            return [];
+        }
+    }
+
+    // Best-effort namespace-qualified type name of the method's containing type ("<unknown>" if CCI cannot
+    // resolve it) — same helper ObfuscationAnalysis.CallerType and CapabilityAnalysis use.
+    private static string CallerTypeName(IMethodDefinition method)
+    {
+        try { return TypeName(method.ContainingTypeDefinition); }
+        catch { return "<unknown>"; }
+    }
     #endregion
 
     #region Fields
@@ -214,5 +273,10 @@ public sealed class AssemblyAnalyzer : Runtime, IDisposable
         public bool IsUnreadable => Body is null && Error is not null;
         #endregion
     }
+
+    /// <summary>One <c>ldstr</c> constant yielded by <see cref="StringConstants"/>, paired with its best-effort
+    /// caller. <see cref="CallerType"/>/<see cref="CallerMethod"/> mirror the fields <see cref="ObfuscationFinding"/>
+    /// and <see cref="ApiCallFinding"/> already carry.</summary>
+    public readonly record struct StringConstant(string Text, string CallerType, string CallerMethod);
     #endregion
 }

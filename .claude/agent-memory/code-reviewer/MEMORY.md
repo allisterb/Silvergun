@@ -13,3 +13,5 @@
 - [ext/ comments explaining non-obvious design rationale are acceptable](ext-comment-proportionality.md) — weigh merge-conflict cost against the alternative of the reasoning being lost.
 - [CLI exit code vs report footer predicate](project_exit-code-footer-predicate.md) — ADR-0024's invariant has one accepted counterexample (PackageMetadata script findings); `attention` is copied across 4+ sites.
 - [Auditing "commutative by construction" claims](feedback_verify-structural-commutativity-claims.md) — partition result arms constant-vs-operand, then trace null/Unknown sentinels through each.
+- [ldstr-indicator-classifier review](project_ldstr-indicator-classifier.md) — clean landing 2026-08-20; one stale comment after a design pivot, one undocumented CLI-integration scope gap.
+- [Re-verify empirical code comments](feedback-reverify-empirical-code-comments.md) — reproduce cited timing/byte-count claims in scratchpad, don't trust the comment.

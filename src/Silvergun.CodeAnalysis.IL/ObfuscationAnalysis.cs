@@ -24,6 +24,17 @@ using Microsoft.Cci;
 /// Shannon entropy of the raw encoded constant is recorded on every finding as a secondary signal.
 /// Detection classifies only — decoded archives are never extracted (RecursiveExtractor is out of scope).
 /// Never throws: per-method / per-constant failures are skipped, not fatal (ADR 0005 threat model).
+/// <para>
+/// <b>Does NOT share <see cref="AssemblyAnalyzer.StringConstants"/> with <see cref="IndicatorAnalysis"/></b>
+/// even though that seam exists and does the identical <c>ldstr</c> walk: <c>SafeNameTests.SafeName_BothConsumers_CallTheSharedSeam</c>
+/// pins that this class's own compiled IL calls <see cref="AssemblyAnalyzer.SafeName"/> directly (a structural
+/// guard against a private, divergence-prone copy of the fallback reappearing here) — a real regression, verified
+/// with the IL test suite before/after retargeting <see cref="Analyze"/> onto <see cref="AssemblyAnalyzer.StringConstants"/>,
+/// even though the produced <see cref="ObfuscationReport"/> findings were confirmed byte-identical. Since the
+/// shared seam moves the <c>SafeName</c> call site out of this class's own IL and into <c>AssemblyAnalyzer</c>'s,
+/// it fails that pre-existing invariant, so per the task spec's own fallback instruction this class keeps its own
+/// copy of the guarded walk below rather than retargeting onto the shared seam.
+/// </para>
 /// </summary>
 public sealed class ObfuscationAnalysis(AssemblyAnalyzer assembly)
 {

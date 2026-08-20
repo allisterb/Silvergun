@@ -18,6 +18,9 @@
     <!-- OSSGadget MIT backdoor rulesets (see Resources/BackdoorRules/NOTICE.md), loaded at runtime by ScriptRuleScanner. -->
     <EmbeddedResource Include="Resources\BackdoorRules\*.json" />
     <EmbeddedResource Include="Resources\BackdoorRules\NOTICE.md" />
+    <!-- Silvergun-owned rulesets (see Resources/SilvergunRules/README.md), loaded at runtime by ScriptRuleScanner. -->
+    <EmbeddedResource Include="Resources\SilvergunRules\*.json" />
+    <EmbeddedResource Include="Resources\SilvergunRules\README.md" />
   </ItemGroup>
 
   <ItemGroup>

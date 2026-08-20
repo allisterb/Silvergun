@@ -1,6 +1,6 @@
 ---
 name: subagent-repo-hygiene-checks
-description: After any ext/ or revert-verify subagent task, check BOTH for stray .claude/ dirs in submodules AND for an orphaned git stash holding the agent's work
+description: After any ext/, revert-verify, or code-review subagent task, check for stray .claude/ dirs in submodules, an orphaned git stash, AND unrestored mutations to shipped src/ files
 metadata:
   type: feedback
 ---
@@ -46,3 +46,19 @@ stash held five completed guards across two files. Recovered with `git stash pop
 a confirmation** — check `git stash list` before concluding anything was lost or never done.
 Inspect with `git stash show -p stash@{0}` before popping. Related: [[avoid-find-command]] —
 `find` is the usual thing that kills these agents mid-verification.
+
+## 3. `code-reviewer` is NOT read-only — it will mutate shipped files to probe them
+
+Despite being described as a read-only review gate, its agent definition grants **Write and Edit**.
+Observed 2026-08-03: to prove a structural guard was not vacuous, it temporarily reverted a shipped
+detection rule (`SG0010`) to its known-broken shape, then restored it and self-verified byte-identity
+against a scratchpad backup.
+
+**Why it matters:** the probe is legitimate and produced a real finding, but a reviewer editing
+`src/` means a crashed or timed-out review can leave a **silently sabotaged detection rule** in the
+tree — the worst possible residue in a security tool, because the suite may still pass.
+
+**How to apply:** after any `code-reviewer` run, re-read the specific files it says it probed and
+confirm the shipped values, plus `git status --short`. Do not accept a self-reported restore. When
+delegating a review, add: "do NOT temporarily mutate any shipped file as part of your verification"
+unless the probe is what you actually want.

@@ -1,0 +1,52 @@
+[
+  {
+    "name": "Silvergun: OOB Callback / Interaction Domain",
+    "id": "SG0001",
+    "description": "References a host from the out-of-band interaction / request-catcher class (pipedream, ceye.io, Burp Collaborator, interact.sh, webhook.site, dnslog.cn, canarytokens.com, requestcatcher.com, beeceptor.com, hookbin.com, requestbin), commonly used to prove/exfiltrate a callback from installed or built package content.",
+    "tags": [
+      "Silvergun.Backdoor.CallbackDomain"
+    ],
+    "severity": "important",
+    "patterns": [
+      {
+        "pattern": "(?<![A-Za-z0-9-])(pipedream\\.net|pipedream\\.com|ceye\\.io|burpcollaborator\\.net|interact\\.sh|oastify\\.com|requestbin\\.net|requestbin\\.com|webhook\\.site|dnslog\\.cn|canarytokens\\.com|requestcatcher\\.com|beeceptor\\.com|hookbin\\.com)(?![A-Za-z0-9-])",
+        "type": "regex",
+        "scopes": [ "code" ],
+        "modifiers": [ "i" ],
+        "confidence": "high"
+      }
+    ]
+  },
+  {
+    "name": "Silvergun: Exfiltration Sink (Paste / File Drop / Chat Webhook)",
+    "id": "SG0002",
+    "description": "References a paste, anonymous-file-drop or chat-webhook sink (pastebin raw, hastebin, transfer.sh, file.io, anonfiles, Discord/Slack/Telegram webhook endpoints) commonly used to exfiltrate data from installed or built package content.",
+    "tags": [
+      "Silvergun.Backdoor.ExfilSink"
+    ],
+    "severity": "moderate",
+    "patterns": [
+      {
+        "pattern": "(?<![A-Za-z0-9-])(hastebin\\.com|transfer\\.sh|file\\.io|anonfiles\\.com)(?![A-Za-z0-9-])",
+        "type": "regex",
+        "scopes": [ "code" ],
+        "modifiers": [ "i" ],
+        "confidence": "high"
+      },
+      {
+        "pattern": "(?<![A-Za-z0-9-])(pastebin\\.com/raw|discord\\.com/api/webhooks|discordapp\\.com/api/webhooks|hooks\\.slack\\.com/services)(?![A-Za-z0-9-])",
+        "type": "regex",
+        "scopes": [ "code" ],
+        "modifiers": [ "i" ],
+        "confidence": "high"
+      },
+      {
+        "pattern": "(?<![A-Za-z0-9-])(api\\.telegram\\.org/bot)",
+        "type": "regex",
+        "scopes": [ "code" ],
+        "modifiers": [ "i" ],
+        "confidence": "high"
+      }
+    ]
+  }
+]

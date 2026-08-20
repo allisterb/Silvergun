@@ -1,0 +1,73 @@
+[
+  {
+    "name": "Silvergun: MSBuild Exec Task",
+    "id": "SG0010",
+    "description": "A package-shipped .targets/.props file declares an <Exec> task, which runs an arbitrary command on the consuming developer's or build agent's machine at build time — a supply-chain execution primitive independent of what the command actually does.",
+    "tags": [
+      "Silvergun.Execution.MsBuildExec"
+    ],
+    "severity": "moderate",
+    "patterns": [
+      {
+        "pattern": "<Exec ",
+        "type": "substring",
+        "scopes": [ "code" ],
+        "modifiers": [],
+        "confidence": "high"
+      }
+    ]
+  },
+  {
+    "name": "Silvergun: MSBuild Exec Download/Execute Primitive",
+    "id": "SG0011",
+    "description": "An <Exec> task's Command carries a download-and-execute or encoded-execution primitive (PowerShell -enc/-EncodedCommand/-WindowStyle Hidden/DownloadString/DownloadFile/Invoke-WebRequest/iwr/iex, curl piped to a shell, certutil -urlcache/-decode, bitsadmin /transfer, mshta http, rundll32 ...url.dll) — the high-signal case of SG0010, matched at build time on a NuGet consumer's machine.",
+    "tags": [
+      "Silvergun.Execution.MsBuildDownloadExec"
+    ],
+    "severity": "critical",
+    "patterns": [
+      {
+        "pattern": "Command\\s*=\\s*\"[^\"\\r\\n]*(?:-enc\\b|-encodedcommand|-w(?:indowstyle)?\\s+hidden|downloadstring|downloadfile|invoke-webrequest|\\biwr\\b|\\biex\\b)[^\"\\r\\n]*\"",
+        "type": "regex",
+        "scopes": [ "code" ],
+        "modifiers": [ "i" ],
+        "confidence": "high"
+      },
+      {
+        "pattern": "Command\\s*=\\s*\"[^\"\\r\\n]*curl[^\"\\r\\n]*\\|\\s*(?:(?:sudo|(?:/usr/bin/)?env)\\s+)?(?:[A-Za-z0-9._/-]*/)?(?:pwsh|powershell|sh|bash|zsh|dash|ash|ksh|fish)\\b[^\"\\r\\n]*\"",
+        "type": "regex",
+        "scopes": [ "code" ],
+        "modifiers": [ "i" ],
+        "confidence": "high"
+      },
+      {
+        "pattern": "Command\\s*=\\s*\"[^\"\\r\\n]*certutil[^\"\\r\\n]*(?:-urlcache|-decode)[^\"\\r\\n]*\"",
+        "type": "regex",
+        "scopes": [ "code" ],
+        "modifiers": [ "i" ],
+        "confidence": "high"
+      },
+      {
+        "pattern": "Command\\s*=\\s*\"[^\"\\r\\n]*bitsadmin[^\"\\r\\n]*/transfer[^\"\\r\\n]*\"",
+        "type": "regex",
+        "scopes": [ "code" ],
+        "modifiers": [ "i" ],
+        "confidence": "high"
+      },
+      {
+        "pattern": "Command\\s*=\\s*\"[^\"\\r\\n]*mshta[^\"\\r\\n]*http[^\"\\r\\n]*\"",
+        "type": "regex",
+        "scopes": [ "code" ],
+        "modifiers": [ "i" ],
+        "confidence": "high"
+      },
+      {
+        "pattern": "Command\\s*=\\s*\"[^\"\\r\\n]*rundll32[^\"\\r\\n]*url\\.dll[^\"\\r\\n]*\"",
+        "type": "regex",
+        "scopes": [ "code" ],
+        "modifiers": [ "i" ],
+        "confidence": "high"
+      }
+    ]
+  }
+]

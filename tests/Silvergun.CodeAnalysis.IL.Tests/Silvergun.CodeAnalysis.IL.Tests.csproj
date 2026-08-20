@@ -59,6 +59,13 @@
                       ReferenceOutputAssembly="false"
                       SkipGetTargetFrameworkProperties="true"
                       AdditionalProperties="TargetFramework=net472" />
+    <!-- A dozen hand-written ldstr constants (six distinct public IPv4 hosts + two repeats of the first) used
+         ONLY by IndicatorAnalysisTruncationTests, to exercise IndicatorAnalysis's injected maxDistinctIndicators
+         override against a deterministic, isolated cap boundary. Replaces the deleted
+         Silvergun.CodeAnalysis.IL.Tests.BulkIndicatorFixture (10,010 machine-generated constants used to trip
+         the real 10,000 cap) now that the cap itself is injectable — see IndicatorCapPayloads.cs for why it is
+         still kept as its own (now tiny) assembly rather than folded into the shared fixture. -->
+    <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.IndicatorCapFixture\Silvergun.CodeAnalysis.IL.Tests.IndicatorCapFixture.csproj" />
   </ItemGroup>
 
 </Project>
