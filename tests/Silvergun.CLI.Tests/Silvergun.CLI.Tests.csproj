@@ -28,6 +28,11 @@
          project's output directory, where UnreadableMethodBodyCliTests copies and corrupts it. Nothing compiles
          against its types — it is located by file name at test time. -->
     <ProjectReference Include="..\Silvergun.CLI.Tests.BenignFixture\Silvergun.CLI.Tests.BenignFixture.csproj" />
+    <!-- Real IndicatorAnalysis findings across every IndicatorCategory (indicator-cli-integration task), reused
+         from the IL test suite's own fixture (tests/Silvergun.CodeAnalysis.IL.Tests.Fixture/IndicatorPayloads.cs)
+         rather than duplicating a second copy: referenced (not merely built) so its dll lands in this project's
+         output directory and IndicatorHeadlineAndJsonEndToEndTests can drive the real CLI against it by file name. -->
+    <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.Fixture\Silvergun.CodeAnalysis.IL.Tests.Fixture.csproj" />
   </ItemGroup>
 
 </Project>

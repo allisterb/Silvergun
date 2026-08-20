@@ -104,11 +104,11 @@ internal static class FooterHeadline
 
     #region Fields
     /// <summary>The <c>cleanDetail</c> tail <c>AssemblyReportRenderer</c> passes to the shared footer.</summary>
-    internal const string AssemblyCleanDetail = "no sensitive-API or obfuscation findings.";
+    internal const string AssemblyCleanDetail = "no sensitive-API, obfuscation, or discriminating-indicator findings.";
 
     /// <summary>The (different, longer) tail <c>PackageReportRenderer</c> passes.</summary>
     internal const string PackageCleanDetail =
-        "no capability, script, obfuscation, malware-signature, or known-vulnerability findings.";
+        "no capability, script, obfuscation, malware-signature, known-vulnerability, or discriminating-indicator findings.";
 
     private const string CleanLabel = "Clean";
     private const string NotVerifiedLabel = "Not verified";

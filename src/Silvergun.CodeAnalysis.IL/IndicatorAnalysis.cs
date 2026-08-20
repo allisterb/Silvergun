@@ -158,6 +158,7 @@ public sealed class IndicatorAnalysis(AssemblyAnalyzer assembly, int? maxDistinc
             {
                 if (found.Count >= MaxIndicatorsPerConstant) break;
                 if (IsVersionAssignment(text, m.Index)) continue;
+                if (IsPartOfLongerDottedRun(text, m.Index, m.Length)) continue;
                 if (!IPAddress.TryParse(m.Value, out var ip)) continue;
                 var value = ip.ToString();
                 claimedHosts.Add(value);
@@ -166,6 +167,8 @@ public sealed class IndicatorAnalysis(AssemblyAnalyzer assembly, int? maxDistinc
             foreach (Match m in ipv6Regex.Matches(text))
             {
                 if (found.Count >= MaxIndicatorsPerConstant) break;
+                if (!HasHexGroup(m.Value)) continue;
+                if (IsAdjacentToWordCharacter(text, m.Index, m.Length)) continue;
                 if (!IPAddress.TryParse(m.Value, out var ip) || ip.AddressFamily != AddressFamily.InterNetworkV6) continue;
                 var value = ip.ToString();
                 claimedHosts.Add(value);
@@ -286,12 +289,73 @@ public sealed class IndicatorAnalysis(AssemblyAnalyzer assembly, int? maxDistinc
         return false;
     }
 
+    // True when the ipv4Regex match at [matchIndex, matchIndex + matchLength) is one segment of a LONGER
+    // dotted-decimal run, not a standalone address — the known, mechanical false positive from cryptographic
+    // OIDs (ARCHITECT DECISIONS, indicator-benign-prevalence.md): MimeKit's S/MIME OID
+    // "1.3.6.1.4.1.188.7.1.1.2" contains "1.3.6.1" and "4.1.188.7" as syntactically valid dotted quads, but
+    // neither is an address; each is four digits carved out of a longer run of OID arcs. Implemented as a
+    // positional check of the single character immediately before/after the match, NOT a regex lookaround, for
+    // the same reason as IsVersionAssignment: RegexOptions.NonBacktracking (required on every pattern in this
+    // file) does not support lookaround at all. A match is rejected only when the run demonstrably continues
+    // past it — the adjacent character is '.' AND the character beyond that is a digit — so a trailing sentence
+    // period ("...at 8.8.8.8.") does not fire this (the character after the dot is not a digit).
+    private static bool IsPartOfLongerDottedRun(string text, int matchIndex, int matchLength)
+    {
+        var before = matchIndex - 1;
+        if (before >= 0 && text[before] == '.' && before - 1 >= 0 && char.IsAsciiDigit(text[before - 1]))
+            return true;
+
+        var after = matchIndex + matchLength;
+        if (after < text.Length && text[after] == '.' && after + 1 < text.Length && char.IsAsciiDigit(text[after + 1]))
+            return true;
+
+        return false;
+    }
+
+    // True when an ipv6Regex match contains at least one hexadecimal group — i.e. is not the bare all-elision
+    // form "::". "::" itself carries no address information at all: it is a common artifact of regex SOURCE CODE
+    // ldstr constants (e.g. "[^{}:]+)(?::" or "[^:]+)::(?<memberName>"), not an intended reference to the
+    // unspecified address. A simple content check, not a positional scan, because there is no adjacent-character
+    // condition to test — the match itself is the whole candidate. "::1" and every other compressed form keep at
+    // least one hex group and are unaffected.
+    private static bool HasHexGroup(string value) => value.Any(char.IsAsciiHexDigit);
+
+    // True when the character immediately BEFORE or immediately AFTER an ipv6Regex match is alphanumeric — i.e.
+    // the match is merely a fragment of a larger word/token, not a standalone address, on either boundary.
+    // HasHexGroup's "at least one hex digit" requirement is satisfied by the LAST character of countless
+    // ordinary words ('e', 'd', 'f', 'a', 'b', 'c', and every digit are all valid hex digits) sitting directly
+    // against a "::" that follows — e.g. XPath's "descendant-or-self::node()" ("f::") or a Discord emoji
+    // shortcode ":call_me_hand::skin-tone-1:" ("d::"). The trailing side has the mirror defect: the greedy
+    // [A-Fa-f0-9]{0,4} group after the colons happily swallows the FIRST 1-4 characters of the FOLLOWING word if
+    // they happen to be hex digits, even when the leading side is clean — PostgreSQL's cast syntax
+    // "'true'::boolean" matches as "::b" (the apostrophe blocks the leading side, but "b", the first letter of
+    // "boolean", gets consumed as if it were a hex group). IPAddress.TryParse offers no protection against
+    // either shape — "e::" genuinely parses (as "000e::") and so does "::b" (as "::000b"). Implemented as a pair
+    // of single-character positional checks, NOT a regex lookaround, for the same NonBacktracking reason as
+    // IsVersionAssignment/IsPartOfLongerDottedRun above (and structured like the latter, which also checks both
+    // boundaries this way): RegexOptions.NonBacktracking (required on every pattern in this file) does not
+    // support lookaround at all. A match at the very start/end of the constant has no character on that side at
+    // all, which is deliberately NOT treated the same as an adjacent alphanumeric one, so a leading "::1" or a
+    // constant that IS exactly "2001:db8::1" still fires.
+    private static bool IsAdjacentToWordCharacter(string text, int matchIndex, int matchLength)
+    {
+        if (matchIndex > 0 && char.IsAsciiLetterOrDigit(text[matchIndex - 1]))
+            return true;
+
+        var after = matchIndex + matchLength;
+        return after < text.Length && char.IsAsciiLetterOrDigit(text[after]);
+    }
+
     // RFC1918 (10/8, 172.16/12, 192.168/16) + loopback + link-local for IPv4; unique-local (fc00::/7) + loopback
-    // + link-local for IPv6 — exactly the three classes the PrivateIpLiteral category names, nothing broader
-    // (e.g. CGNAT 100.64.0.0/10 is deliberately excluded — the spec calls out RFC1918/loopback/link-local only).
+    // + link-local for IPv6 — exactly the three classes the PrivateIpLiteral category names — PLUS the
+    // unspecified address (0.0.0.0 / "::"), which is not RFC1918 at all but is folded in here anyway: the
+    // meaningful distinction this tool needs is routable vs not, and 0.0.0.0/"::" is the least routable address
+    // there is, so leaving it in PublicIpLiteral would be a defect in the routability test, not merely
+    // imprecision the way an over-broad category would be. (CGNAT 100.64.0.0/10 is deliberately still excluded —
+    // the spec calls out RFC1918/loopback/link-local/unspecified only.)
     private static bool IsPrivate(IPAddress ip)
     {
-        if (IPAddress.IsLoopback(ip))
+        if (IPAddress.IsLoopback(ip) || ip.Equals(IPAddress.Any) || ip.Equals(IPAddress.IPv6Any))
             return true;
 
         if (ip.AddressFamily == AddressFamily.InterNetwork)

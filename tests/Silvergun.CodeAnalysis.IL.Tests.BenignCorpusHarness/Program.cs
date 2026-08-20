@@ -19,9 +19,10 @@ public sealed record HarnessOptions(
 
 /// <summary>
 /// Benign-corpus harness - <b>a measurement instrument, not a shipped feature and not a unit test</b>. It scans a
-/// pinned set of ordinary, widely-used NuGet packages and reports which capabilities appear in what share of them,
-/// so that a later risk-scoring ADR can calibrate a gate against evidence instead of intuition. It changes nothing
-/// about how Silvergun scores or gates; it only measures.
+/// pinned set of ordinary, widely-used NuGet packages and reports which capabilities and
+/// <see cref="Silvergun.CodeAnalysis.IL.IndicatorCategory"/> values appear in what share of them, so that a later
+/// risk-scoring ADR can calibrate a gate against evidence instead of intuition. It changes nothing about how
+/// Silvergun scores or gates; it only measures.
 /// <para>
 /// Two roles in one executable. Without arguments (or with options) it is the <b>driver</b>. With
 /// <c>scan &lt;assembly&gt;</c> it is the <b>child</b> (<see cref="ChildScan"/>) that analyses exactly one assembly
@@ -76,8 +77,15 @@ public static class Program
             CorpusReport.WriteFindingsTsv(tsv, results);
             CorpusReport.WriteMarkdown(md, Path.GetFileName(tsv), date, manifest, options.CacheRoot, results);
 
+            var itsv = Path.Combine(options.OutputDirectory, $"indicator-prevalence-{date:yyyy-MM-dd}.tsv");
+            var imd = Path.Combine(options.OutputDirectory, $"indicator-prevalence-{date:yyyy-MM-dd}.md");
+            CorpusReport.WriteIndicatorFindingsTsv(itsv, results);
+            CorpusReport.WriteIndicatorMarkdown(imd, Path.GetFileName(itsv), date, manifest, options.CacheRoot, results);
+
             Console.WriteLine($"wrote {tsv}");
             Console.WriteLine($"wrote {md}");
+            Console.WriteLine($"wrote {itsv}");
+            Console.WriteLine($"wrote {imd}");
             Console.WriteLine(
                 $"counted {results.Count(r => r.Counted)}/{results.Count} package(s); " +
                 $"{results.Count(r => r.Status == PackageResult.Scanned)} complete");

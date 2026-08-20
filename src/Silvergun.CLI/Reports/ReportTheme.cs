@@ -1,5 +1,9 @@
 namespace Silvergun.CLI.Reports;
 
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
 using Spectre.Console;
 
 using Silvergun.CodeAnalysis.IL;
@@ -91,5 +95,82 @@ internal static class ReportTheme
     internal static string YesNo(bool value) => value ? "yes" : "no";
 
     internal static string YN(bool value) => value ? "y" : "n";
+
+    /// <summary>
+    /// The <see cref="IndicatorCategory"/> values rendered as full detail rows in the human report — the seven
+    /// categories measured at 0% (or, for <see cref="IndicatorCategory.PublicIpLiteral"/>, still judged
+    /// discriminating) benign-corpus share in <c>docs/agent/measurements/indicator-prevalence-2026-08-03.md</c>.
+    /// Every other category (<see cref="IndicatorCategory.ReflectionTypeName"/>, <see cref="IndicatorCategory.GenericUrl"/>,
+    /// <see cref="IndicatorCategory.PrivateIpLiteral"/>) is counts-only in the terminal — <c>--json</c> always
+    /// carries every category in full regardless of this list (indicator-cli-integration task).
+    /// <para>ARCHITECT DECISION 2026-08-03: this same split also governs the Assessment headline — these seven
+    /// categories DO set "attention" (so the headline reads "Findings present" rather than "Clean"), because a
+    /// package whose only finding is e.g. a <see cref="IndicatorCategory.CallbackDomain"/> must not print "Clean"
+    /// with that finding listed in the section directly above it. It is still not a gate: neither this group nor
+    /// the counts-only categories ever affect the exit code.</para>
+    /// </summary>
+    internal static bool IsDiscriminatingIndicatorCategory(IndicatorCategory category) => category is
+        IndicatorCategory.CallbackDomain or IndicatorCategory.ExfilSink or IndicatorCategory.DynamicDns
+        or IndicatorCategory.RawCodeHost or IndicatorCategory.CredentialPath or IndicatorCategory.AutorunRegistry
+        or IndicatorCategory.PublicIpLiteral;
+
+    /// <summary>
+    /// Per-<see cref="IndicatorCategory"/> finding-count grid over EVERY category, including a count of zero — a
+    /// category present at zero is information, so it is never omitted. Counts aggregated finding rows (already
+    /// deduplicated per (Category, Value, CallerType, CallerMethod) by <see cref="IndicatorAnalysis"/>), not raw
+    /// <see cref="IndicatorFinding.Occurrences"/>, matching how counts are reported elsewhere in these renderers
+    /// (e.g. capability/obfuscation finding counts).
+    /// </summary>
+    internal static Grid IndicatorCountSummary(IReadOnlyList<IndicatorFinding> findings)
+    {
+        var grid = new Grid();
+        grid.AddColumn(new GridColumn().NoWrap().PadRight(2));
+        grid.AddColumn();
+        foreach (var category in Enum.GetValues<IndicatorCategory>())
+        {
+            var count = findings.Count(f => f.Category == category);
+            grid.AddRow($"[grey]{Esc(category.ToString())}[/]", count == 0 ? "[green]0[/]" : $"[orange1]{count}[/]");
+        }
+        return grid;
+    }
+
+    /// <summary>
+    /// The full <see cref="Capability"/> manifest (capability-manifest-reframe task): EVERY enum value, present or
+    /// absent, in enum-declaration order — the enum is documented append-only, so this ordering is stable across
+    /// releases and makes two different packages' manifests visually comparable. Do NOT sort by count. An absent
+    /// capability is itself information ("this package does NOT execute processes"), so zero rows are never
+    /// omitted, matching <see cref="IndicatorCountSummary"/>'s posture toward zero-count categories.
+    /// <para>
+    /// Derived entirely at render time from <see cref="ApiCallFinding"/> rows already on the report — no report
+    /// record gains a member for this (that would reopen the <c>--json</c> splice's duplicate-property hazard);
+    /// the persisted/serialized manifest shape belongs to the capability-diff-versions follow-up task.
+    /// </para>
+    /// </summary>
+    internal static Grid CapabilityManifest(IReadOnlyList<ApiCallFinding> findings)
+    {
+        var grid = new Grid();
+        grid.AddColumn(new GridColumn().NoWrap().PadRight(2));
+        grid.AddColumn(new GridColumn().NoWrap().PadRight(2));
+        grid.AddColumn();
+        foreach (var capability in Enum.GetValues<Capability>())
+        {
+            var count = findings.Count(f => f.Capability == capability);
+            grid.AddRow(
+                $"[grey]{Esc(capability.ToString())}[/]",
+                count > 0 ? Colored(capability, "present") : "[grey]absent[/]",
+                count > 0 ? $"[orange1]{count}[/]" : "[green]0[/]");
+        }
+        return grid;
+    }
+
+    /// <summary>
+    /// Honesty line printed alongside <see cref="CapabilityManifest"/>: the manifest itself is purely
+    /// informational, but presenting it as an inventory does NOT change the gate — <c>--strict</c> still fails the
+    /// build on ANY capability finding, exactly as before this task. Stated explicitly so the report never reads as
+    /// "purely informational" while silently controlling CI (whether presence alone SHOULD gate is the deferred,
+    /// separate decision in ADR-0027 — not this task).
+    /// </summary>
+    internal static string CapabilityGateNote(bool rich) =>
+        $"[grey]Note[/] {Dash(rich)} this manifest is informational; [bold]--strict[/] still fails the build on ANY capability present here.";
     #endregion
 }

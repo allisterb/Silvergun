@@ -9,7 +9,8 @@ using Silvergun.PackageAnalysis.NuGet.Yara;
 
 /// <summary>
 /// Runs the CIL capability analysis over every assembly in a <c>.nupkg</c>. <see cref="Scan"/> opens the
-/// package, analyzes each inventoried assembly with <see cref="AssemblyAnalyzer"/> + <see cref="CapabilityAnalysis"/>,
+/// package, analyzes each inventoried assembly with <see cref="AssemblyAnalyzer"/> + <see cref="CapabilityAnalysis"/>
+/// (plus the best-effort <see cref="ObfuscationAnalysis"/> and <see cref="IndicatorAnalysis"/> side analyses, ADR 0010),
 /// and aggregates the per-assembly reports (plus identity and scripts) into a <see cref="PackageCapabilityReport"/>.
 /// A per-assembly load/analysis failure becomes a skipped <see cref="AssemblyScanResult"/> — never fatal. Never throws.
 /// </summary>
@@ -56,8 +57,10 @@ public sealed class PackageScanner : Runtime
     }
 
     // Loads and analyzes one assembly; a Load/Analyze failure yields a skipped result carrying the Result message.
-    // Metadata and obfuscation are read best-effort in every path — a failure never sinks the assembly (null member).
-    // The CCI AssemblyAnalyzer is loaded once and shared by both the capability and obfuscation analyses (ADR 0010).
+    // Metadata, obfuscation, and indicators are read best-effort in every path — a failure never sinks the assembly
+    // (null member). The CCI AssemblyAnalyzer is loaded once and shared by the capability, obfuscation, and
+    // indicator analyses (ADR 0010; indicators follow the obfuscation precedent exactly, indicator-cli-integration
+    // task).
     private static AssemblyScanResult ScanAssembly(PackageAssembly assembly, bool resolveReferences)
     {
         var metadata = ReadMetadata(assembly.FullPath, resolveReferences);
@@ -68,10 +71,11 @@ public sealed class PackageScanner : Runtime
 
         using var cci = loaded.Value;
         var obfuscation = AnalyzeObfuscation(cci);
+        var indicators = AnalyzeIndicators(cci);
         var analysis = new CapabilityAnalysis(cci).Analyze();
         return analysis.IsSuccess
-            ? new AssemblyScanResult(assembly, analysis.Value, null, metadata, obfuscation)
-            : new AssemblyScanResult(assembly, null, analysis.Message ?? "Capability analysis failed.", metadata, obfuscation);
+            ? new AssemblyScanResult(assembly, analysis.Value, null, metadata, obfuscation, indicators)
+            : new AssemblyScanResult(assembly, null, analysis.Message ?? "Capability analysis failed.", metadata, obfuscation, indicators);
     }
 
     // Best-effort script/content rule scan over the open package (ADR 0012); ScriptRuleScanner already never throws,
@@ -175,6 +179,18 @@ public sealed class PackageScanner : Runtime
             return result.Value;
 
         Warn("Could not analyze obfuscation for {0}: {1}", cci.AssemblyPath, result.Message ?? "unknown error");
+        return null;
+    }
+
+    // Best-effort indicator scan over the already-loaded analyzer, mirroring AnalyzeObfuscation exactly
+    // (indicator-cli-integration task); a failure logs a warning and yields null.
+    private static IndicatorReport? AnalyzeIndicators(AssemblyAnalyzer cci)
+    {
+        var result = new IndicatorAnalysis(cci).Analyze();
+        if (result.IsSuccess)
+            return result.Value;
+
+        Warn("Could not analyze indicators for {0}: {1}", cci.AssemblyPath, result.Message ?? "unknown error");
         return null;
     }
     #endregion

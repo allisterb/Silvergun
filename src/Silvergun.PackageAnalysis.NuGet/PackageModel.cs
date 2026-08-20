@@ -81,7 +81,10 @@ public sealed record AssemblyScanResult(
     // Consumers must surface it verbatim and must not paraphrase it into a benign-sounding diagnosis.
     string? SkipReason,
     AssemblyMetadataInfo? Metadata,   // null if the metadata read failed or the assembly produced no analysis
-    ObfuscationReport? Obfuscation);   // null if obfuscation analysis failed or the assembly produced no analysis
+    ObfuscationReport? Obfuscation,   // null if obfuscation analysis failed or the assembly produced no analysis
+    // Additive trailing member (indicator-cli-integration task), same posture as Obfuscation: null if indicator
+    // analysis failed, was never attempted (SkipReason case), or predates this field in old JSON.
+    IndicatorReport? Indicators = null);
 
 /// <summary>Aggregate, serializable scan result for one package (ADR 0002 pattern — strings/records only).</summary>
 public sealed record PackageCapabilityReport(

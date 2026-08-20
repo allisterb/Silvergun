@@ -237,12 +237,18 @@ internal static class Program
         var obfuscationResult = new ObfuscationAnalysis(cci).Analyze();
         var obfuscation = obfuscationResult.IsSuccess ? obfuscationResult.Value : null;
 
+        // Indicators run off the SAME loaded analyzer too (indicator-cli-integration task, following the ADR 0010
+        // obfuscation precedent exactly): one assembly load, three analyses. Best-effort — a failure leaves it null;
+        // deliberately NOT wired into completeness/the exit code (that gate is a separate ADR, see the task spec).
+        var indicatorResult = new IndicatorAnalysis(cci).Analyze();
+        var indicators = indicatorResult.IsSuccess ? indicatorResult.Value : null;
+
         // Metadata read is best-effort — a failure leaves Metadata null. That null is a COMPLETENESS caveat (ADR 0024,
         // same class as the failed obfuscation analysis above): the report cannot claim "Clean" when the identity facts
         // it prints were never read, so it reaches the exit code as incompleteness (3), never as a finding (2).
         var metadataResult = AssemblyMetadata.Read(assemblyPath, !noResolve);
         var report = new AssemblyAnalysisReport(
-            metadataResult.IsSuccess ? metadataResult.Value : null, reportResult.Value, obfuscation);
+            metadataResult.IsSuccess ? metadataResult.Value : null, reportResult.Value, obfuscation, indicators);
 
         // The SAME assessment drives the report footer (via the renderer, which calls this same factory) and the exit
         // code below — ADR 0024's load-bearing invariant is that exit 0 ⇔ the footer would say "Clean".

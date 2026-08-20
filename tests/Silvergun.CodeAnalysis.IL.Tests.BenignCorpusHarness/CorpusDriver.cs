@@ -22,6 +22,12 @@ public sealed record PackageResult(
     public int MethodsSkipped => Scans.Sum(s => s.MethodsSkipped);
 
     public IEnumerable<ScannedFinding> Findings => Scans.SelectMany(s => s.Findings);
+
+    public IEnumerable<ScannedIndicator> Indicators => Scans.SelectMany(s => s.Indicators);
+
+    /// <summary>True when any scanned assembly in this package hit the distinct-indicator cap - this package's
+    /// indicator numbers are then a floor, not a total (see <see cref="AssemblyScan.IndicatorTruncated"/>).</summary>
+    public bool IndicatorTruncated => Scans.Any(s => s.IndicatorTruncated);
     #endregion
 
     #region Fields
@@ -56,7 +62,8 @@ public sealed class CorpusDriver(PackageCache cache, string harnessExecutable, T
             results.Add(result);
             progress.WriteLine(
                 $"{result.Status} tfm={result.Tfm.Tfm ?? "-"} asm={result.Scans.Count} " +
-                $"findings={result.Findings.Count()} skipped-methods={result.MethodsSkipped}");
+                $"findings={result.Findings.Count()} indicators={result.Indicators.Count()} " +
+                $"indicator-truncated={result.IndicatorTruncated} skipped-methods={result.MethodsSkipped}");
         }
 
         return results;

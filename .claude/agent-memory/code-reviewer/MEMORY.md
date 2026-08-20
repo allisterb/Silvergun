@@ -15,3 +15,4 @@
 - [Auditing "commutative by construction" claims](feedback_verify-structural-commutativity-claims.md) — partition result arms constant-vs-operand, then trace null/Unknown sentinels through each.
 - [ldstr-indicator-classifier review](project_ldstr-indicator-classifier.md) — clean landing 2026-08-20; one stale comment after a design pivot, one undocumented CLI-integration scope gap.
 - [Re-verify empirical code comments](feedback-reverify-empirical-code-comments.md) — reproduce cited timing/byte-count claims in scratchpad, don't trust the comment.
+- [indicator-cli-integration review](project_indicator-cli-integration.md) — clean CLI wiring; but bundled an out-of-scope src/ fix a sibling task's doc explicitly forbade making.

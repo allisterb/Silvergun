@@ -309,6 +309,218 @@ public sealed class IndicatorAnalysisTests : IClassFixture<AssemblyAnalyzerFixtu
     }
     #endregion
 
+    #region F2 — OID-slicing and unspecified-address false-positive fixes
+    // IsPartOfLongerDottedRun fix: MimeKit's real S/MIME OID "1.3.6.1.4.1.188.7.1.1.2" must produce NO IP
+    // finding at all — the original defect sliced it into TWO false IP findings ("1.3.6.1" and
+    // "4.1.188.7"), so both must be absent, not just one.
+    [Fact]
+    public void Analyze_OidSlicedIntoIpLiterals_ProducesNoIpFinding()
+    {
+        var findings = FindingsFor(nameof(IndicatorPayloads.GetOidSlicedIntoIpLiterals));
+        Assert.DoesNotContain(findings,
+            f => f.Category is IndicatorCategory.PublicIpLiteral or IndicatorCategory.PrivateIpLiteral);
+        Assert.DoesNotContain(findings, f => f.Value == "1.3.6.1");
+        Assert.DoesNotContain(findings, f => f.Value == "4.1.188.7");
+    }
+
+    // Negative side of the OID fix, which must STILL fire: none of these dotted quads are part of a
+    // longer run, so each remains a genuine IP-literal finding.
+    [Theory]
+    [InlineData(nameof(IndicatorPayloads.GetIpLiteralTrailingSentencePeriod), "8.8.8.8")] // trailing sentence period
+    [InlineData(nameof(IndicatorPayloads.GetUrlWithVersionLikeHost), "4.0.0.0")]          // mid-URL slash
+    [InlineData(nameof(IndicatorPayloads.GetPublicIpv4EmbeddedInSentence), "8.8.8.8")]    // ordinary sentence
+    [InlineData(nameof(IndicatorPayloads.GetPublicIpWithPort), "203.0.113.5")]            // trailing port
+    public void Analyze_IpLiteralsNotPartOfLongerRun_StillProduceIpFinding(string caller, string expectedValue)
+    {
+        var findings = FindingsFor(caller);
+        Assert.Contains(findings,
+            f => f.Value == expectedValue &&
+                 f.Category is IndicatorCategory.PublicIpLiteral or IndicatorCategory.PrivateIpLiteral);
+    }
+
+    // Combination case: the OID fragments must be suppressed AND the genuine public IP in the same
+    // constant must still be reported. A test that only checks suppression cannot tell "the fix works"
+    // from "IP detection broke".
+    [Fact]
+    public void Analyze_OidAndPublicIpCombined_SuppressesOidButStillReportsRealIp()
+    {
+        var findings = FindingsFor(nameof(IndicatorPayloads.GetOidAndPublicIpCombined));
+
+        Assert.DoesNotContain(findings, f => f.Value == "1.3.6.1");
+        Assert.DoesNotContain(findings, f => f.Value == "4.1.188.7");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(IndicatorCategory.PublicIpLiteral, finding.Category);
+        Assert.Equal("8.8.8.8", finding.Value);
+    }
+
+    // HasHexGroup fix: a bare "::" carved out of a regex SOURCE-CODE literal carries no hex group and no
+    // address information at all — it must now produce NO finding whatsoever (absence, not
+    // reclassification into a different category).
+    [Fact]
+    public void Analyze_BareDoubleColonFromRegexSource_ProducesNoFinding()
+    {
+        Assert.Empty(FindingsFor(nameof(IndicatorPayloads.GetBareDoubleColonFromRegexSource)));
+    }
+
+    // IsPrivate fix: the unspecified addresses (0.0.0.0 / "::") are not routable, so they now classify as
+    // PrivateIpLiteral rather than PublicIpLiteral — the category name says "private" but the real
+    // distinction the fix encodes is routable vs not. This is a CHANGED expectation.
+    [Fact]
+    public void Analyze_UnspecifiedIpv4_IsClassifiedPrivateNotPublic()
+    {
+        var finding = Assert.Single(FindingsFor(nameof(IndicatorPayloads.GetUnspecifiedIpv4)));
+        Assert.Equal(IndicatorCategory.PrivateIpLiteral, finding.Category);
+        Assert.Equal("0.0.0.0", finding.Value);
+    }
+
+    // Non-regression: ordinary compressed/unique-local/public IPv6 forms (which DO carry a hex group and
+    // ARE routable-or-not for reasons unrelated to this fix) keep their pre-fix classification.
+    [Theory]
+    [InlineData(nameof(IndicatorPayloads.GetIpv6Loopback), IndicatorCategory.PrivateIpLiteral, "::1")]
+    [InlineData(nameof(IndicatorPayloads.GetIpv6UniqueLocalFc00), IndicatorCategory.PrivateIpLiteral, "fc00::1")]
+    [InlineData(nameof(IndicatorPayloads.GetIpv6PublicDocumentationExample), IndicatorCategory.PublicIpLiteral, "2001:db8::1")]
+    [InlineData(nameof(IndicatorPayloads.GetIpv6WithPortBrackets), IndicatorCategory.PrivateIpLiteral, "::1")]
+    public void Analyze_Ipv6NonRegressionForms_KeepPreFixClassification(
+        string caller, IndicatorCategory expectedCategory, string expectedValue)
+    {
+        var finding = Assert.Single(FindingsFor(caller));
+        Assert.Equal(expectedCategory, finding.Category);
+        Assert.Equal(expectedValue, finding.Value);
+    }
+
+    // Non-regression on the earlier Version= quad fix, which this OID fix sits alongside and must not
+    // disturb: "Version=4.0.0.0" still yields no IP finding (already asserted by
+    // Analyze_VersionAssignmentQuads_ProduceNoIpFinding above), and the "MyVersion=" word-boundary miss
+    // still yields a (public) IP finding for the whole token (already asserted by
+    // Analyze_MyVersionFalseSuffix_StillProducesIpFinding above). Re-asserted here by name only, not
+    // duplicated, to keep this region's own baseline visible without duplicating fixture data.
+    [Fact]
+    public void Analyze_VersionQuadExclusion_IsUnaffectedByOidFix()
+    {
+        Assert.DoesNotContain(FindingsFor(nameof(IndicatorPayloads.GetVersionAssignmentPlain)),
+            f => f.Category is IndicatorCategory.PublicIpLiteral or IndicatorCategory.PrivateIpLiteral);
+        Assert.Contains(FindingsFor(nameof(IndicatorPayloads.GetMyVersionFalseSuffix)),
+            f => f.Value == "4.0.0.0" && f.Category == IndicatorCategory.PublicIpLiteral);
+    }
+
+    // KNOWN LIMITATIONS — pinned as documented current behaviour, NOT fixed, so nobody later mistakes
+    // these for regressions. Both were reported by the implementer alongside the OID/unspecified-address
+    // fixes above and deliberately left as-is: there is no positional or contextual signal available to
+    // distinguish them from a genuine address without risking false negatives on real IP literals.
+    [Fact]
+    public void Analyze_BareFourArcOidFragmentWithNoContext_IsStillReadAsIp()
+    {
+        // A standalone exactly-4-arc OID fragment ("1.3.6.1", nothing before or after it) is
+        // syntactically indistinguishable from a real IPv4 literal — IsPartOfLongerDottedRun has nothing
+        // to key off when the run does not visibly continue.
+        var finding = Assert.Single(FindingsFor(nameof(IndicatorPayloads.GetBareOidFragmentReadAsIp)));
+        Assert.Equal(IndicatorCategory.PublicIpLiteral, finding.Category);
+        Assert.Equal("1.3.6.1", finding.Value);
+    }
+
+    [Fact]
+    public void Analyze_UnlabeledVersionQuadWithNoPrefix_IsStillReadAsIp()
+    {
+        // An unlabeled 4-part version ("Fixed in 1.2.3.4") with no "Version="-shaped prefix and every
+        // octet <= 255 is syntactically a valid IPv4 literal — IsVersionAssignment has no token to match
+        // against, so this is not excluded.
+        var finding = Assert.Single(FindingsFor(nameof(IndicatorPayloads.GetUnlabeledVersionQuadReadAsIp)));
+        Assert.Equal(IndicatorCategory.PublicIpLiteral, finding.Category);
+        Assert.Equal("1.2.3.4", finding.Value);
+    }
+    #endregion
+
+    #region F3 — IsAdjacentToWordCharacter (leading/trailing word-adjacency) fix
+    // A 148-package corpus measurement found ordinary text misclassified as an IPv6 PublicIpLiteral via
+    // two mechanisms: (1) LEADING side — a trailing hex digit of an ordinary word sitting directly
+    // against "::" (e.g. XPath's "self::" read as "f::", a Discord emoji shortcode's "hand::" read as
+    // "d::"); (2) TRAILING side — the greedy [A-Fa-f0-9]{0,4} group AFTER "::" swallows the first
+    // letters of the FOLLOWING word (e.g. Npgsql's "'true'::boolean" read as "::b", which
+    // IPAddress.TryParse accepts as "::000b"). The fix (IsAdjacentToWordCharacter) is symmetric: it
+    // rejects a match with an ASCII letter or digit immediately before OR immediately after it. All four
+    // real-world-shaped constants below must produce NO IP-literal finding — absence, not
+    // reclassification into a different category (some may still legitimately surface non-IP findings
+    // from other categories; that is not what these tests check).
+    [Theory]
+    [InlineData(nameof(IndicatorPayloads.GetNpgsqlCastToBoolean))]
+    [InlineData(nameof(IndicatorPayloads.GetXPathDescendantOrSelfAxis))]
+    [InlineData(nameof(IndicatorPayloads.GetDiscordEmojiShortcode))]
+    [InlineData(nameof(IndicatorPayloads.GetSqlCaseWhenWithCastBoolean))]
+    public void Analyze_WordAdjacentIpv6Candidates_ProduceNoIpFinding(string caller)
+    {
+        var findings = FindingsFor(caller);
+        Assert.DoesNotContain(findings,
+            f => f.Category is IndicatorCategory.PublicIpLiteral or IndicatorCategory.PrivateIpLiteral);
+    }
+
+    // Dedicated TRAILING-side case, independent of the three real-world examples above (per
+    // IndicatorPayloads.TrailingSideWordAdjacencyDiscriminator's doc comment): "key'::a1b2c3" is
+    // constructed so a LEADING-only guard would let it through (the character before the match is an
+    // apostrophe, not alphanumeric) and IPAddress.TryParse("::a1b2") would happily accept the resulting
+    // fragment as a valid IPv6 literal. Only the trailing half of the symmetric fix — the check on the
+    // character immediately after the match ('c' of the following "c3") — rejects it. This is the case
+    // that discriminates the shipped symmetric fix from a leading-only one.
+    [Fact]
+    public void Analyze_TrailingSideWordAdjacencyDiscriminator_ProducesNoIpFinding()
+    {
+        var findings = FindingsFor(nameof(IndicatorPayloads.GetTrailingSideWordAdjacencyDiscriminator));
+        Assert.DoesNotContain(findings,
+            f => f.Category is IndicatorCategory.PublicIpLiteral or IndicatorCategory.PrivateIpLiteral);
+    }
+
+    // Regression: the fix must not have blunted genuine detection. Covers private/public, compressed and
+    // full-length IPv6 forms, including a real-world address (Google Public DNS) not already present in
+    // the fixture set.
+    [Theory]
+    [InlineData(nameof(IndicatorPayloads.GetIpv6Loopback), IndicatorCategory.PrivateIpLiteral, "::1")]
+    [InlineData(nameof(IndicatorPayloads.GetIpv6UniqueLocalFc00), IndicatorCategory.PrivateIpLiteral, "fc00::1")]
+    [InlineData(nameof(IndicatorPayloads.GetIpv6WithPortBrackets), IndicatorCategory.PrivateIpLiteral, "::1")]
+    [InlineData(nameof(IndicatorPayloads.GetIpv6PublicDocumentationExample), IndicatorCategory.PublicIpLiteral, "2001:db8::1")]
+    [InlineData(nameof(IndicatorPayloads.GetIpv6GoogleDns), IndicatorCategory.PublicIpLiteral, "2001:4860:4860::8888")]
+    public void Analyze_WordAdjacencyFix_DoesNotBluntGenuineIpv6Detection(
+        string caller, IndicatorCategory expectedCategory, string expectedValue)
+    {
+        var finding = Assert.Single(FindingsFor(caller));
+        Assert.Equal(expectedCategory, finding.Category);
+        Assert.Equal(expectedValue, finding.Value);
+    }
+
+    // Regression: the IPv4 path (a wholly separate branch in Classify, unaffected by this fix) is
+    // unaffected — a genuine public literal and the unspecified address both keep their classification.
+    [Fact]
+    public void Analyze_WordAdjacencyFix_Ipv4PathUnaffected()
+    {
+        var finding = Assert.Single(FindingsFor(nameof(IndicatorPayloads.GetPublicIpv4EmbeddedInSentence)));
+        Assert.Equal(IndicatorCategory.PublicIpLiteral, finding.Category);
+        Assert.Equal("8.8.8.8", finding.Value);
+    }
+
+    [Fact]
+    public void Analyze_WordAdjacencyFix_UnspecifiedIpv4StillClassifiedPrivate()
+    {
+        var finding = Assert.Single(FindingsFor(nameof(IndicatorPayloads.GetUnspecifiedIpv4)));
+        Assert.Equal(IndicatorCategory.PrivateIpLiteral, finding.Category);
+        Assert.Equal("0.0.0.0", finding.Value);
+    }
+
+    // Boundary: no preceding character at all (start-of-string) is deliberately NOT treated the same as a
+    // preceding alphanumeric — already pinned by Analyze_Ipv6Loopback_IsClassifiedPrivate above ("::1" is
+    // the entire constant). The cases below cover a preceding non-word character that IS present: space,
+    // '=', '"', and '(' — '[' is already covered by Analyze_Ipv6WithBracketsAndPort_StripsToBareAddress.
+    [Theory]
+    [InlineData(nameof(IndicatorPayloads.GetIpv6PrecededBySpace))]
+    [InlineData(nameof(IndicatorPayloads.GetIpv6PrecededByEquals))]
+    [InlineData(nameof(IndicatorPayloads.GetIpv6PrecededByQuote))]
+    [InlineData(nameof(IndicatorPayloads.GetIpv6PrecededByParen))]
+    public void Analyze_Ipv6PrecededByNonWordCharacter_StillFires(string caller)
+    {
+        var finding = Assert.Single(FindingsFor(caller));
+        Assert.Equal(IndicatorCategory.PrivateIpLiteral, finding.Category);
+        Assert.Equal("::1", finding.Value);
+    }
+    #endregion
+
     #region G — semantics
     // GenericUrl fires only when no other category claimed the host.
     [Fact]

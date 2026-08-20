@@ -37,3 +37,30 @@ agent definitions and older specs may still say otherwise. Related:
 **Also learned 2026-07-26:** never run two `dotnet test` invocations in parallel when their
 projects share a referenced project's output — they collide on the same `obj/`/`bin/` DLL
 and fail with `CS2012` (file in use). Run test suites sequentially.
+
+## ⚠️ It is Windows PowerShell **5.1 only** — and NEVER install a runtime (2026-08-20)
+
+`pwsh` is **not installed**; `powershell` is `5.1.19041.7663` at
+`C:\Windows\System32\WindowsPowerShell\v1.0\powershell`. A spec of mine said "PowerShell 7+",
+and the subagent went looking to install one.
+
+**The user's rule: do not install interpreters, runtimes or tools on your own — it would need
+elevated privileges anyway. Use what is on the machine.** This generalises beyond PowerShell:
+never `winget`/`choco`/`npm -g`/`dotnet tool install` your way out of a version constraint.
+Work within what is present, or stop and ask.
+
+**Always state the target as "Windows PowerShell 5.1" in a spec**, and design around its gaps:
+
+- No `[System.Management.Automation.SemanticVersion]` — hand-roll SemVer comparison. Do **not**
+  fall back to `[version]`: it cannot express prerelease tags and mis-sorts them.
+- No ternary `? :`, no `??`, no `&&`/`||` pipeline chain operators.
+- No `ConvertFrom-Json -AsHashtable`, no `-SkipHttpErrorCheck`, no `-StatusCodeVariable`.
+- **TLS 1.2 must be set explicitly** or HTTPS calls fail:
+  `[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12`.
+- `Invoke-RestMethod` throws on 4xx/5xx — read the code via
+  `$_.Exception.Response.StatusCode` to detect 429/403. It does **not** throw on 202, so
+  detecting a WAF challenge needs `Invoke-WebRequest -UseBasicParsing` and inspecting
+  `StatusCode`/headers.
+
+Verified working 2026-08-20: `Invoke-WebRequest` to `https://api.nuget.org/v3/index.json`
+returns 200 under 5.1 once TLS 1.2 is set.

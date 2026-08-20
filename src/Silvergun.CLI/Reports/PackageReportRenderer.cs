@@ -56,6 +56,14 @@ internal static class PackageReportRenderer
         console.Write(VulnerabilitiesWidget(rich, report.Vulnerabilities, report.VulnerabilitiesStatus));
         console.WriteLine();
 
+        // Indicator (network / sensitive-target) findings, aggregated across every packaged assembly — selective by
+        // design (see IndicatorsWidget). Excluded from the --strict exit-code gate (out of scope per the task spec —
+        // a presentation-only addition, not a gate), but the seven discriminating categories DO set the Assessment
+        // headline (ARCHITECT DECISION 2026-08-03) — see Footer below.
+        console.Write(Section(rich, "Indicators"));
+        console.Write(IndicatorsWidget(rich, report.Assemblies));
+        console.WriteLine();
+
         // Resolver-lite transitive dependency coverage (ADR 0018), shown only when --depth resolution actually ran
         // (NotRun / depth 0 omits the section). Keyed on DependencyResolution so a Partial walk reads as incomplete
         // coverage, never as a clean all-clear.
@@ -65,6 +73,16 @@ internal static class PackageReportRenderer
             console.Write(TransitiveWidget(rich, report.ResolvedDependencies, report.DependencyResolution));
             console.WriteLine();
         }
+
+        // Capability manifest (capability-manifest-reframe task): what this package CAN do, as a package-level
+        // rollup across every analyzed assembly — an inventory alongside the findings sections above, not merged
+        // into them. All 11 Capability values, present or absent, in enum order. Per-assembly detail stays where
+        // it already is, in the Assemblies tree below. Presentation only; does not change what --strict gates on
+        // (see the note it prints).
+        console.Write(Section(rich, "Capability manifest"));
+        console.Write(CapabilityManifest(report.AllFindings.ToList()));
+        console.MarkupLine(CapabilityGateNote(rich));
+        console.WriteLine();
 
         console.Write(Section(rich, "Assemblies"));
         console.Write(AssembliesTree(rich, report.Assemblies));
@@ -218,6 +236,65 @@ internal static class PackageReportRenderer
             ? $"{f.PackageId}@{f.PackageVersion} [dependency]"
             : $"{f.PackageId}@{f.PackageVersion}";
 
+    // Indicator (network / sensitive-target) findings aggregated across every packaged assembly whose analysis
+    // produced a report — selective by design (see ReportTheme.IsDiscriminatingIndicatorCategory /
+    // IndicatorCountSummary): ALWAYS a per-category count summary, every category including zero, plus full detail
+    // rows (tagged with the assembly they came from) for only the discriminating categories. An assembly whose
+    // indicator analysis is null (failed, or the file was never analysed) simply contributes nothing here — that
+    // gap already surfaces via CompletenessAssessment's obfuscation/metadata caveats' sibling reasoning, not
+    // duplicated here. Truncated is rendered as a visible caveat, naming which assembly(ies) hit the cap.
+    private static IRenderable IndicatorsWidget(bool rich, IReadOnlyList<AssemblyScanResult> assemblies)
+    {
+        var reports = assemblies
+            .Where(a => a.Indicators is not null)
+            .Select(a => (Path: a.Assembly.RelativePath, Report: a.Indicators!))
+            .ToArray();
+
+        if (reports.Length == 0)
+            return new Markup("[grey](unavailable)[/]");
+
+        var allFindings = reports.SelectMany(r => r.Report.Findings).ToArray();
+        var widgets = new List<IRenderable> { IndicatorCountSummary(allFindings) };
+
+        var detail = reports
+            .SelectMany(r => r.Report.Findings
+                .Where(f => IsDiscriminatingIndicatorCategory(f.Category))
+                .Select(f => (r.Path, Finding: f)))
+            .ToArray();
+        if (detail.Length > 0)
+            widgets.Add(IndicatorDetailTable(rich, detail));
+
+        var truncated = reports.Where(r => r.Report.Truncated).Select(r => r.Path).ToArray();
+        if (truncated.Length > 0)
+            widgets.Add(new Markup(
+                $"[yellow]{Esc(AlertGlyph(rich))} indicator analysis TRUNCATED for {Esc(string.Join(", ", truncated))} " +
+                $"{Dash(rich)} these findings are a FLOOR, not a total[/]"));
+
+        return new Rows(widgets);
+    }
+
+    // Detail rows for the discriminating indicator categories only, tagged with the packaged assembly they came from
+    // (multiple assemblies can each contribute a row for the same category/value).
+    private static Table IndicatorDetailTable(bool rich, IReadOnlyList<(string Path, IndicatorFinding Finding)> rows)
+    {
+        var table = new Table().Border(TableBorderFor(rich)).Expand();
+        table.AddColumn("[bold]Assembly[/]");
+        table.AddColumn("[bold]Category[/]");
+        table.AddColumn("[bold]Value[/]");
+        table.AddColumn("[bold]Caller[/]");
+        table.AddColumn("[bold]Occurrences[/]");
+
+        foreach (var (path, f) in rows)
+            table.AddRow(
+                Esc(path),
+                $"[red]{Esc(f.Category.ToString())}[/]",
+                Esc(f.Value),
+                Esc($"{f.CallerType}.{f.CallerMethod}"),
+                f.Occurrences.ToString());
+
+        return table;
+    }
+
     // Resolver-lite transitive dependency coverage (ADR 0018): a headline keyed on the resolution status plus a table of
     // resolved nodes (id@version, depth, direct/transitive). Complete states the resolved count + max depth reached and
     // the "approximate — not a restore" caveat; Partial is a prominent (yellow in --rich) incomplete-coverage note so it
@@ -327,7 +404,10 @@ internal static class PackageReportRenderer
     // (Source = PackageMetadata) prints "Findings present" here and still exits 0 under --strict. Both sides are
     // correct: a human should see manifest findings, and per script-rule-precision they must not fail CI because
     // nothing in a .nuspec executes. This is exactly why ADR 0024's invariant is an IMPLICATION — footer says
-    // "Clean" ⇒ exit 0 — and not a biconditional (see the "CORRECTED AGAIN" note in that ADR).
+    // "Clean" ⇒ exit 0 — and not a biconditional (see the "CORRECTED AGAIN" note in that ADR). The same relationship
+    // now applies to indicators (ARCHITECT DECISION 2026-08-03): the seven discriminating categories also widen
+    // "Attention" without touching the exit code, so a CallbackDomain-only package prints "Findings present" and
+    // still exits 0 without --strict.
     private static void Footer(IAnsiConsole console, bool rich, PackageCapabilityReport report)
     {
         var allFindings = report.AllFindings.ToList();
@@ -367,6 +447,26 @@ internal static class PackageReportRenderer
                 _ => "[grey]Known vulnerabilities (OSV):[/] [green]none[/]",
             });
 
+        // Indicators are DELIBERATELY excluded from the exit code (out of scope per the task spec — a
+        // presentation-only addition, not a gate) but the seven discriminating categories (the same split
+        // IndicatorsWidget renders as detail rows, IsDiscriminatingIndicatorCategory) DO set "attention" below —
+        // ARCHITECT DECISION 2026-08-03: a CallbackDomain-only finding must not print "Clean" while the callback
+        // domain sits in the section right above it. The noisy categories (ReflectionTypeName/GenericUrl/
+        // PrivateIpLiteral) stay excluded from attention. Truncated is still surfaced here as a visible caveat,
+        // naming which assembly(ies): "could not analyse everything" must never read as a clean result.
+        var indicatorReports = report.Assemblies.Where(a => a.Indicators is not null).ToList();
+        var indicatorCount = indicatorReports.Sum(a => a.Indicators!.Findings.Count);
+        var discriminatingIndicatorCount = indicatorReports
+            .Sum(a => a.Indicators!.Findings.Count(f => IsDiscriminatingIndicatorCategory(f.Category)));
+        var indicatorsTruncated = indicatorReports.Where(a => a.Indicators!.Truncated).Select(a => a.Assembly.RelativePath).ToList();
+        console.MarkupLine(indicatorCount == 0
+            ? "[grey]Indicators:[/] [green]none[/]"
+            : $"[grey]Indicators:[/] [orange1]{indicatorCount} finding(s)[/], {discriminatingIndicatorCount} discriminating" +
+              (discriminatingIndicatorCount < indicatorCount ? " [grey](see breakdown above)[/]" : string.Empty));
+        if (indicatorsTruncated.Count > 0)
+            console.MarkupLine($"[yellow]{Esc(AlertGlyph(rich))} indicator analysis TRUNCATED for {Esc(string.Join(", ", indicatorsTruncated))} " +
+                                $"{Dash(rich)} these findings are a FLOOR, not a total[/]");
+
         // Transitive coverage line (resolver-lite, ADR 0018), shown only when --depth resolution ran. A Partial walk is
         // surfaced as incomplete coverage so it can downgrade the clean claim below (like an OSV outage).
         if (report.DependencyResolution != DependencyResolutionStatus.NotRun)
@@ -383,10 +483,10 @@ internal static class PackageReportRenderer
         CompletenessFooter.WriteCoverage(console, assessment);
 
         var attention = allFindings.Count > 0 || report.ScriptFindings.Count > 0 || hasObfuscation
-            || report.YaraFindings.Count > 0 || report.Vulnerabilities.Count > 0;
+            || report.YaraFindings.Count > 0 || report.Vulnerabilities.Count > 0 || discriminatingIndicatorCount > 0;
         CompletenessFooter.WriteHeadline(
             console, rich, attention, assessment,
-            "no capability, script, obfuscation, malware-signature, or known-vulnerability findings.");
+            "no capability, script, obfuscation, malware-signature, known-vulnerability, or discriminating-indicator findings.");
     }
     #endregion
 }

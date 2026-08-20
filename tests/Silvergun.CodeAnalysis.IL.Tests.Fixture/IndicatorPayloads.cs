@@ -101,6 +101,99 @@ public class IndicatorPayloads
     /// <summary>Boundary: no '=' after "Version", so this is not an assignment — must still fire.</summary>
     public const string VersionWithoutEquals = "Version 4.0.0.0";
 
+    // ---- F2: OID / unspecified-address false-positive fixes ------------------------------------------
+
+    /// <summary>MimeKit's real S/MIME OID. The IPv4 matcher naively carves "1.3.6.1" and "4.1.188.7" out
+    /// of this — the OID-slicing false positive (indicator-benign-prevalence.md) — both must now be
+    /// suppressed, so this constant must produce NO IP finding at all.</summary>
+    public const string OidSlicedIntoIpLiterals = "1.3.6.1.4.1.188.7.1.1.2";
+
+    /// <summary>The OID false positive AND a genuine public IP literal in the same constant: the OID
+    /// fragments must be suppressed AND 8.8.8.8 must still be reported. Checking suppression alone
+    /// cannot distinguish "the fix works" from "IP detection broke".</summary>
+    public const string OidAndPublicIpCombined = "OID 1.3.6.1.4.1.188.7.1.1.2 talks to 8.8.8.8";
+
+    /// <summary>Negative side of the OID fix: a trailing SENTENCE period (not a continuing dotted run —
+    /// the character after the dot is end-of-string, not a digit) must still fire.</summary>
+    public const string IpLiteralTrailingSentencePeriod = "The server is at 8.8.8.8.";
+
+    /// <summary>KNOWN LIMITATION (not fixed — see IndicatorAnalysisTests): a standalone, exactly-4-arc OID
+    /// fragment with nothing on either side is syntactically indistinguishable from a real address. There
+    /// is no positional signal to reject it.</summary>
+    public const string BareOidFragmentReadAsIp = "1.3.6.1";
+
+    /// <summary>KNOWN LIMITATION (not fixed — see IndicatorAnalysisTests): an unlabeled 4-part version
+    /// (no "Version=" prefix, all octets &lt;= 255) is indistinguishable from a real address.</summary>
+    public const string UnlabeledVersionQuadReadAsIp = "Fixed in 1.2.3.4";
+
+    /// <summary>The bare all-elision IPv6 form "::", carved out of a regex SOURCE-CODE literal exactly as
+    /// MimeKit-adjacent code does (e.g. a named-group pattern like "[^{}:]+)(?::"). Carries no hex group
+    /// at all — must now produce NO finding (previously misclassified as PublicIpLiteral).</summary>
+    public const string BareDoubleColonFromRegexSource = "[^{}:]+)(?::";
+
+    /// <summary>The IPv4 unspecified address. Not routable, so — like "::" — it must classify as
+    /// PrivateIpLiteral, not PublicIpLiteral (this is a CHANGED expectation from before the fix).</summary>
+    public const string UnspecifiedIpv4 = "0.0.0.0";
+
+    /// <summary>Unique-local (fc00::/7) non-regression, using the exact address named in the fix's own
+    /// doc comment rather than the pre-existing <see cref="Ipv6Ula"/> fixture value.</summary>
+    public const string Ipv6UniqueLocalFc00 = "fc00::1";
+
+    /// <summary>A real, globally-routable IPv6 (the RFC 3849 documentation prefix) — public non-regression,
+    /// distinct from the pre-existing <see cref="Ipv6Public"/> fixture value.</summary>
+    public const string Ipv6PublicDocumentationExample = "2001:db8::1";
+
+    // ---- F3: IsAdjacentToWordCharacter (leading/trailing word-adjacency) fix -------------------------
+
+    /// <summary>LEADING-side defect (SecureBlackbox-adjacent): an XPath axis selector where the
+    /// hex-digit tail of "self" ('f') sits directly against "::" — previously misread as the fragment
+    /// "f::". Must now produce NO IP finding.</summary>
+    public const string XPathDescendantOrSelfAxis = "descendant-or-self::node()";
+
+    /// <summary>LEADING-side defect (DSharpPlus-adjacent): a Discord emoji shortcode where the hex-digit
+    /// tail of "hand" ('d') sits directly against "::" — previously misread as the fragment "d::". Must
+    /// now produce NO IP finding.</summary>
+    public const string DiscordEmojiShortcode = ":call_me_hand::skin-tone-1:";
+
+    /// <summary>TRAILING-side defect (Npgsql-adjacent): a PostgreSQL type cast. The apostrophe already
+    /// blocks the LEADING side ('\'' is not alphanumeric) — this is NOT caught by a leading-only guard.
+    /// The greedy hex group after "::" swallows "b" from "boolean", previously misread as "::b" (which
+    /// <c>IPAddress.TryParse</c> accepts as "::000b"). Must now produce NO IP finding.</summary>
+    public const string NpgsqlCastToBoolean = "'true'::boolean";
+
+    /// <summary>Both leading- and trailing-adjacent PostgreSQL casts in one realistic SQL constant. Must
+    /// produce NO IP finding at all.</summary>
+    public const string SqlCaseWhenWithCastBoolean =
+        "SELECT CASE WHEN x THEN 'true'::boolean ELSE 'false'::boolean END";
+
+    /// <summary>Dedicated TRAILING-side case, independent of <see cref="NpgsqlCastToBoolean"/>: built so
+    /// the run after "::" is exactly four greedy hex characters ("a1b2") followed by MORE word characters
+    /// ("c3"). A LEADING-only guard would let this through unmodified — the character before the match is
+    /// an apostrophe, not alphanumeric — and <c>IPAddress.TryParse("::a1b2")</c> happily parses it as a
+    /// valid literal. Only the trailing half of the symmetric fix (the character immediately after the
+    /// match, 'c' of "c3") rejects it. This is what discriminates the shipped symmetric fix from a
+    /// leading-only one.</summary>
+    public const string TrailingSideWordAdjacencyDiscriminator = "key'::a1b2c3";
+
+    /// <summary>Real, unabbreviated public IPv6 literal (Google Public DNS) — a genuine non-regression
+    /// case for the word-adjacency fix, distinct from the pre-existing IPv6 fixtures.</summary>
+    public const string Ipv6GoogleDns = "2001:4860:4860::8888";
+
+    /// <summary>Boundary: an IPv6 literal preceded by a space still fires — a preceding non-word
+    /// character is not the same as no preceding character at all (the start-of-string case is already
+    /// covered by <see cref="Ipv6Loopback"/>).</summary>
+    public const string Ipv6PrecededBySpace = "connect to ::1 now";
+
+    /// <summary>Boundary: an IPv6 literal preceded by '=' still fires.</summary>
+    public const string Ipv6PrecededByEquals = "addr=::1";
+
+    /// <summary>Boundary: an IPv6 literal preceded (and followed) by '"' still fires.</summary>
+    public const string Ipv6PrecededByQuote = "\"::1\"";
+
+    /// <summary>Boundary: an IPv6 literal preceded (and followed) by parentheses still fires. (The '['
+    /// case is already covered by <see cref="Ipv6WithPortBrackets"/>.)</summary>
+    public const string Ipv6PrecededByParen = "(::1)";
+
     // ---- G: semantics ----------------------------------------------------------------------------
 
     /// <summary>A URL whose host matches no named category — the GenericUrl fallback.</summary>
@@ -171,6 +264,27 @@ public class IndicatorPayloads
     public string GetUrlWithVersionLikeHost() => UrlWithVersionLikeHost;
     public string GetMyVersionFalseSuffix() => MyVersionFalseSuffix;
     public string GetVersionWithoutEquals() => VersionWithoutEquals;
+
+    public string GetOidSlicedIntoIpLiterals() => OidSlicedIntoIpLiterals;
+    public string GetOidAndPublicIpCombined() => OidAndPublicIpCombined;
+    public string GetIpLiteralTrailingSentencePeriod() => IpLiteralTrailingSentencePeriod;
+    public string GetBareOidFragmentReadAsIp() => BareOidFragmentReadAsIp;
+    public string GetUnlabeledVersionQuadReadAsIp() => UnlabeledVersionQuadReadAsIp;
+    public string GetBareDoubleColonFromRegexSource() => BareDoubleColonFromRegexSource;
+    public string GetUnspecifiedIpv4() => UnspecifiedIpv4;
+    public string GetIpv6UniqueLocalFc00() => Ipv6UniqueLocalFc00;
+    public string GetIpv6PublicDocumentationExample() => Ipv6PublicDocumentationExample;
+
+    public string GetXPathDescendantOrSelfAxis() => XPathDescendantOrSelfAxis;
+    public string GetDiscordEmojiShortcode() => DiscordEmojiShortcode;
+    public string GetNpgsqlCastToBoolean() => NpgsqlCastToBoolean;
+    public string GetSqlCaseWhenWithCastBoolean() => SqlCaseWhenWithCastBoolean;
+    public string GetTrailingSideWordAdjacencyDiscriminator() => TrailingSideWordAdjacencyDiscriminator;
+    public string GetIpv6GoogleDns() => Ipv6GoogleDns;
+    public string GetIpv6PrecededBySpace() => Ipv6PrecededBySpace;
+    public string GetIpv6PrecededByEquals() => Ipv6PrecededByEquals;
+    public string GetIpv6PrecededByQuote() => Ipv6PrecededByQuote;
+    public string GetIpv6PrecededByParen() => Ipv6PrecededByParen;
 
     public string GetGenericUrlUnclaimed() => GenericUrlUnclaimed;
     public string GetReflectionAqnCaseUpper() => ReflectionAqnCaseUpper;

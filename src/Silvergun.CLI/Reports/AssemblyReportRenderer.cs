@@ -36,8 +36,20 @@ internal static class AssemblyReportRenderer
             console.Write(CapabilityTable(rich, caps.Findings));
         console.WriteLine();
 
+        // Capability manifest (capability-manifest-reframe task): what this assembly CAN do, as an inventory
+        // alongside the findings table above — not merged into it. All 11 Capability values, present or absent, in
+        // enum order. Presentation only; does not change what --strict gates on (see the note it prints).
+        console.Write(Section(rich, "Capability manifest"));
+        console.Write(CapabilityManifest(caps.Findings));
+        console.MarkupLine(CapabilityGateNote(rich));
+        console.WriteLine();
+
         console.Write(Section(rich, "Obfuscation"));
         console.Write(ObfuscationWidget(rich, report.Obfuscation));
+        console.WriteLine();
+
+        console.Write(Section(rich, "Indicators"));
+        console.Write(IndicatorsWidget(rich, report.Indicators));
         console.WriteLine();
 
         console.Write(Section(rich, "Assessment"));
@@ -120,9 +132,56 @@ internal static class AssemblyReportRenderer
         return table;
     }
 
+    // Indicator (network / sensitive-target) findings — selective by design (ADR from indicator-prevalence
+    // measurement, see the task spec): ALWAYS a per-category count summary, every category including zero, plus
+    // full detail rows for only the discriminating categories (IsDiscriminatingIndicatorCategory). Truncated is
+    // rendered as a visible caveat wherever indicator counts appear — the findings are a floor, not a total.
+    private static IRenderable IndicatorsWidget(bool rich, IndicatorReport? indicators)
+    {
+        if (indicators is null)
+            return new Markup("[grey](unavailable)[/]");
+
+        var widgets = new List<IRenderable> { IndicatorCountSummary(indicators.Findings) };
+
+        var detail = indicators.Findings.Where(f => IsDiscriminatingIndicatorCategory(f.Category)).ToArray();
+        if (detail.Length > 0)
+            widgets.Add(IndicatorDetailTable(rich, detail));
+
+        if (indicators.Truncated)
+            widgets.Add(new Markup(
+                $"[yellow]{Esc(AlertGlyph(rich))} indicator analysis TRUNCATED {Dash(rich)} " +
+                "the distinct-indicator cap was reached; these findings are a FLOOR, not a total[/]"));
+
+        return new Rows(widgets);
+    }
+
+    // Detail rows for the discriminating indicator categories only (the counts-only categories never reach here).
+    private static Table IndicatorDetailTable(bool rich, IReadOnlyList<IndicatorFinding> findings)
+    {
+        var table = new Table().Border(TableBorderFor(rich)).Expand();
+        table.AddColumn("[bold]Category[/]");
+        table.AddColumn("[bold]Value[/]");
+        table.AddColumn("[bold]Caller[/]");
+        table.AddColumn("[bold]Occurrences[/]");
+        table.AddColumn("[bold]Excerpt[/]");
+
+        foreach (var f in findings)
+            table.AddRow(
+                $"[red]{Esc(f.Category.ToString())}[/]",
+                Esc(f.Value),
+                Esc($"{f.CallerType}.{f.CallerMethod}"),
+                f.Occurrences.ToString(),
+                Esc(f.Excerpt));
+
+        return table;
+    }
+
     // Qualitative footer: colored per-capability counts, obfuscation count, the IL coverage line, and the three-tier
-    // Findings / Not verified / Clean headline. "Attention" is exactly what the --strict gate keys on (capability OR
-    // obfuscation findings present); "not verified" comes from the SHARED CompletenessAssessment the exit code uses
+    // Findings / Not verified / Clean headline. "Attention" is DELIBERATELY WIDER than the --strict gate (ARCHITECT
+    // DECISION 2026-08-03): the gate keys on capability OR obfuscation findings only, but the headline also fires on
+    // the seven discriminating indicator categories (IsDiscriminatingIndicatorCategory) so a CallbackDomain-only
+    // assembly cannot print "Clean" with the callback domain listed in the section above it. Neither indicator group
+    // affects the exit code. "Not verified" comes from the SHARED CompletenessAssessment the exit code uses
     // (ADR 0024) — so a run that skipped methods, or whose obfuscation analysis failed, can never read "Clean".
     private static void Footer(IAnsiConsole console, bool rich, AssemblyAnalysisReport report)
     {
@@ -142,12 +201,29 @@ internal static class AssemblyReportRenderer
             ? "[grey]Obfuscation:[/] [green]none[/]"
             : $"[grey]Obfuscation:[/] [orange1]{obfuscationCount} finding(s)[/]");
 
+        // Indicators are DELIBERATELY excluded from the exit code (out of scope per the task spec — a
+        // presentation-only addition, not a gate) but the seven discriminating categories (the same split
+        // IndicatorsWidget renders as detail rows, IsDiscriminatingIndicatorCategory) DO set "attention" below —
+        // ARCHITECT DECISION 2026-08-03: a CallbackDomain-only finding must not print "Clean" while the callback
+        // domain sits in the section right above it. The noisy categories (ReflectionTypeName/GenericUrl/
+        // PrivateIpLiteral) stay excluded from attention. Truncated is still surfaced here as a visible caveat:
+        // "could not analyse everything" must never read as a clean result.
+        var indicatorCount = report.Indicators?.Findings.Count ?? 0;
+        var discriminatingIndicatorCount = report.Indicators?.Findings
+            .Count(f => IsDiscriminatingIndicatorCategory(f.Category)) ?? 0;
+        console.MarkupLine(indicatorCount == 0
+            ? "[grey]Indicators:[/] [green]none[/]"
+            : $"[grey]Indicators:[/] [orange1]{indicatorCount} finding(s)[/], {discriminatingIndicatorCount} discriminating" +
+              (discriminatingIndicatorCount < indicatorCount ? " [grey](see breakdown above)[/]" : string.Empty) +
+              (report.Indicators!.Truncated ? " [yellow](truncated - floor, not a total)[/]" : string.Empty));
+
         var assessment = CompletenessAssessment.ForAssembly(report);
         CompletenessFooter.WriteCoverage(console, assessment);
 
-        var attention = findings.Count > 0 || obfuscationCount > 0;
+        var attention = findings.Count > 0 || obfuscationCount > 0 || discriminatingIndicatorCount > 0;
         CompletenessFooter.WriteHeadline(
-            console, rich, attention, assessment, "no sensitive-API or obfuscation findings.");
+            console, rich, attention, assessment,
+            "no sensitive-API, obfuscation, or discriminating-indicator findings.");
     }
     #endregion
 }

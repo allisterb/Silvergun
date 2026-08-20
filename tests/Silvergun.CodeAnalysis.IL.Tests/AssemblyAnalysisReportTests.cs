@@ -95,6 +95,80 @@ public sealed class AssemblyAnalysisReportTests : IClassFixture<AssemblyDisassem
         Assert.Equal(report.Capabilities.MethodsSkipped, restored.Capabilities.MethodsSkipped);
     }
 
+    // G (indicator-cli-integration task) — Indicators is an additive trailing member, same posture as Obfuscation:
+    // a real IndicatorAnalysis run over Runtime.dll round-trips element-wise (AssemblyName/AnalyzedAt/Findings/
+    // Truncated all survive ToJson/FromJson).
+    [Fact]
+    public void AssemblyAnalysisReport_JsonRoundTrip_PreservesIndicators()
+    {
+        var report = ComposeRuntimeReportWithIndicators();
+
+        var json = report.ToJson();
+        var restored = AssemblyAnalysisReport.FromJson(json);
+
+        Assert.NotNull(restored);
+        Assert.NotNull(restored!.Indicators);
+        Assert.Equal(report.Indicators!.AssemblyName, restored.Indicators!.AssemblyName);
+        Assert.Equal(report.Indicators.AnalyzedAt, restored.Indicators.AnalyzedAt);
+        Assert.Equal(report.Indicators.Truncated, restored.Indicators.Truncated);
+        Assert.Equal(report.Indicators.Findings, restored.Indicators.Findings);   // record equality per finding
+
+        // The other two halves are unaffected by adding a fourth composed member.
+        Assert.NotNull(restored.Metadata);
+        Assert.NotNull(restored.Obfuscation);
+        Assert.Equal(report.Capabilities.Findings, restored.Capabilities.Findings);
+    }
+
+    // A null Indicators (best-effort indicator analysis failed, or never attempted) must round-trip as null
+    // without disturbing the other three halves — the never-throw, best-effort contract this task follows from
+    // ADR 0010's obfuscation precedent.
+    [Fact]
+    public void AssemblyAnalysisReport_WithNullIndicators_RoundTripsWithCapabilitiesIntact()
+    {
+        var full = ComposeRuntimeReportWithIndicators();
+        var report = full with { Indicators = null };
+
+        var json = report.ToJson();
+        var restored = AssemblyAnalysisReport.FromJson(json);
+
+        Assert.NotNull(restored);
+        Assert.Null(restored!.Indicators);
+        Assert.NotNull(restored.Metadata);
+        Assert.NotNull(restored.Obfuscation);
+        Assert.Equal(report.Capabilities.AssemblyName, restored.Capabilities.AssemblyName);
+        Assert.Equal(report.Capabilities.Findings, restored.Capabilities.Findings);
+    }
+
+    // The exact hazard the report's own doc comment names: JSON written before Indicators existed (no such
+    // property at all — not even "Indicators": null) must still deserialize, reading identically to "the analysis
+    // was never attempted" — i.e. Indicators is null, not a deserialization failure.
+    [Fact]
+    public void AssemblyAnalysisReport_LegacyJsonWithoutIndicatorsProperty_DeserializesWithIndicatorsNull()
+    {
+        const string legacyJson = """
+            {
+              "Metadata": null,
+              "Capabilities": {
+                "AssemblyName": "Legacy.dll",
+                "AssemblyPath": "/x/Legacy.dll",
+                "AnalyzedAt": "2020-01-01T00:00:00+00:00",
+                "Findings": [],
+                "MethodsTotal": 3,
+                "MethodsAnalyzed": 3,
+                "MethodsSkipped": 0,
+                "SkippedMethods": []
+              },
+              "Obfuscation": null
+            }
+            """;
+
+        var restored = AssemblyAnalysisReport.FromJson(legacyJson);
+
+        Assert.NotNull(restored);
+        Assert.Null(restored!.Indicators);
+        Assert.Equal("Legacy.dll", restored.Capabilities.AssemblyName);
+    }
+
     private static AssemblyAnalysisReport ComposeRuntimeReport()
     {
         var metadata = AssemblyMetadata.Read(RuntimePath);
@@ -112,6 +186,29 @@ public sealed class AssemblyAnalysisReportTests : IClassFixture<AssemblyDisassem
         Assert.True(obfuscation.IsSuccess, obfuscation.Message);
 
         return new AssemblyAnalysisReport(metadata.Value, analysis.Value, obfuscation.Value);
+    }
+
+    // As ComposeRuntimeReport, but also runs IndicatorAnalysis off the SAME loaded analyzer (ADR 0010 precedent),
+    // composing all four halves — the shape Program.RunAnalyze actually builds (indicator-cli-integration task).
+    private static AssemblyAnalysisReport ComposeRuntimeReportWithIndicators()
+    {
+        var metadata = AssemblyMetadata.Read(RuntimePath);
+        Assert.True(metadata.IsSuccess, metadata.Message);
+
+        var create = AssemblyAnalyzer.Load(RuntimePath);
+        Assert.True(create.IsSuccess, create.Message);
+        using var cci = create.Value;
+
+        var analysis = new CapabilityAnalysis(cci).Analyze();
+        Assert.True(analysis.IsSuccess, analysis.Message);
+
+        var obfuscation = new ObfuscationAnalysis(cci).Analyze();
+        Assert.True(obfuscation.IsSuccess, obfuscation.Message);
+
+        var indicators = new IndicatorAnalysis(cci).Analyze();
+        Assert.True(indicators.IsSuccess, indicators.Message);
+
+        return new AssemblyAnalysisReport(metadata.Value, analysis.Value, obfuscation.Value, indicators.Value);
     }
     #endregion
 

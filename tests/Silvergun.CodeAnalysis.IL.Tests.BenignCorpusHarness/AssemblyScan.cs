@@ -14,9 +14,19 @@ public sealed record ScannedFinding(
     string Capability, string Kind, string CallerType, string CallerMethod, string CalledApi);
 
 /// <summary>
+/// One aggregated indicator finding as it crossed the child-process boundary - strings only, deliberately, and
+/// already aggregated (see <see cref="Silvergun.CodeAnalysis.IL.IndicatorAnalysis"/>): <see cref="Occurrences"/>
+/// is how many <c>ldstr</c> constants in this caller produced this same (Category, Value) pair.
+/// </summary>
+public sealed record ScannedIndicator(
+    string Category, string Value, string Excerpt, string CallerType, string CallerMethod, int Occurrences);
+
+/// <summary>
 /// What one child process reported about one assembly. <see cref="ExitCode"/> is null only for
 /// <see cref="TimedOut"/>. <see cref="Completed"/> is the coverage gate: a child that exited 0 but never printed
-/// <c>DONE</c> was cut short and its findings are a floor, not a total.
+/// <c>DONE</c> was cut short and its findings are a floor, not a total. <see cref="IndicatorTruncated"/> mirrors
+/// <see cref="Silvergun.CodeAnalysis.IL.IndicatorReport.Truncated"/> - when true, <see cref="Indicators"/> for
+/// this assembly is itself a floor, not a total, independent of <see cref="Completed"/>.
 /// </summary>
 public sealed record AssemblyScan(
     string AssemblyFile,
@@ -27,6 +37,8 @@ public sealed record AssemblyScan(
     int MethodsAnalyzed,
     int MethodsSkipped,
     IReadOnlyList<ScannedFinding> Findings,
+    IReadOnlyList<ScannedIndicator> Indicators,
+    bool IndicatorTruncated,
     string? Failure)
 {
     #region Properties
@@ -45,16 +57,22 @@ public sealed record AssemblyScan(
 }
 
 /// <summary>
-/// The child half of the harness: loads <b>one</b> assembly and runs <see cref="CapabilityAnalysis"/> over it, in
-/// its own process. ADR-0021 is the whole reason for the split - a CCI <c>Debug.Assert</c>/<c>Debug.Fail</c> is
-/// <c>Environment.FailFast</c> (exit 35, no managed exception, no <c>catch</c>), so one hostile or merely unlucky
-/// assembly run in-process would take the entire corpus run with it. "Benign by assumption" is not "benign by
-/// proof": these are unaudited third-party binaries and they get the same containment as the pathological fixtures.
+/// The child half of the harness: loads <b>one</b> assembly and runs <see cref="CapabilityAnalysis"/> and
+/// <see cref="IndicatorAnalysis"/> over it, in its own process, off the same loaded
+/// <see cref="AssemblyAnalyzer"/>. ADR-0021 is the whole reason for the split - a CCI
+/// <c>Debug.Assert</c>/<c>Debug.Fail</c> is <c>Environment.FailFast</c> (exit 35, no managed exception, no
+/// <c>catch</c>), so one hostile or merely unlucky assembly run in-process would take the entire corpus run with
+/// it. "Benign by assumption" is not "benign by proof": these are unaudited third-party binaries and they get the
+/// same containment as the pathological fixtures.
 /// <para>Output contract (stdout, one tab-separated record per line):</para>
 /// <list type="bullet">
 /// <item><description><c>META\t&lt;total&gt;\t&lt;analyzed&gt;\t&lt;skipped&gt;</c> - once.</description></item>
 /// <item><description><c>FINDING\t&lt;capability&gt;\t&lt;kind&gt;\t&lt;callerType&gt;\t&lt;callerMethod&gt;\t&lt;calledApi&gt;</c>
 /// - once per finding, in <see cref="CapabilityAnalysis"/>'s own deterministic order.</description></item>
+/// <item><description><c>IMETA\t&lt;truncated 0|1&gt;</c> - once, mirroring
+/// <see cref="Silvergun.CodeAnalysis.IL.IndicatorReport.Truncated"/>.</description></item>
+/// <item><description><c>INDICATOR\t&lt;category&gt;\t&lt;value&gt;\t&lt;excerpt&gt;\t&lt;callerType&gt;\t&lt;callerMethod&gt;\t&lt;occurrences&gt;</c>
+/// - once per aggregated indicator, in <see cref="IndicatorAnalysis"/>'s own deterministic order.</description></item>
 /// <item><description><c>DONE</c> - the last line on a clean run; its absence, even with exit 0, means the process
 /// was cut short.</description></item>
 /// </list>
@@ -98,6 +116,13 @@ public static class ChildScan
                 return 1;
             }
 
+            var indicators = new IndicatorAnalysis(analyzer).Analyze();
+            if (!indicators.IsSuccess)
+            {
+                Console.Error.WriteLine($"INDICATOR-ANALYSIS-FAILED {indicators.Message}");
+                return 1;
+            }
+
             var report = capabilities.Value;
             Console.WriteLine(string.Join('\t',
                 "META", report.MethodsTotal, report.MethodsAnalyzed, report.MethodsSkipped));
@@ -105,6 +130,13 @@ public static class ChildScan
             foreach (var f in report.Findings)
                 Console.WriteLine(string.Join('\t',
                     "FINDING", f.Capability, f.Kind, Clean(f.CallerType), Clean(f.CallerMethod), Clean(f.CalledApi)));
+
+            var ireport = indicators.Value;
+            Console.WriteLine(string.Join('\t', "IMETA", ireport.Truncated ? 1 : 0));
+
+            foreach (var f in ireport.Findings)
+                Console.WriteLine(string.Join('\t',
+                    "INDICATOR", f.Category, Clean(f.Value), Clean(f.Excerpt), Clean(f.CallerType), Clean(f.CallerMethod), f.Occurrences));
 
             Console.WriteLine("DONE");
             return 0;
@@ -167,7 +199,7 @@ public static class ChildScanRunner
         if (!process.WaitForExit((int)timeout.TotalMilliseconds))
         {
             try { process.Kill(entireProcessTree: true); } catch { /* best-effort */ }
-            return new AssemblyScan(file, null, TimedOut: true, Completed: false, 0, 0, 0, [], "timed out");
+            return new AssemblyScan(file, null, TimedOut: true, Completed: false, 0, 0, 0, [], [], false, "timed out");
         }
 
         return Parse(file, process.ExitCode, stdout.GetAwaiter().GetResult(), stderr.GetAwaiter().GetResult());
@@ -185,6 +217,15 @@ public static class ChildScanRunner
             .Select(f => new ScannedFinding(f[1], f[2], f[3], f[4], f[5]))
             .ToArray();
 
+        var imeta = lines.FirstOrDefault(l => l.StartsWith("IMETA\t", StringComparison.Ordinal))?.Split('\t');
+
+        var indicators = lines
+            .Where(l => l.StartsWith("INDICATOR\t", StringComparison.Ordinal))
+            .Select(l => l.Split('\t'))
+            .Where(f => f.Length == 7)
+            .Select(f => new ScannedIndicator(f[1], f[2], f[3], f[4], f[5], Number(f, 6)))
+            .ToArray();
+
         return new AssemblyScan(
             file,
             exitCode,
@@ -194,6 +235,8 @@ public static class ChildScanRunner
             MethodsAnalyzed: Number(meta, 2),
             MethodsSkipped: Number(meta, 3),
             findings,
+            indicators,
+            IndicatorTruncated: imeta is not null && imeta.Length > 1 && imeta[1] == "1",
             Failure: exitCode == 0 ? null : FirstLine(stderr));
     }
 
