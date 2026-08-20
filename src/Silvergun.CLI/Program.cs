@@ -5,6 +5,8 @@ using System.Runtime.CompilerServices;
 namespace Silvergun.CLI;
 
 using System.CommandLine;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 using Spectre.Console;
 
@@ -19,7 +21,9 @@ using Silvergun.PackageAnalysis.NuGet.Yara;
 /// Entry point for the Silvergun CLI. Exposes the <c>analyze</c> verb, which runs
 /// <see cref="AssemblyAnalyzer"/> + <see cref="CapabilityAnalysis"/> + <see cref="ObfuscationAnalysis"/> over a
 /// .NET assembly; the <c>scan-package</c> verb, which runs <see cref="PackageScanner"/> over a <c>.nupkg</c>;
-/// and the <c>check-squat</c> verb, which runs <see cref="SquatChecker"/> against a package id (network).
+/// the <c>check-squat</c> verb, which runs <see cref="SquatChecker"/> against a package id (network); and the
+/// <c>capability-diff</c> verb, which compares two <c>--snapshot</c> files written by <c>analyze</c>/
+/// <c>scan-package</c> (capability-diff-versions task, Phase B; offline).
 /// <para>
 /// Exit codes are part of the CI contract (ADR 0003, amended by ADR 0024):
 /// <list type="table">
@@ -91,6 +95,11 @@ internal static class Program
         {
             Description = "Skip best-effort assembly-reference resolution when reading metadata."
         };
+        var snapshotOption = new Option<string?>("--snapshot")
+        {
+            Description = "Also write a JSON array of CapabilitySnapshot (one per analyzed assembly) to this file, " +
+                          "for later comparison with capability-diff. Does not affect stdout, the human report, --json, or the exit code."
+        };
         var healthOption = new Option<bool>("--health")
         {
             Description = "Also resolve the package's GitHub repository from the local nuspec and attach a " +
@@ -130,7 +139,7 @@ internal static class Program
 
         var analyzeCommand = new Command("analyze", "Analyze a .NET assembly for sensitive-API capabilities.")
         {
-            assemblyPathArgument, jsonOption, richOption, outputOption, strictOption, debugOption, noResolveOption, allowIncompleteOption
+            assemblyPathArgument, jsonOption, richOption, outputOption, strictOption, debugOption, noResolveOption, allowIncompleteOption, snapshotOption
         };
         analyzeCommand.Validators.Add(RejectJsonWithRich);
         analyzeCommand.SetAction(parse => RunAnalyze(
@@ -141,11 +150,12 @@ internal static class Program
             parse.GetValue(strictOption),
             parse.GetValue(debugOption),
             parse.GetValue(noResolveOption),
-            parse.GetValue(allowIncompleteOption)));
+            parse.GetValue(allowIncompleteOption),
+            parse.GetValue(snapshotOption)));
 
         var scanPackageCommand = new Command("scan-package", "Scan a .nupkg for sensitive-API capabilities.")
         {
-            nupkgPathArgument, jsonOption, richOption, outputOption, strictOption, debugOption, noResolveOption, healthOption, noYaraOption, noVulnsOption, depthOption, allowIncompleteOption
+            nupkgPathArgument, jsonOption, richOption, outputOption, strictOption, debugOption, noResolveOption, healthOption, noYaraOption, noVulnsOption, depthOption, allowIncompleteOption, snapshotOption
         };
         scanPackageCommand.Validators.Add(RejectJsonWithRich);
         scanPackageCommand.SetAction(parse => RunScanPackage(
@@ -160,7 +170,8 @@ internal static class Program
             parse.GetValue(noYaraOption),
             parse.GetValue(noVulnsOption),
             parse.GetValue(depthOption),
-            parse.GetValue(allowIncompleteOption)));
+            parse.GetValue(allowIncompleteOption),
+            parse.GetValue(snapshotOption)));
 
         // check-squat hits nuget.org, so its handler is async; the sync action bridges via GetAwaiter().GetResult()
         // to keep System.CommandLine's synchronous Invoke path (stdout purity handled by ConfigureLogging).
@@ -205,15 +216,58 @@ internal static class Program
             parse.GetValue(outputOption),
             parse.GetValue(debugOption)).GetAwaiter().GetResult());
 
+        // capability-diff (capability-diff-versions task, Phase B; corrected 2026-08-20): compares two --snapshot
+        // files, matched by the composite key (AssemblyName, TargetFramework) — see CapabilityDiffReport.Compare
+        // for why name alone is wrong (multi-targeted packages emit one element per TFM under a shared name).
+        // Offline, synchronous — no network call, unlike check-squat/health.
+        //
+        // TRUST NOTE (2026-08-20 code review): the baseline file is trusted by construction — see the verb
+        // Description below and CapabilityDiffReport's class doc for the full statement.
+        var baselineArgument = new Argument<string>("baseline")
+        {
+            Description = "Path to the baseline capability-snapshot JSON file (a --snapshot output of analyze/scan-package)."
+        };
+        var candidateArgument = new Argument<string>("candidate")
+        {
+            Description = "Path to the candidate capability-snapshot JSON file to compare against the baseline."
+        };
+        var allowTfmMismatchOption = new Option<bool>("--allow-tfm-mismatch")
+        {
+            Description = "Proceed when NOTHING matches between baseline and candidate — every (assembly, target " +
+                          "framework) pair on one side is absent from the other, so no capability comparison is " +
+                          "possible at all (a vacuous diff would otherwise silently read as \"no changes\"). Does " +
+                          "NOT relax matching itself: a shared (assembly, TFM) pair is always compared, and TFMs " +
+                          "unique to one side are always reported as added/dropped regardless of this flag."
+        };
+        var capabilityDiffCommand = new Command("capability-diff",
+            "Compare two capability snapshots (--snapshot output of analyze/scan-package) and report what capabilities changed. " +
+            "The baseline file is a TRUST ANCHOR: it is compared as-is, so a baseline hand-edited (or maliciously " +
+            "committed) to already claim a capability makes a genuine addition in the candidate invisible. Review " +
+            "changes to a baseline file like code, and regenerate it from a trusted scan rather than hand-editing it.")
+        {
+            baselineArgument, candidateArgument, jsonOption, richOption, outputOption, strictOption, debugOption, allowIncompleteOption, allowTfmMismatchOption
+        };
+        capabilityDiffCommand.Validators.Add(RejectJsonWithRich);
+        capabilityDiffCommand.SetAction(parse => RunCapabilityDiff(
+            parse.GetValue(baselineArgument)!,
+            parse.GetValue(candidateArgument)!,
+            parse.GetValue(jsonOption),
+            parse.GetValue(richOption),
+            parse.GetValue(outputOption),
+            parse.GetValue(strictOption),
+            parse.GetValue(debugOption),
+            parse.GetValue(allowIncompleteOption),
+            parse.GetValue(allowTfmMismatchOption)));
+
         var root = new RootCommand("Silvergun — static capability analysis for .NET assemblies.")
         {
-            analyzeCommand, scanPackageCommand, checkSquatCommand, healthCommand
+            analyzeCommand, scanPackageCommand, checkSquatCommand, healthCommand, capabilityDiffCommand
         };
 
         return root.Parse(args).Invoke();
     }
 
-    private static int RunAnalyze(string assemblyPath, bool json, bool rich, string? output, bool strict, bool debug, bool noResolve, bool allowIncomplete)
+    private static int RunAnalyze(string assemblyPath, bool json, bool rich, string? output, bool strict, bool debug, bool noResolve, bool allowIncomplete, string? snapshot)
     {
         ConfigureLogging(json, output, debug);
 
@@ -260,12 +314,20 @@ internal static class Program
         if (!emitted)
             return 1;
 
+        // --snapshot (capability-diff-versions task, Phase B): writes a ONE-element JSON array carrying the SAME
+        // completeness the footer/exit code above used, so trap 1 (an incomplete scan must never diff clean) is
+        // enforceable later. Deliberately does not touch stdout, the human report, --json, or the exit code below.
+        if (snapshot is not null && !TryWriteSnapshotFile(snapshot,
+            [CapabilitySnapshot.From(report.Capabilities, packageId: null, packageVersion: null, targetFramework: null,
+                new ScanCompleteness(completeness.IsComplete, completeness.MethodsTotal, completeness.MethodsAnalyzed, completeness.MethodsSkipped, AssemblyLoadFailures: 0))]))
+            return 1;
+
         ReportIncompleteness("analyze", completeness, allowIncomplete);
 
         return AnalyzeExitCode(report, strict, allowIncomplete);
     }
 
-    private static int RunScanPackage(string nupkgPath, bool json, bool rich, string? output, bool strict, bool debug, bool noResolve, bool health, bool noYara, bool noVulns, int depth, bool allowIncomplete)
+    private static int RunScanPackage(string nupkgPath, bool json, bool rich, string? output, bool strict, bool debug, bool noResolve, bool health, bool noYara, bool noVulns, int depth, bool allowIncomplete, string? snapshot)
     {
         ConfigureLogging(json, output, debug);
 
@@ -332,6 +394,30 @@ internal static class Program
             : EmitHumanReport(c => PackageReportRenderer.Render(c, report, nupkgPath), output, rich);
         if (!emitted)
             return 1;
+
+        // --snapshot (capability-diff-versions task, Phase B): one CapabilitySnapshot per SCANNED assembly (Report
+        // is non-null — mirrors PackageCapabilityReport.AllFindings' own filter), sharing the SAME package-level
+        // completeness the footer/exit code above used, so a diff drawn from this file can never read the package
+        // as more complete than the report just shown. AssemblyLoadFailures counts files that produced NO
+        // CapabilityReport at all (SkipReason set) — the same class of gap CompletenessAssessment.ForPackage folds
+        // into IsComplete, just not exposed as its own count there.
+        // KNOWN GAP: a package with ZERO assemblies that produced a CapabilityReport (e.g. purely native DLLs)
+        // writes an EMPTY array — there is no element left to carry the incomplete flag, so capability-diff cannot
+        // detect that case (see the task write-up). Not fixed here: Phase B's design deliberately keeps the
+        // snapshot file a plain array of self-describing elements, with no new container type for a package-level
+        // low-water mark.
+        if (snapshot is not null)
+        {
+            var assemblyLoadFailures = report.Assemblies.Count(a => a.SkipReason is not null);
+            var scanCompleteness = new ScanCompleteness(
+                completeness.IsComplete, completeness.MethodsTotal, completeness.MethodsAnalyzed, completeness.MethodsSkipped, assemblyLoadFailures);
+            var snapshots = report.Assemblies
+                .Where(a => a.Report is not null)
+                .Select(a => CapabilitySnapshot.From(a.Report!, report.Package.Id, report.Package.Version, a.Assembly.TargetFramework, scanCompleteness))
+                .ToArray();
+            if (!TryWriteSnapshotFile(snapshot, snapshots))
+                return 1;
+        }
 
         ReportIncompleteness("scan-package", completeness, allowIncomplete);
 
@@ -480,6 +566,146 @@ internal static class Program
 
         // Advisory: unavailable is a normal outcome (exit 0). Only a write/emit failure is a hard error.
         return emitted ? 0 : 1;
+    }
+
+    // Compares two --snapshot files (capability-diff-versions task, Phase B; corrected 2026-08-20). Offline and
+    // synchronous — unlike check-squat/health, nothing here touches the network. Elements are matched by the
+    // composite key (AssemblyName, TargetFramework) — see CapabilityDiffReport.Compare's doc comment for why name
+    // alone silently collapsed multi-targeted packages to one TFM variant. Four refusal traps, checked in this
+    // order:
+    //   1. an unrecognized SchemaVersion anywhere in either file (trap 3) -> exit 1, no report produced at all
+    //      (CapabilitySnapshot.FromJson deliberately does not check this itself; it is this verb's judgment).
+    //   2. an EMPTY snapshot array on either side (a scan-package of a package with no analyzable assemblies) ->
+    //      exit 3, unconditional. An empty array cannot carry the incomplete flag, so left unchecked, diffing two
+    //      empty arrays would report "no capability changes" for a comparison that never looked at anything.
+    //   3. a matched-pair set that comes back EMPTY while both files are non-empty — the vacuous-diff trap
+    //      (repurposed trap 2, since composite keying makes the old cross-TFM comparison impossible by
+    //      construction): unless --allow-tfm-mismatch -> exit 3, no report produced. Nothing in common between the
+    //      two files means no capability comparison happened at all, which must never read as a clean "no changes".
+    //   4. an incomplete scan on either side (trap 1) -> the diff IS still computed and rendered (findings win the
+    //      headline, exactly like analyze/scan-package), but the exit code is gated at 3 unless --allow-incomplete.
+    private static int RunCapabilityDiff(
+        string baselinePath, string candidatePath, bool json, bool rich, string? output, bool strict, bool debug,
+        bool allowIncomplete, bool allowTfmMismatch)
+    {
+        ConfigureLogging(json, output, debug);
+
+        var baselineResult = LoadSnapshotArray(baselinePath);
+        if (!baselineResult.IsSuccess)
+        {
+            Console.Error.WriteLine(baselineResult.Message);
+            return 1;
+        }
+
+        var candidateResult = LoadSnapshotArray(candidatePath);
+        if (!candidateResult.IsSuccess)
+        {
+            Console.Error.WriteLine(candidateResult.Message);
+            return 1;
+        }
+
+        var baseline = baselineResult.Value;
+        var candidate = candidateResult.Value;
+
+        // Trap 3: refuse outright rather than best-effort-parse a snapshot shape this build does not understand.
+        var unknownVersion = baseline.Concat(candidate).FirstOrDefault(s => s.SchemaVersion != CapabilitySnapshot.CurrentSchemaVersion);
+        if (unknownVersion is not null)
+        {
+            Console.Error.WriteLine(
+                $"capability-diff: snapshot for '{unknownVersion.AssemblyName}' has schema version {unknownVersion.SchemaVersion}, " +
+                $"but this build only understands version {CapabilitySnapshot.CurrentSchemaVersion}. Refusing to diff it.");
+            return 1;
+        }
+
+        // Empty-array hole: a scan-package with nothing analyzable writes an empty array, which cannot carry the
+        // incomplete flag. Unconditional — there is no meaningful comparison to override into existing.
+        if (baseline.Count == 0 || candidate.Count == 0)
+        {
+            Console.Error.WriteLine(
+                $"capability-diff: {(baseline.Count == 0 ? "baseline" : "candidate")} snapshot has no assemblies to compare " +
+                "(an empty --snapshot array). Refusing to diff it.");
+            return 3;
+        }
+
+        var diff = CapabilityDiffReport.Compare(baseline, candidate);
+
+        // Vacuous-diff trap (repurposed trap 2): both files are non-empty, but nothing matched — e.g. the two
+        // files' TFM sets are disjoint. A comparison of nothing must never read as a clean "no changes".
+        if (diff.MatchedPairCount == 0 && !allowTfmMismatch)
+        {
+            Console.Error.WriteLine(
+                "capability-diff: NOTHING MATCHED between baseline and candidate — no (assembly, target framework) " +
+                "pair is present in both files, so no capability comparison is possible. Refusing to compare. " +
+                "Pass --allow-tfm-mismatch to override.");
+            return 3;
+        }
+
+        // Trap 1: any incomplete element on a side makes that WHOLE side untrustworthy for a clean result.
+        var (baselineComplete, baselineCaveats) = CapabilityDiffOutcome.SideCompleteness(baseline);
+        var (candidateComplete, candidateCaveats) = CapabilityDiffOutcome.SideCompleteness(candidate);
+
+        var outcome = new CapabilityDiffOutcome(
+            diff, baselineComplete, baselineCaveats, candidateComplete, candidateCaveats,
+            VacuousDiffOverridden: diff.MatchedPairCount == 0);
+
+        var emitted = json
+            ? TryEmit(outcome.ToJson(), output)
+            : EmitHumanReport(c => CapabilityDiffReportRenderer.Render(c, outcome, baselinePath, candidatePath), output, rich);
+        if (!emitted)
+            return 1;
+
+        return CapabilityDiffExitCode(diff, strict, outcome.IsIncomplete, allowIncomplete);
+    }
+
+    // The capability-diff verb's exit code, as ONE seam (mirrors AnalyzeExitCode/ScanPackageExitCode). Same
+    // precedence as ScanExitCode: a tripped --strict gate beats incompleteness, because an added capability is
+    // accurate and actionable even when coverage was partial elsewhere.
+    //
+    // ⚠️ This is the FIRST place capability DATA gates an exit code by design (ADR — capability-diff-versions task).
+    // That is acceptable ONLY because it gates on a DELTA (HasAddedCapabilities: a capability the candidate has that
+    // the baseline did not), never on bare capability PRESENCE: presence alone fires on ~96% of benign packages
+    // (docs/agent/measurements, capability-manifest-reframe task) and gating on it would be pure noise. Do NOT
+    // "simplify" this into gating on diff.HasAnyCapabilityChange or on any single snapshot's manifest presence —
+    // that would silently reintroduce the presence-gate this project deliberately rejected.
+    internal static int CapabilityDiffExitCode(CapabilityDiffReport diff, bool strict, bool isIncomplete, bool allowIncomplete) =>
+        strict && diff.HasAddedCapabilities ? 2
+        : isIncomplete && !allowIncomplete ? 3
+        : 0;
+
+    // Reads a --snapshot JSON array (capability-diff-versions task). Never throws: a missing file, an unreadable
+    // file, or malformed/non-array JSON all become a failure Result with a message meant for stderr.
+    private static Result<IReadOnlyList<CapabilitySnapshot>> LoadSnapshotArray(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            return Result.Failure<IReadOnlyList<CapabilitySnapshot>>($"Snapshot file '{path}' does not exist.");
+
+        try
+        {
+            var json = File.ReadAllText(path);
+            var snapshots = JsonSerializer.Deserialize<List<CapabilitySnapshot>>(json, snapshotJsonOptions);
+            return snapshots is null
+                ? Result.Failure<IReadOnlyList<CapabilitySnapshot>>($"Snapshot file '{path}' is empty or JSON 'null'.")
+                : Result.Success<IReadOnlyList<CapabilitySnapshot>>(snapshots);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return Result.Failure<IReadOnlyList<CapabilitySnapshot>>($"Could not read snapshot file '{path}': {ex.Message}", ex);
+        }
+    }
+
+    // Writes a --snapshot JSON array (analyze/scan-package). Same error posture as TryEmit's file branch.
+    private static bool TryWriteSnapshotFile(string path, IReadOnlyList<CapabilitySnapshot> snapshots)
+    {
+        try
+        {
+            File.WriteAllText(path, JsonSerializer.Serialize(snapshots, snapshotJsonOptions));
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Console.Error.WriteLine($"Failed to write snapshot to {path}: {ex.Message}");
+            return false;
+        }
     }
 
     // Best-effort project-health lookup from the LOCAL nuspec (scan-package --health): repo resolution is offline
@@ -716,5 +942,14 @@ internal static class Program
     // Sane upper bound for --depth (resolver-lite, ADR 0018): a positive request is clamped to this so a large value
     // can't fan out into an unbounded network walk. Resolver-lite is an approximation, not a restore — depth stays small.
     private const int MaxResolveDepth = 8;
+
+    // Shared read/write options for --snapshot files and capability-diff's inputs (capability-diff-versions task):
+    // indented so a committed baseline is reviewable, enums by name so CurrentSchemaVersion-stable JSON survives a
+    // future Capability append without renumbering.
+    private static readonly JsonSerializerOptions snapshotJsonOptions = new()
+    {
+        WriteIndented = true,
+        Converters = { new JsonStringEnumConverter() }
+    };
     #endregion
 }

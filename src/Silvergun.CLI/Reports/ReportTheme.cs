@@ -141,25 +141,27 @@ internal static class ReportTheme
     /// capability is itself information ("this package does NOT execute processes"), so zero rows are never
     /// omitted, matching <see cref="IndicatorCountSummary"/>'s posture toward zero-count categories.
     /// <para>
-    /// Derived entirely at render time from <see cref="ApiCallFinding"/> rows already on the report — no report
-    /// record gains a member for this (that would reopen the <c>--json</c> splice's duplicate-property hazard);
-    /// the persisted/serialized manifest shape belongs to the capability-diff-versions follow-up task.
+    /// Renders from the shared <c>Silvergun.CodeAnalysis.IL.CapabilityManifest</c> projection (capability-diff-versions
+    /// task) rather than recomputing counts inline — the same projection the serializable
+    /// <c>Silvergun.CodeAnalysis.IL.CapabilitySnapshot</c> carries, so the report and a snapshot can never disagree
+    /// about what "present" means. No report record gains a member for this (that would reopen the <c>--json</c>
+    /// splice's duplicate-property hazard); this method's own name and signature are unchanged on purpose — a fully
+    /// qualified name is used for the projection type below because this class already declares a member with the
+    /// same simple name (<c>CapabilityManifest</c>), which a bare reference to the type would otherwise collide with.
     /// </para>
     /// </summary>
     internal static Grid CapabilityManifest(IReadOnlyList<ApiCallFinding> findings)
     {
+        var manifest = Silvergun.CodeAnalysis.IL.CapabilityManifest.From(findings);
         var grid = new Grid();
         grid.AddColumn(new GridColumn().NoWrap().PadRight(2));
         grid.AddColumn(new GridColumn().NoWrap().PadRight(2));
         grid.AddColumn();
-        foreach (var capability in Enum.GetValues<Capability>())
-        {
-            var count = findings.Count(f => f.Capability == capability);
+        foreach (var entry in manifest.Entries)
             grid.AddRow(
-                $"[grey]{Esc(capability.ToString())}[/]",
-                count > 0 ? Colored(capability, "present") : "[grey]absent[/]",
-                count > 0 ? $"[orange1]{count}[/]" : "[green]0[/]");
-        }
+                $"[grey]{Esc(entry.Capability.ToString())}[/]",
+                entry.Present ? Colored(entry.Capability, "present") : "[grey]absent[/]",
+                entry.Present ? $"[orange1]{entry.CallSiteCount}[/]" : "[green]0[/]");
         return grid;
     }
 

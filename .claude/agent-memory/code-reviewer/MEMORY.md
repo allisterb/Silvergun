@@ -16,3 +16,4 @@
 - [ldstr-indicator-classifier review](project_ldstr-indicator-classifier.md) — clean landing 2026-08-20; one stale comment after a design pivot, one undocumented CLI-integration scope gap.
 - [Re-verify empirical code comments](feedback-reverify-empirical-code-comments.md) — reproduce cited timing/byte-count claims in scratchpad, don't trust the comment.
 - [indicator-cli-integration review](project_indicator-cli-integration.md) — clean CLI wiring; but bundled an out-of-scope src/ fix a sibling task's doc explicitly forbade making.
+- [capability-diff-versions review](project_capability-diff-versions.md) — live NUL-sentinel collision found by reproducing it, not reasoning about it; string-domain sentinels need this check whenever input is attacker-controlled.

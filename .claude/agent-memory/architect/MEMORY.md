@@ -13,6 +13,7 @@
 - [Reader choice: keep CCI](project_reader_choice_cci.md) — ILSpy/Cecil measured and rejected 2026-07-30; adoption scale ≠ hostile-input robustness; our robustness is in our layer
 - [Measure before designing](project_measure_before_designing.md) — spike first on ext/analysis-net claims; ALSO re-aggregate raw output yourself — 3 subagent reports contradicted their own data
 - [Opus cyber-filter on reviews](project_opus_cyber_filter_reviews.md) — Opus 4.8 specialists trip a cybersecurity safety filter on malware-adjacent code; re-dispatch on Sonnet with correctness-framed wording
+- [Suppressed diagnostic = defect signal](feedback_suppressed_diagnostic_is_a_defect.md) — a subagent explaining why a warning is safe to suppress is usually wrong; the compiler isn't
 - [Record decisions at dispatch time](feedback_record_decisions_at_dispatch.md) — a dispatch prompt is invisible authorization; amend the spec BEFORE dispatching, not after review flags it
 - [Post-subagent repo hygiene checks](feedback_subagent_stray_memory.md) — stray `.claude/`, orphaned stash, and code-reviewer editing shipped src/ files
 - [`dotnet sln add` rewrites platforms](reference_dotnet_sln_add_diff.md) — hand-edit `src/Silvergun.sln` (+7 lines); the CLI injects x64/x86 rows for every project
