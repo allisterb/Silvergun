@@ -319,8 +319,9 @@ public sealed class ScriptRuleScanner : Runtime
 
     // Collapses matches to one finding per (RuleId, RelativePath) — RuleId case-insensitive, path ordinal — keeping the
     // first match's line/excerpt/severity/confidence/tags and recording the total match count as Occurrences. A single
-    // alternation rule matching a file N times previously produced N findings, inflating both the report and the
-    // --strict gate (docs/agent/tasks/script-rule-precision.md). Ordering is deterministic: path, line, then rule id.
+    // alternation rule matching a file N times previously produced N findings, inflating the report (and, at the time,
+    // the --strict gate — since ADR-0027, Source=Script findings no longer gate) (docs/agent/tasks/script-rule-precision.md).
+    // Ordering is deterministic: path, line, then rule id.
     // "First" is taken as the lowest StartLine rather than the engine's emission order, which is not contractually
     // source order within a multi-pattern rule.
     private static IReadOnlyList<ScriptFinding> Aggregate(IEnumerable<ScriptFinding> findings) => findings

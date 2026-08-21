@@ -33,3 +33,31 @@ this is the dangerous direction: absence of findings reads as absence of threat.
   fires end-to-end on a realistic input before believing it exists.
 
 Related: [[detection-calibration]], [[measure-before-designing]], [[hostile-input-threat-model]]
+
+## The sharpest instance yet (2026-08-21): the FIX for an inert guard was itself inert
+
+4. **YARA backend self-reported "available" while its native core failed to load on every scan** —
+   zero findings forever, indistinguishable from "no malware matched". Found only by a 100-package
+   corpus measurement, never by the suite.
+5. **The fix for (4) could not fire for the most common backend.** It derived a
+   `YaraScanStatus.Unavailable` from *whether the scan threw* — but every `IYaraScanner` carries an
+   explicit "never throws" contract and swallows failures internally. With no backend configured at
+   all, the scanner returned empty without throwing and the status read **`Completed`**. It also
+   *regressed* the previous check, which had caught that case correctly.
+
+**The unifying root cause, worth more than the instances:**
+**inferring health from the absence of a symptom, rather than asking the component whether it works.**
+A "never throws" contract makes exception-absence carry *no information*. A "backend selected" check
+proves selection, not function.
+
+**How to apply:**
+- When wiring up an availability/health/status signal, ask: *what code path sets the failure value,
+  and can it actually execute?* If the failure value comes from a catch block, check whether anything
+  can reach it.
+- Prefer a **positive health signal owned by the component** ("did you initialise?") over an inferred
+  one ("did anything blow up?").
+- Any optional/pluggable backend needs a **functional** check, not a **selection** check. A backend
+  that reports available but cannot function is worse than an absent one, because absence is
+  detectable.
+- Treat a newly-added status enum as untested until a test pins **every** value against a **real**
+  implementation — not just a synthetic double built to reach the branch.

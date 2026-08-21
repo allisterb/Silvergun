@@ -7,6 +7,7 @@ using Spectre.Console;
 using Silvergun.CodeAnalysis.IL;
 using Silvergun.Intel;
 using Silvergun.PackageAnalysis.NuGet;
+using Silvergun.PackageAnalysis.NuGet.Yara;
 
 using static Silvergun.CLI.Reports.ReportTheme;
 
@@ -24,9 +25,11 @@ using static Silvergun.CLI.Reports.ReportTheme;
 /// <see cref="ObfuscationReport"/> (best-effort analysis that failed), a null
 /// <see cref="AssemblyMetadataInfo"/> (best-effort metadata read that failed), a non-null
 /// <see cref="AssemblyScanResult.SkipReason"/> (an inventoried file that could not be analysed at all),
-/// <see cref="DependencyResolutionStatus.Partial"/> (ADR 0018) and
+/// <see cref="DependencyResolutionStatus.Partial"/> (ADR 0018),
 /// <see cref="VulnerabilityScanStatus.Unavailable"/>/<see cref="VulnerabilityScanStatus.NotChecked"/>
-/// (ADR 0017). Every <see cref="Caveats"/> entry names its specific gap in prose.
+/// (ADR 0017), and <see cref="YaraScanStatus.Unavailable"/> (ADR 0027 decision 4 — a YARA scan that was
+/// requested but could not actually run, e.g. the native <c>libyara</c> backend failing to initialize).
+/// Every <see cref="Caveats"/> entry names its specific gap in prose.
 /// </para>
 /// <para>
 /// <see cref="Caveats"/> can embed untrusted package/assembly content (paths), so it is escaped where it is
@@ -83,7 +86,8 @@ internal readonly record struct CompletenessAssessment(
     /// <summary>
     /// Completeness of a <c>scan-package</c> report: IL coverage aggregated over the packaged assemblies, a failed
     /// obfuscation analysis or metadata read on any of them, an inventoried file that could not be analysed at all,
-    /// an incomplete resolver-lite transitive walk, and vulnerability data that was not obtained.
+    /// an incomplete resolver-lite transitive walk, vulnerability data that was not obtained, and a YARA
+    /// malware-signature scan that did not actually run (ADR 0027 decision 4).
     /// <para>
     /// A file with a <see cref="AssemblyScanResult.SkipReason"/> (⇒ no <see cref="CapabilityReport"/>) is a
     /// <b>whole binary that produced no analysis</b> — a larger blind spot than a few methods that could not be
@@ -128,6 +132,9 @@ internal readonly record struct CompletenessAssessment(
 
         if (VulnerabilityCaveat(report.VulnerabilitiesStatus) is { } vulnCaveat)
             caveats.Add(vulnCaveat);
+
+        if (YaraCaveat(report.YaraScanStatus) is { } yaraCaveat)
+            caveats.Add(yaraCaveat);
 
         return new CompletenessAssessment(caveats.Count == 0, caveats, total, analyzedMethods, skipped);
     }
@@ -180,6 +187,17 @@ internal readonly record struct CompletenessAssessment(
     {
         VulnerabilityScanStatus.Unavailable => "the known-vulnerability check did not complete",
         VulnerabilityScanStatus.NotChecked => "the known-vulnerability check did not run",
+        _ => null,
+    };
+
+    // Mirrors VulnerabilityCaveat's shape, but names only one status (ADR 0027 decision 4): Unavailable means YARA
+    // was REQUESTED and ATTEMPTED but could not actually run (no backend selected, or a selected backend threw
+    // during initialization/scanning — the native libyara defect this caveat exists to surface), so an empty
+    // YaraFindings list is NOT evidence of a clean package and must not read as "Clean". NotRun (an explicit
+    // --no-yara opt-out) is deliberately NOT a caveat here — the caller chose to skip the scan, unlike an outage.
+    private static string? YaraCaveat(YaraScanStatus status) => status switch
+    {
+        YaraScanStatus.Unavailable => "the YARA malware-signature scan did not complete",
         _ => null,
     };
 

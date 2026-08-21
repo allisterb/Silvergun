@@ -7,6 +7,11 @@ namespace Silvergun.PackageAnalysis.NuGet.Yara;
 /// </summary>
 public sealed class NullYaraScanner : IYaraScanner
 {
+    #region Properties
+    /// <summary>Always <c>false</c> — there is no backend here at all, only the no-op (ADR 0027 decision 4).</summary>
+    public bool Available => false;
+    #endregion
+
     #region Methods
     public IReadOnlyList<YaraMatch> ScanFile(string fullPath) => Array.Empty<YaraMatch>();
 

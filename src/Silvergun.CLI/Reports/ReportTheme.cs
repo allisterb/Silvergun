@@ -188,13 +188,12 @@ internal static class ReportTheme
     }
 
     /// <summary>
-    /// Honesty line printed alongside <see cref="CapabilityManifest"/>: the manifest itself is purely
-    /// informational, but presenting it as an inventory does NOT change the gate — <c>--strict</c> still fails the
-    /// build on ANY capability finding, exactly as before this task. Stated explicitly so the report never reads as
-    /// "purely informational" while silently controlling CI (whether presence alone SHOULD gate is the deferred,
-    /// separate decision in ADR-0027 — not this task).
+    /// Honesty line printed alongside <see cref="CapabilityManifest"/>: as of ADR-0027, capability presence is
+    /// purely informational and does NOT fail the build under <c>--strict</c> (only the capability *delta* gates,
+    /// via <c>capability-diff</c>). Stated explicitly so the report never leaves the reader guessing what the
+    /// manifest does and does not control.
     /// </summary>
     internal static string CapabilityGateNote(bool rich) =>
-        $"[grey]Note[/] {Dash(rich)} this manifest is informational; [bold]--strict[/] still fails the build on ANY capability present here.";
+        $"[grey]Note[/] {Dash(rich)} this manifest is informational; [bold]--strict[/] does not fail the build on capability presence alone (ADR-0027).";
     #endregion
 }

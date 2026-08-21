@@ -14,9 +14,12 @@ public static class YaraScannerFactory
     public static IYaraScanner Shared => shared.Value;
 
     /// <summary>
-    /// <c>true</c> when a real YARA backend was selected (Windows in-process, or a valid classic-CLI path);
-    /// <c>false</c> when scanning degrades to <see cref="NullYaraScanner"/> because no engine is available
-    /// (e.g. non-Windows with <c>SILVERGUN_YARA_PATH</c> unset). The CLI uses this to emit an advisory note.
+    /// <c>true</c> when a real YARA backend was SELECTED (Windows in-process, or a valid classic-CLI path);
+    /// <c>false</c> only when scanning degrades to <see cref="NullYaraScanner"/> because no engine is configured
+    /// (e.g. non-Windows with <c>SILVERGUN_YARA_PATH</c> unset). <b>This does not prove the backend actually
+    /// works</b> — the Windows in-process backend is always "selected" even when its native <c>libyara.NET</c>
+    /// dependency fails to load. The CLI's advisory note is keyed on <see cref="PackageCapabilityReport.YaraScanStatus"/>
+    /// instead (the real, per-run outcome), not on this property.
     /// </summary>
     public static bool BackendAvailable => Shared is not NullYaraScanner;
     #endregion

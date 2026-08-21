@@ -180,11 +180,12 @@ internal static class AssemblyReportRenderer
     // Findings / Not verified / Clean headline. "Attention" is DELIBERATELY WIDER than the --strict gate (ARCHITECT
     // DECISION 2026-08-03): the headline also fires on the seven discriminating indicator categories
     // (IsDiscriminatingIndicatorCategory) so a CallbackDomain-only assembly cannot print "Clean" with the callback
-    // domain listed in the section above it. As of ADR 0026, the gate (Program.AnalyzeExitCode) keys on capability OR
-    // obfuscation findings OR one of three gating indicator categories (CallbackDomain, DynamicDns, CredentialPath —
-    // IsGatingIndicatorCategory); the remaining four discriminating categories, and every counts-only category,
-    // still never affect the exit code — "attention" stays the wider set. "Not verified" comes from the SHARED
-    // CompletenessAssessment the exit code uses
+    // domain listed in the section above it. As of ADR 0027, the gate (Program.AnalyzeExitCode) keys ONLY on one of
+    // three gating indicator categories (CallbackDomain, DynamicDns, CredentialPath — IsGatingIndicatorCategory);
+    // capability and obfuscation findings stopped gating (67-81% and 29% benign prevalence), so "attention" is now
+    // wider still than before — it fires on capability/obfuscation presence and all seven discriminating indicator
+    // categories, none of which (bar the three gating ones) affect the exit code. "Not verified" comes from the
+    // SHARED CompletenessAssessment the exit code uses
     // (ADR 0024) — so a run that skipped methods, or whose obfuscation analysis failed, can never read "Clean".
     private static void Footer(IAnsiConsole console, bool rich, AssemblyAnalysisReport report)
     {

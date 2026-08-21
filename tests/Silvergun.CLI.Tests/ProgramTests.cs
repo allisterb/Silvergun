@@ -1,21 +1,32 @@
 namespace Silvergun.CLI.Tests;
 
 using Silvergun.CLI;
+using Silvergun.CodeAnalysis.IL;
 using Silvergun.Intel;
 using Silvergun.PackageAnalysis.NuGet;
 
 using Xunit;
 
+using static Silvergun.CLI.Tests.AnalysisCompletenessTests;
+
 /// <summary>
 /// Unit tests for the CLI's testable seams: <see cref="Program.SelectPopularitySource"/> source selection,
-/// <see cref="Program.IsValidSource"/> validation, and the <see cref="Program.ScanExitCode"/> --strict gate
-/// (including which script findings are allowed to gate it — see
-/// <c>docs/agent/tasks/script-rule-precision.md</c>). No network is touched — the popularity sources build a
-/// client/repository lazily, so asserting the concrete returned type is safe.
+/// <see cref="Program.IsValidSource"/> validation, and the <see cref="Program.ScanExitCode"/> --strict gate.
+/// <para>
+/// ADR-0027 ("what --strict gates on") narrowed the gate from six sources to three — vulnerabilities, YARA
+/// findings, and ADR-0026's gating indicator categories — because the other three (capability presence,
+/// obfuscation findings, <c>Source=Script</c> script findings) were measured at 67-81%/29%/25% benign-package
+/// prevalence with ZERO user-would-accept hits (Table C). Their booleans were REMOVED from
+/// <see cref="Program.ScanExitCode"/>'s signature on purpose, not merely defaulted — a future attempt to re-gate
+/// on them must fail to compile here. This file therefore pins two things with equal weight: the surviving
+/// three-source gate (region A), and the explicit non-gating of the three de-gated sources, asserted individually
+/// by name for both <c>analyze</c> and <c>scan-package</c> (region B) — the exclusions are the part most likely to
+/// look like a bug to a future reader and be silently reverted.
+/// </para>
 /// </summary>
 public sealed class ProgramTests
 {
-    #region Methods
+    #region Methods — source selection (unaffected by ADR-0027)
     [Fact]
     public void SelectPopularitySource_Auto_ReturnsNuGet_WhenKeyUnset()
     {
@@ -71,133 +82,154 @@ public sealed class ProgramTests
     [InlineData("libraries.io")]
     public void IsValidSource_RejectsUnrecognizedValues(string source) =>
         Assert.False(Program.IsValidSource(source));
+    #endregion
 
+    #region Methods — A: the surviving three-source ScanExitCode gate (pure seam)
+    // Every combination of the three surviving gate sources, strict on, nothing incomplete: 2 exactly when strict
+    // AND at least one of {YARA, vulnerability, gating indicator} is set, else 0.
     [Theory]
     [InlineData(true, false, false, false, 0)]
-    [InlineData(false, true, true, true, 0)]
+    [InlineData(false, true, true, true, 0)]    // no --strict: never gates, no matter how many sources fire
     [InlineData(true, true, false, false, 2)]
     [InlineData(true, false, true, false, 2)]
     [InlineData(true, false, false, true, 2)]
-    public void ScanExitCode_ReturnsTwoOnlyWhenStrictAndAnyGate(
-        bool strict, bool cap, bool obf, bool script, int expected) =>
-        Assert.Equal(expected, Program.ScanExitCode(strict, cap, obf, script));
+    [InlineData(true, true, true, true, 2)]
+    public void ScanExitCode_ReturnsTwoOnlyWhenStrictAndOneOfTheThreeSurvivingGates(
+        bool strict, bool yara, bool vuln, bool gatingIndicator, int expected) =>
+        Assert.Equal(expected, Program.ScanExitCode(
+            strict, hasYaraFindings: yara, hasVulnerabilities: vuln, hasGatingIndicatorFindings: gatingIndicator,
+            isIncomplete: false, allowIncomplete: false));
 
-    // The new trailing YARA gate (ADR 0016): a YARA finding is a high-confidence IOC, so it trips --strict on its
-    // own (=> 2), stays silent when strict is off (=> 0), and never fabricates a non-zero when no gate is present.
+    // YARA alone (ADR 0016): a name-match on a malware signature is the strongest signal the tool has, so it trips
+    // --strict on its own, stays silent when strict is off, and never fabricates a non-zero when no gate is present.
     [Theory]
-    [InlineData(true, false, false, false, true, 2)]    // strict + only YARA => 2
-    [InlineData(false, false, false, false, true, 0)]   // non-strict + YARA => 0
-    [InlineData(true, false, false, false, false, 0)]   // strict but nothing set => 0
-    [InlineData(true, true, false, false, true, 2)]     // YARA alongside another gate is still 2
-    public void ScanExitCode_WithYaraGate_ReturnsTwoOnlyWhenStrictAndAnyGate(
-        bool strict, bool cap, bool obf, bool script, bool yara, int expected) =>
-        Assert.Equal(expected, Program.ScanExitCode(strict, cap, obf, script, yara));
+    [InlineData(true, true, 2)]
+    [InlineData(false, true, 0)]
+    [InlineData(true, false, 0)]
+    public void ScanExitCode_YaraFindingsAlone_GatesOnlyUnderStrict(bool strict, bool yara, int expected) =>
+        Assert.Equal(expected, Program.ScanExitCode(
+            strict, hasYaraFindings: yara, hasVulnerabilities: false, hasGatingIndicatorFindings: false,
+            isIncomplete: false, allowIncomplete: false));
 
-    // The 5th parameter defaults to false, so a strict scan whose only YARA-arg is omitted matches the 4-arg result:
-    // pre-existing callers (assembly / check-squat) are unaffected by the additive gate.
+    // A known vulnerability alone (ADR 0017): a real CVE should fail a build on its own.
     [Theory]
-    [InlineData(true, false, false, false)]
-    [InlineData(true, true, false, false)]
-    [InlineData(false, true, true, true)]
-    public void ScanExitCode_YaraDefaultsFalse_MatchesFourArgOverload(bool strict, bool cap, bool obf, bool script) =>
-        Assert.Equal(
-            Program.ScanExitCode(strict, cap, obf, script),
-            Program.ScanExitCode(strict, cap, obf, script, hasYaraFindings: false));
+    [InlineData(true, true, 2)]
+    [InlineData(false, true, 0)]
+    [InlineData(true, false, 0)]
+    public void ScanExitCode_VulnerabilityAlone_GatesOnlyUnderStrict(bool strict, bool vuln, int expected) =>
+        Assert.Equal(expected, Program.ScanExitCode(
+            strict, hasYaraFindings: false, hasVulnerabilities: vuln, hasGatingIndicatorFindings: false,
+            isIncomplete: false, allowIncomplete: false));
 
-    // The new trailing OSV known-vulnerability gate (ADR 0017): a known vuln is a concrete, actionable IOC, so it
-    // trips --strict on its own (=> 2), stays silent when strict is off (=> 0), and never fabricates a non-zero when
-    // no gate is present.
+    // A gating indicator finding alone (ADR 0026's three categories, aggregated by Program.AnalyzeExitCode /
+    // ScanPackageExitCode into this one boolean): gates --strict on its own too.
     [Theory]
-    [InlineData(true, false, false, false, false, true, 2)]    // strict + only a vulnerability => 2
-    [InlineData(false, false, false, false, false, true, 0)]   // non-strict + vulnerability => 0
-    [InlineData(true, false, false, false, false, false, 0)]   // strict but nothing set => 0
-    [InlineData(true, true, false, false, false, true, 2)]     // vulnerability alongside another gate is still 2
-    [InlineData(true, false, false, false, true, true, 2)]     // vulnerability alongside a YARA hit is still 2
-    public void ScanExitCode_WithVulnerabilityGate_ReturnsTwoOnlyWhenStrictAndAnyGate(
-        bool strict, bool cap, bool obf, bool script, bool yara, bool vuln, int expected) =>
-        Assert.Equal(expected, Program.ScanExitCode(strict, cap, obf, script, yara, vuln));
-
-    // The 6th parameter defaults to false, so a strict scan whose vulnerability-arg is omitted matches the 5-arg
-    // result: pre-existing callers (assembly / check-squat) are unaffected by the additive OSV gate.
-    [Theory]
-    [InlineData(true, false, false, false, false)]
-    [InlineData(true, false, false, false, true)]
-    [InlineData(false, true, true, true, false)]
-    public void ScanExitCode_VulnerabilityDefaultsFalse_MatchesFiveArgOverload(
-        bool strict, bool cap, bool obf, bool script, bool yara) =>
-        Assert.Equal(
-            Program.ScanExitCode(strict, cap, obf, script, yara),
-            Program.ScanExitCode(strict, cap, obf, script, yara, hasVulnerabilities: false));
+    [InlineData(true, true, 2)]
+    [InlineData(false, true, 0)]
+    [InlineData(true, false, 0)]
+    public void ScanExitCode_GatingIndicatorFindingsAlone_GatesOnlyUnderStrict(bool strict, bool gating, int expected) =>
+        Assert.Equal(expected, Program.ScanExitCode(
+            strict, hasYaraFindings: false, hasVulnerabilities: false, hasGatingIndicatorFindings: gating,
+            isIncomplete: false, allowIncomplete: false));
 
     // OSV reachability (the Unavailable status) is NOT a --strict FINDINGS gate: that gate is findings-only, so an
-    // Unavailable check with NO findings (hasVulnerabilities:false) never trips it — it returns 0 here, exactly like a
-    // completed-clean scan, and an outage can never fabricate a policy verdict (2).
+    // Unavailable check with NO findings (hasVulnerabilities:false) never trips it — it returns 0 here, exactly like
+    // a completed-clean scan, and an outage can never fabricate a policy verdict (2) at this pure seam.
     //
     // ⚠️ This is a statement about the FINDINGS gate only, NOT about the outage's overall exit code. Under ADR 0024
     // that outage is incompleteness, so the real scan-package run exits 3: Program.ScanPackageExitCode derives
     // isIncomplete from CompletenessAssessment.ForPackage, which treats Unavailable/NotChecked as "vulnerability data
-    // not obtained" (see CompletenessExitCodeTests.ScanPackage_WhenVulnerabilityDataNotObtained_ExitsThree). The
-    // assertion below is still exactly right because this is the PURE seam with isIncomplete defaulted to false — the
-    // pre-ADR-0024 claim that the signal "lives in the report/stderr, not the code" is what no longer holds.
+    // not obtained" (see CompletenessExitCodeTests.ScanPackage_WhenVulnerabilityDataNotObtained_ExitsThree).
     [Fact]
     public void ScanExitCode_StrictWithUnavailableStatusButNoFindings_ReturnsZero() =>
         Assert.Equal(0, Program.ScanExitCode(
-            strict: true, hasCapabilityFindings: false, hasObfuscation: false, hasScriptFindings: false,
-            hasYaraFindings: false, hasVulnerabilities: false));
+            strict: true, hasYaraFindings: false, hasVulnerabilities: false, hasGatingIndicatorFindings: false,
+            isIncomplete: false, allowIncomplete: false));
 
     // Resolver-lite (ADR 0018): under --depth the transitive vulnerabilities OSV finds are MERGED into
-    // report.Vulnerabilities (the CLI attaches them via the same `with { Vulnerabilities = ... }` step), so they flow
-    // through the SAME `hasVulnerabilities` gate arg — the ScanExitCode signature is unchanged. This asserts that a
-    // vulnerability of transitive origin still trips --strict to exit 2, exactly like a direct/dependency hit.
+    // report.Vulnerabilities (the CLI attaches them via the same `with { Vulnerabilities = ... }` step), so they
+    // flow through the SAME hasVulnerabilities gate arg. This asserts a vulnerability of transitive origin still
+    // trips --strict, exactly like a direct/dependency hit.
     [Fact]
     public void ScanExitCode_TransitiveVuln_GatesStrict() =>
         Assert.Equal(2, Program.ScanExitCode(
-            strict: true, hasCapabilityFindings: false, hasObfuscation: false, hasScriptFindings: false,
-            hasYaraFindings: false, hasVulnerabilities: true));
+            strict: true, hasYaraFindings: false, hasVulnerabilities: true, hasGatingIndicatorFindings: false,
+            isIncomplete: false, allowIncomplete: false));
+    #endregion
 
-    // Script-rule precision (docs/agent/tasks/script-rule-precision.md): findings from the declarative package
-    // manifest (Source=PackageMetadata) are advisory — reported in full, but they must NOT fail CI on their own,
-    // mirroring the ADR 0015 "advisory never gates" precedent. Nothing in a .nuspec executes.
+    #region Methods — B: PIN THE DE-GATING — capability/obfuscation/script alone must NOT gate --strict
+    // ADR-0027 Table C: every one of the 72/100 benign packages that failed the old six-source gate failed for a
+    // noise-class reason (capability presence, obfuscation, or a script heuristic) — never a real CVE, a YARA
+    // name-match, or a gating indicator. These three exclusions are the evidence-backed part of the decision most
+    // likely to look like a bug to a future reader ("surely a capability finding should fail a strict build?") and
+    // the most likely thing to be silently reverted, so each is pinned individually, by name, for both verbs where
+    // it applies (script findings are scan-package-only: AssemblyAnalysisReport carries no ScriptFindings).
     //
-    // NOTE ON SHAPE: the gate expression lives INLINE in Program.RunScanPackage (`report.ScriptFindings.Any(f =>
-    // f.Source == ScriptFindingSource.Script)`), with no seam to call. These two tests therefore apply that exact
-    // predicate to a constructed report and feed the result to ScanExitCode, so a regression that widened the gate
-    // back to "any script finding" would have to change this predicate too.
+    // A structural guard, not just a behavioral one: Program.ScanExitCode's signature has NO parameter for
+    // capability/obfuscation/script findings at all, so a regression that tried to re-gate on them would have to
+    // change the signature (and every call site) before it could even compile — these tests assert the observable
+    // half of that same removal, at the report/verb level the run methods actually call.
     [Fact]
-    public void ScanExitCode_MetadataOnlyScriptFindings_DoesNotGateStrict()
+    public void AnalyzeExitCode_CapabilityFindingsAlone_DoesNotGateStrict()
     {
-        var report = ReportWithScriptFindings(
-            Finding("BD000600", ScriptFindingSource.PackageMetadata),
-            Finding("BD000804", ScriptFindingSource.PackageMetadata));
+        var report = AssemblyReport(methodsTotal: 5, methodsSkipped: 0, findings: [CapabilityFinding]);
 
-        var hasScriptFindings = report.ScriptFindings.Any(f => f.Source == ScriptFindingSource.Script);
-
-        Assert.NotEmpty(report.ScriptFindings);   // still reported in full ...
-        Assert.False(hasScriptFindings);          // ... but not a gate
-        Assert.Equal(0, Program.ScanExitCode(
-            strict: true, hasCapabilityFindings: false, hasObfuscation: false, hasScriptFindings,
-            hasYaraFindings: false, hasVulnerabilities: false));
+        Assert.Equal(0, Program.AnalyzeExitCode(report, strict: true, allowIncomplete: false));
     }
 
-    // The recall half of the same contract: a finding from real script/build content still gates --strict, even when
-    // it sits alongside advisory manifest findings.
     [Fact]
-    public void ScanExitCode_ScriptSourcedFinding_GatesStrict()
+    public void ScanPackageExitCode_CapabilityFindingsAlone_DoesNotGateStrict()
     {
-        var report = ReportWithScriptFindings(
-            Finding("BD000600", ScriptFindingSource.PackageMetadata),
-            Finding("BD000500", ScriptFindingSource.Script));
+        var report = Package(Analyzed("lib/net10.0/A.dll", methodsTotal: 5, methodsSkipped: 0, findings: [CapabilityFinding]));
 
-        var hasScriptFindings = report.ScriptFindings.Any(f => f.Source == ScriptFindingSource.Script);
+        Assert.Equal(0, Program.ScanPackageExitCode(report, strict: true, allowIncomplete: false));
+    }
 
-        Assert.True(hasScriptFindings);
-        Assert.Equal(2, Program.ScanExitCode(
-            strict: true, hasCapabilityFindings: false, hasObfuscation: false, hasScriptFindings,
-            hasYaraFindings: false, hasVulnerabilities: false));
+    [Fact]
+    public void AnalyzeExitCode_ObfuscationFindingsAlone_DoesNotGateStrict()
+    {
+        var report = AssemblyReport(methodsTotal: 5, methodsSkipped: 0) with
+        {
+            Obfuscation = ObfuscationReportWithFinding("Sample.dll")
+        };
+
+        Assert.Equal(0, Program.AnalyzeExitCode(report, strict: true, allowIncomplete: false));
+    }
+
+    [Fact]
+    public void ScanPackageExitCode_ObfuscationFindingsAlone_DoesNotGateStrict()
+    {
+        var analyzed = Analyzed("lib/net10.0/A.dll", methodsTotal: 5, methodsSkipped: 0) with
+        {
+            Obfuscation = ObfuscationReportWithFinding("lib/net10.0/A.dll")
+        };
+        var report = Package(analyzed);
+
+        Assert.Equal(0, Program.ScanPackageExitCode(report, strict: true, allowIncomplete: false));
+    }
+
+    // Script-rule precision (docs/agent/tasks/script-rule-precision.md) established that PackageMetadata-sourced
+    // script findings never gated; ADR-0027 goes further and stops Source=Script findings gating too — the 25%
+    // benign share was "one benign package in four". Recall (that these findings are still real findings, still
+    // reported) is asserted alongside the de-gating so this test cannot be satisfied by a report that silently drops
+    // the finding instead of merely not gating on it.
+    [Fact]
+    public void ScanPackageExitCode_ScriptSourcedFindingsAlone_DoesNotGateStrict()
+    {
+        var report = ReportWithScriptFindings(Finding("SIL9001", ScriptFindingSource.Script));
+
+        Assert.NotEmpty(report.ScriptFindings);   // still reported in full ...
+        Assert.Equal(0, Program.ScanPackageExitCode(report, strict: true, allowIncomplete: false));   // ... but not a gate
     }
     #endregion
 
     #region Methods — fixtures
+    private static readonly ApiCallFinding CapabilityFinding =
+        new(Capability.FileSystem, ApiCallKind.Call, "T", "M", "System.IO.File.ReadAllText");
+
+    private static ObfuscationReport ObfuscationReportWithFinding(string path) =>
+        new(path, path, Epoch, [new ObfuscationFinding(HiddenContentKind.HighEntropyBlob, "high-entropy base64", "T", "M", 512, 7.9)]);
+
     private static ScriptFinding Finding(string ruleId, ScriptFindingSource source) =>
         new(
             ruleId, "A rule", "Moderate", "Low",
@@ -205,12 +237,7 @@ public sealed class ProgramTests
             7, "excerpt", Array.Empty<string>(), Occurrences: 1, Source: source);
 
     private static PackageCapabilityReport ReportWithScriptFindings(params ScriptFinding[] findings) =>
-        new(
-            new PackageIdentityInfo("Some.Package", "1.0.0", "Author", "A package.", Array.Empty<PackageDependencyInfo>()),
-            DateTimeOffset.UnixEpoch,
-            Array.Empty<AssemblyScanResult>(),
-            Array.Empty<PackageScript>(),
-            findings);
+        PackageWith(scriptFindings: findings);
     #endregion
 
     #region Child types

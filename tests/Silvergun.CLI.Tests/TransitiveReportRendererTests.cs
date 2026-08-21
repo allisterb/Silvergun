@@ -9,6 +9,7 @@ using Spectre.Console;
 using Silvergun.CLI.Reports;
 using Silvergun.Intel;
 using Silvergun.PackageAnalysis.NuGet;
+using Silvergun.PackageAnalysis.NuGet.Yara;
 
 using Xunit;
 
@@ -120,8 +121,10 @@ public sealed class TransitiveReportRendererTests
 
     #region Methods — fixtures
     // A minimal, otherwise-clean scan-package report carrying the given resolver-lite status + resolved set. The OSV
-    // check is treated as Completed-and-clean so the footer's "Clean" claim is gated ONLY by the transitive status — the
-    // subject under test here (a Partial vuln check would independently downgrade the footer and confound the assertion).
+    // check is treated as Completed-and-clean and the YARA scan as Completed (ADR-0027 decision 4 wires
+    // YaraScanStatus.Unavailable — the record's own default — into a completeness caveat too, so it must be set
+    // explicitly here) so the footer's "Clean" claim is gated ONLY by the transitive status — the subject under test
+    // here (a Partial vuln/YARA check would independently downgrade the footer and confound the assertion).
     private static PackageCapabilityReport ReportWithTransitive(
         DependencyResolutionStatus status, params ResolvedDependency[] resolved)
     {
@@ -135,7 +138,8 @@ public sealed class TransitiveReportRendererTests
             Vulnerabilities: Array.Empty<VulnerabilityFinding>(),
             VulnerabilitiesStatus: VulnerabilityScanStatus.Completed,
             ResolvedDependencies: resolved,
-            DependencyResolution: status);
+            DependencyResolution: status,
+            YaraScanStatus: YaraScanStatus.Completed);
     }
     #endregion
 

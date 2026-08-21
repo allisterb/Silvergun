@@ -23,6 +23,20 @@ using libyaraNET;
 /// </summary>
 public sealed class LibYaraScanner : Runtime, IYaraScanner
 {
+    #region Properties
+    /// <summary>
+    /// <c>true</c> when the in-process engine actually initialized — the native <c>libyara.NET</c> dependency
+    /// loaded and at least one embedded rule compiled (<see cref="sharedEngine"/> / <see cref="BuildEngine"/>);
+    /// <c>false</c> when it did not (ADR 0027 decision 4). Reading this for the first time can itself throw:
+    /// forcing <see cref="sharedEngine"/>'s <c>Lazy&lt;T&gt;.Value</c> here JITs this getter, which references the
+    /// same <c>libyaraNET</c> types as <see cref="ScanFile"/> — if the native dependency's assembly cannot load,
+    /// that failure surfaces at THIS call site exactly as it can from <see cref="ScanFile"/>'s. That is precisely
+    /// why <c>PackageScanner.ScanYara</c> keeps a try/catch around this property as defense in depth, not as its
+    /// primary detection mechanism.
+    /// </summary>
+    public bool Available => sharedEngine.Value is not null;
+    #endregion
+
     #region Methods
     /// <summary>
     /// Scans <paramref name="fullPath"/> against the compiled ruleset and maps the hits to

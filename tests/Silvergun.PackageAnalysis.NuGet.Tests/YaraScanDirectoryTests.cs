@@ -88,15 +88,21 @@ public sealed class YaraScanDirectoryTests
     #region Nested types
     // A fake IYaraScanner with no real engine: ScanFile returns `matchesPerFile` hits for any file whose name
     // contains `nameContains`, else empty. It implements ONLY the primitive so tests exercise the interface's
-    // default ScanDirectory loop.
+    // default ScanDirectory loop. Available defaults to true (a healthy backend) since these tests are about the
+    // default ScanDirectory loop's file-attribution logic, not about the health signal (that is
+    // YaraScanPackageWiringTests' concern) — but it is a constructible flag, not hard-coded, so a future test here
+    // could exercise the unhealthy path too without a second fake type.
     private sealed class FakeScanner : IYaraScanner
     {
-        public FakeScanner(string nameContains, string rule, int matchesPerFile = 1)
+        public FakeScanner(string nameContains, string rule, int matchesPerFile = 1, bool available = true)
         {
             _nameContains = nameContains;
             _rule = rule;
             _matchesPerFile = matchesPerFile;
+            Available = available;
         }
+
+        public bool Available { get; }
 
         public IReadOnlyList<YaraMatch> ScanFile(string fullPath) =>
             Path.GetFileName(fullPath).Contains(_nameContains, StringComparison.Ordinal)

@@ -38,8 +38,12 @@ public sealed class PackageScanner : Runtime
             var scriptFindings = ScanScripts(package);
 
             // YARA malware-signature scanning over every extracted file (ADR 0016), while the extraction dir still
-            // exists. Best-effort/never-throws: a scanner failure or an unavailable backend yields empty findings.
-            var yaraFindings = runYara ? ScanYara(package, nupkgPath, yaraScanner) : Array.Empty<YaraFinding>();
+            // exists. Best-effort/never-throws: a scanner failure or an unavailable backend yields empty findings —
+            // but ScanYara ALSO reports which of those it was (YaraScanStatus), so a caller can never mistake
+            // "could not scan" for "scanned and clean" (the defect this status field exists to close).
+            var (yaraFindings, yaraStatus) = runYara
+                ? ScanYara(package, nupkgPath, yaraScanner)
+                : (Array.Empty<YaraFinding>(), YaraScanStatus.NotRun);
 
             var report = new PackageCapabilityReport(
                 package.Identity,
@@ -47,7 +51,8 @@ public sealed class PackageScanner : Runtime
                 results,
                 package.Scripts,
                 scriptFindings,
-                YaraFindings: yaraFindings);
+                YaraFindings: yaraFindings,
+                YaraScanStatus: yaraStatus);
             return Result.Success(report);
         }
         catch (Exception ex)
@@ -110,22 +115,45 @@ public sealed class PackageScanner : Runtime
     // Best-effort YARA malware-signature scan over the open package's extraction directory (ADR 0016). The shared
     // scanner is selected once by YaraScannerFactory (in-process on Windows, classic yara CLI elsewhere, or a no-op
     // when no engine is available); each raw hit is enriched with rule metadata (family/detection-name/category)
-    // from YaraRuleIndex and a package-relative path. Never throws — any failure yields no findings.
-    private static IReadOnlyList<YaraFinding> ScanYara(NuGetPackage package, string nupkgPath, IYaraScanner? yaraScanner = null)
+    // from YaraRuleIndex and a package-relative path.
+    //
+    // Status is derived from IYaraScanner.Available FIRST (ADR 0027 decision 4 code-review fix), not from whether
+    // ScanDirectory throws: every backend contracts to NEVER throw (IYaraScanner's doc comment) and swallows its
+    // own failures, so exception-absence carries no information — a NullYaraScanner (no backend configured at all,
+    // the common configuration) returns empty and throws nothing, which read as Completed before this fix. The
+    // try/catch below is kept as defense in depth, not the primary mechanism: it is what still catches
+    // LibYaraScanner when its native libyara.NET dependency fails to load — that failure can surface at a call
+    // site OUTSIDE any scanner's own guards (inside the interface's default ScanDirectory loop, or from
+    // LibYaraScanner.Available itself), so it genuinely escapes and is legitimately caught here. Never throws
+    // overall — a failure (or an unhealthy backend) yields no findings AND YaraScanStatus.Unavailable, never a bare
+    // empty list that would read as "scanned, clean". The catch is also why such a failure is logged exactly ONCE
+    // per package scan, not once per file: an exception from ScanDirectory aborts its whole per-file loop
+    // immediately (it never reaches a second file), so this is the only place it is ever observed.
+    private static (IReadOnlyList<YaraFinding> Findings, YaraScanStatus Status) ScanYara(
+        NuGetPackage package, string nupkgPath, IYaraScanner? yaraScanner = null)
     {
         try
         {
             var scanner = yaraScanner ?? YaraScannerFactory.Shared;
+            if (!scanner.Available)
+            {
+                Warn("YARA scanning UNAVAILABLE for {0}: no working backend. Malware-signature findings for this package are NOT verified.",
+                    package.Identity.Id);
+                return (Array.Empty<YaraFinding>(), YaraScanStatus.Unavailable);
+            }
+
             var index = YaraRuleIndex.Shared;
             var root = package.ExtractionDir;
-            return scanner.ScanDirectory(root)
+            var findings = scanner.ScanDirectory(root)
                 .Select(hit => Enrich(hit.Match, PackageRelativePath(root, nupkgPath, hit.FullPath), index))
                 .ToArray();
+            return (findings, YaraScanStatus.Completed);
         }
         catch (Exception ex)
         {
-            Warn("YARA scanning failed for {0}: {1}", package.Identity.Id, ex.Message);
-            return Array.Empty<YaraFinding>();
+            Warn("YARA scanning UNAVAILABLE for {0}: {1}. Malware-signature findings for this package are NOT verified.",
+                package.Identity.Id, ex.Message);
+            return (Array.Empty<YaraFinding>(), YaraScanStatus.Unavailable);
         }
     }
 

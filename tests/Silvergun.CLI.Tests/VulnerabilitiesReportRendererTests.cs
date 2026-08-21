@@ -9,6 +9,7 @@ using Spectre.Console;
 using Silvergun.CLI.Reports;
 using Silvergun.Intel;
 using Silvergun.PackageAnalysis.NuGet;
+using Silvergun.PackageAnalysis.NuGet.Yara;
 
 using Xunit;
 
@@ -218,6 +219,9 @@ public sealed class VulnerabilitiesReportRendererTests
     private static PackageCapabilityReport ReportWithVulns(params VulnerabilityFinding[] findings) =>
         ReportWith(VulnerabilityScanStatus.Completed, findings);
 
+    // YaraScanStatus is fixed at Completed here (ADR-0027 decision 4 wires the record's own Unavailable DEFAULT into
+    // a completeness caveat too) so this file's OSV-only assertions (including the single-caveat whole-line-equality
+    // ones for Unavailable/NotChecked) are not confounded by an unrelated YARA caveat.
     private static PackageCapabilityReport ReportWith(VulnerabilityScanStatus status, params VulnerabilityFinding[] findings)
     {
         var pkg = new PackageIdentityInfo("Some.Package", "1.0.0", "Author", "A package.", Array.Empty<PackageDependencyInfo>());
@@ -228,7 +232,8 @@ public sealed class VulnerabilitiesReportRendererTests
             Array.Empty<PackageScript>(),
             Array.Empty<ScriptFinding>(),
             Vulnerabilities: findings,
-            VulnerabilitiesStatus: status);
+            VulnerabilitiesStatus: status,
+            YaraScanStatus: YaraScanStatus.Completed);
     }
     #endregion
 

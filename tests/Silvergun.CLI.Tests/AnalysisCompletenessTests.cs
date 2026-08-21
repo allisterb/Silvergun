@@ -8,6 +8,7 @@ using Silvergun.CLI.Reports;
 using Silvergun.CodeAnalysis.IL;
 using Silvergun.Intel;
 using Silvergun.PackageAnalysis.NuGet;
+using Silvergun.PackageAnalysis.NuGet.Yara;
 
 using Xunit;
 
@@ -294,6 +295,33 @@ public sealed class AnalysisCompletenessTests
         Assert.DoesNotContain("metadata", Assert.Single(assessment.Caveats), StringComparison.OrdinalIgnoreCase);
     }
 
+    // ADR-0027 decision 4: a YARA scan that was REQUESTED but could not actually run (no backend selected, or a
+    // selected backend that threw during init/scan — the native libyara.NET defect the measurement exposed) is NOT
+    // a clean result: an empty YaraFindings list here is not evidence of a clean package, so it must be incomplete
+    // with its own caveat, exactly mirroring the pre-existing VulnerabilityScanStatus.Unavailable caveat below.
+    [Fact]
+    public void ForPackage_WhenYaraScanUnavailable_IsIncompleteWithDidNotCompleteCaveat()
+    {
+        var report = PackageWith(yaraStatus: YaraScanStatus.Unavailable);
+
+        var assessment = CompletenessAssessment.ForPackage(report);
+
+        Assert.False(assessment.IsComplete);
+        Assert.Equal(new[] { "the YARA malware-signature scan did not complete" }, assessment.Caveats);
+    }
+
+    // NotRun is the explicit --no-yara opt-out, a DIFFERENT statement from Unavailable ("did not run because asked
+    // not to" vs "did not run despite being asked to"): the caller chose to skip the scan, so it must NOT raise the
+    // caveat — an operator who opted out has not left a gap the tool failed to fill.
+    [Fact]
+    public void ForPackage_WhenYaraScanNotRun_ReportsNoYaraCaveat()
+    {
+        var assessment = CompletenessAssessment.ForPackage(PackageWith(yaraStatus: YaraScanStatus.NotRun));
+
+        Assert.True(assessment.IsComplete);
+        Assert.Empty(assessment.Caveats);
+    }
+
     // Resolver-lite (ADR 0018): a Partial transitive walk means the coverage claim does not extend to the
     // dependency closure.
     [Fact]
@@ -337,10 +365,16 @@ public sealed class AnalysisCompletenessTests
     }
 
     // The specific regression the flag-free wording prevents, reached the way it actually happens in the wild:
-    // deserializing a package report that predates the VulnerabilitiesStatus field. NotChecked is its default, so a
-    // LEGACY report must never be told an operator passed --no-vulns.
+    // deserializing a package report that predates BOTH the VulnerabilitiesStatus field AND the YaraScanStatus field
+    // (ADR-0027 decision 4 — the same JSON that predates OSV tracking necessarily predates YARA tracking too, since
+    // YaraScanStatus was added later). NotChecked/Unavailable are their respective defaults, so a LEGACY report must
+    // never be told an operator passed --no-vulns/--no-yara, and — the genuinely NEW behavior ADR-0027 adds, not a
+    // regression — it now carries TWO caveats instead of one: the YARA default is Unavailable rather than NotRun
+    // specifically so old data (including every report the libyara.NET native-dependency defect silently produced,
+    // per PackageModel.cs) reads as "not verified", never a false "Completed". This is the fail-closed direction the
+    // ADR calls out as correct and NOT to be changed.
     [Fact]
-    public void ForPackage_LegacyJsonWithoutStatus_YieldsFlagFreeNotRunCaveat()
+    public void ForPackage_LegacyJsonWithoutStatus_YieldsFlagFreeCaveats()
     {
         const string legacyJson = """
             {
@@ -348,7 +382,7 @@ public sealed class AnalysisCompletenessTests
                 "Id": "Legacy.Package",
                 "Version": "1.0.0",
                 "Authors": "Old Author",
-                "Description": "A report serialized before the OSV status field existed.",
+                "Description": "A report serialized before the OSV/YARA status fields existed.",
                 "Dependencies": []
               },
               "AnalyzedAt": "2020-01-01T00:00:00+00:00",
@@ -362,8 +396,16 @@ public sealed class AnalysisCompletenessTests
         var assessment = CompletenessAssessment.ForPackage(restored!);
 
         Assert.Equal(VulnerabilityScanStatus.NotChecked, restored!.VulnerabilitiesStatus);
-        Assert.Equal(new[] { "the known-vulnerability check did not run" }, assessment.Caveats);
-        Assert.DoesNotContain("--no-vulns", Assert.Single(assessment.Caveats));
+        Assert.Equal(YaraScanStatus.Unavailable, restored!.YaraScanStatus);
+        Assert.Equal(
+            new[]
+            {
+                "the known-vulnerability check did not run",
+                "the YARA malware-signature scan did not complete",
+            },
+            assessment.Caveats);
+        Assert.DoesNotContain("--no-vulns", string.Join("; ", assessment.Caveats));
+        Assert.DoesNotContain("--no-yara", string.Join("; ", assessment.Caveats));
     }
 
     // Non-double-counting: a file that produced NO report is its own (larger) caveat, so it must not also skew the
@@ -580,13 +622,25 @@ public sealed class AnalysisCompletenessTests
     internal static PackageCapabilityReport Package(params AssemblyScanResult[] assemblies) =>
         PackageWith(assemblies);
 
-    // A scan-package report defaulting to "the vuln check completed and found nothing" and "no transitive walk was
-    // asked for", so each test's caveat is the ONLY one and the assertions stay unconfounded.
+    // A scan-package report defaulting to "the vuln check completed and found nothing", "no transitive walk was
+    // asked for", and "the YARA scan completed and found nothing" (yaraStatus:), so each test's caveat is the ONLY
+    // one and the assertions stay unconfounded.
+    //
+    // ⚠️ yaraStatus defaults to Completed HERE, deliberately different from PackageCapabilityReport's own record
+    // default (YaraScanStatus.Unavailable — see PackageModel.cs, and that default is CORRECT and must not change: it
+    // is what makes pre-ADR-0027 legacy JSON read as "not verified" rather than falsely clean). A fresh test fixture
+    // is not legacy JSON — it is a report this file is constructing on purpose, so it must say what it means: tests
+    // about something else default to a completed, clean YARA scan (matching vulnStatus's existing precedent below),
+    // and tests ABOUT the YARA caveat pass yaraStatus explicitly (see the ForPackage_WhenYaraScan... tests below and
+    // CompletenessExitCodeTests.ScanPackage_WhenYaraScanUnavailable_ExitsThree). Leaving every fixture at the
+    // record's own default made every package fixture in this suite silently incomplete/"Not verified" the moment
+    // ADR-0027 wired Unavailable into CompletenessAssessment.ForPackage — this default is the fix.
     internal static PackageCapabilityReport PackageWith(
         IEnumerable<AssemblyScanResult>? assemblies = null,
         VulnerabilityScanStatus vulnStatus = VulnerabilityScanStatus.Completed,
         DependencyResolutionStatus resolution = DependencyResolutionStatus.NotRun,
-        IEnumerable<ScriptFinding>? scriptFindings = null) =>
+        IEnumerable<ScriptFinding>? scriptFindings = null,
+        YaraScanStatus yaraStatus = YaraScanStatus.Completed) =>
         new(
             new PackageIdentityInfo("Some.Package", "1.0.0", "Author", "A package.", []),
             Epoch,
@@ -594,7 +648,8 @@ public sealed class AnalysisCompletenessTests
             [],
             scriptFindings?.ToArray() ?? [],
             VulnerabilitiesStatus: vulnStatus,
-            DependencyResolution: resolution);
+            DependencyResolution: resolution,
+            YaraScanStatus: yaraStatus);
     #endregion
 
     #region Fields

@@ -15,10 +15,33 @@ using Xunit;
 /// binary is invoked; the environment variables are saved and restored around each test (see
 /// <see cref="YaraEnvScope"/>). The Windows in-process backend and the nonzero-exit / timeout process paths are
 /// covered by a manual Windows smoke, not here (native, engine-dependent — same posture as the network sources).
+/// <para>
+/// <b>LibYaraScanner.Available cannot be pinned from this test project</b> (ADR 0027 decision 4, task constraint D):
+/// this project targets <c>net10.0</c> only, and <c>LibYaraScanner</c> lives entirely behind <c>#if WINDOWS</c>
+/// (compiled only into <c>net10.0-windows</c>) — the type is simply absent from this build, not merely untested.
+/// Even a <c>net10.0-windows</c> test project would not make the health check meaningful without the native
+/// <c>libyara.NET</c> dependency actually deployed, which per ADR 0027 is not currently shipped ("the backend
+/// itself is still broken — publishing the native libyara core is a dependency decision reserved for the user").
+/// So the only thing a same-process test could pin today is <c>Available == false</c>, which is already covered
+/// indirectly by <see cref="Silvergun.PackageAnalysis.NuGet.PackageScanner"/>'s try/catch defense-in-depth pin in
+/// <c>YaraScanPackageWiringTests.Scan_WithThrowingFakeScanner_SwallowsFailure_ReportIntact</c> (the same failure
+/// shape <c>LibYaraScanner</c> would produce when its native dependency fails to load). A real assertion on
+/// <c>LibYaraScanner.Available</c> needs a Windows machine with the native core actually present, which is exactly
+/// the "manual Windows smoke" this class already defers to.
+/// </para>
 /// </summary>
 public sealed class YaraScannerTests
 {
     #region Methods
+    // ADR 0027 decision 4 / code-review fix: NullYaraScanner is the "no backend configured at all" case, so its
+    // health signal must read false — the whole point of Available existing is that a caller must be able to ask
+    // directly rather than infer health from exception-absence (every backend never throws by contract).
+    [Fact]
+    public void NullYaraScanner_Available_IsAlwaysFalse()
+    {
+        Assert.False(NullYaraScanner.Instance.Available);
+    }
+
     // The null backend returns empty for a normal path...
     [Fact]
     public void NullYaraScanner_ScanFile_ReturnsEmpty()
@@ -67,6 +90,25 @@ public sealed class YaraScannerTests
 
         Assert.False(scanner.Available);
         Assert.Empty(scanner.ScanFile("/tmp/whatever.dll"));
+    }
+
+    // ADR 0027 decision 4: Available must also reflect a GENUINE positive — a SILVERGUN_YARA_PATH that resolves to
+    // an existing file. Available checks only file existence (never launches the process), so a dummy placeholder
+    // file is enough to pin the healthy side of the health-signal contract without invoking a real yara binary.
+    [Fact]
+    public void YaraCliScanner_WhenPathResolvesToAnExistingFile_IsAvailable()
+    {
+        var yara = Path.Combine(Path.GetTempPath(), "silvergun-fake-yara-" + Guid.NewGuid().ToString("N") + ".exe");
+        File.WriteAllText(yara, "not a real yara binary");
+        using var _ = new YaraEnvScope(yara, yarac: null);
+        try
+        {
+            Assert.True(new YaraCliScanner().Available);
+        }
+        finally
+        {
+            File.Delete(yara);
+        }
     }
 
     // Even when unavailable, scanning a real existing file must not throw and must be empty.

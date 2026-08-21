@@ -23,10 +23,18 @@ using static Silvergun.CLI.Tests.AnalysisCompletenessTests;
 /// <c>docs/agent/tasks/capability-manifest-reframe.md</c>: both verb renderers now print a "Capability manifest"
 /// section — EVERY <see cref="Capability"/> value, present or absent, in enum-declaration order, derived at render
 /// time from the report's existing <see cref="ApiCallFinding"/> rows (<see cref="ReportTheme.CapabilityManifest"/>)
-/// — alongside a one-line honesty note (<see cref="ReportTheme.CapabilityGateNote"/>) that <c>--strict</c> still
-/// gates on ANY capability present. This is presentation only: no report record gained a member, so <c>--json</c>
-/// must stay unaffected, and neither exit-code seam (<see cref="Program.AnalyzeExitCode"/> /
-/// <see cref="Program.ScanPackageExitCode"/>) may move because of it.
+/// — alongside a one-line honesty note (<see cref="ReportTheme.CapabilityGateNote"/>).
+/// <para>
+/// ⚠️ ADR-0027 CORRECTION: that note used to read "...--strict still fails the build on ANY capability present
+/// here", and section F below used to pin capability presence alone AS a --strict gate (exit 2). ADR-0027 measured
+/// capability presence at 67-81% benign-package prevalence with zero user-would-accept hits and STOPPED it gating —
+/// the note now reads "...--strict does not fail the build on capability presence alone (ADR-0027)", and section F
+/// pins the new behavior (exit 0) under the same name-what-it-pins discipline the rest of this file uses.
+/// </para>
+/// This remains presentation only: no report record gained a member, so <c>--json</c> must stay unaffected, and
+/// neither exit-code seam (<see cref="Program.AnalyzeExitCode"/> / <see cref="Program.ScanPackageExitCode"/>) may
+/// move BECAUSE OF THE MANIFEST'S RENDERING — capability presence's actual (non-)effect on the exit code is a
+/// separate, ADR-0027 fact pinned here regardless of whether the manifest renders at all.
 /// <para>
 /// Reports are constructed directly via <see cref="AnalysisCompletenessTests"/>'s fixtures (mirrors
 /// <c>IndicatorHeadlineAndRenderingTests</c>' own rationale): the point is to pin the manifest's behavior over
@@ -314,9 +322,13 @@ public sealed class CapabilityManifestTests
     }
     #endregion
 
-    #region Methods — F: exit-code independence
+    #region Methods — F: exit-code independence (ADR-0027: capability presence alone does NOT gate --strict)
+    // RENAMED from "...StillExitsTwo_..." (which asserted the policy ADR-0027 overturned): capability presence was
+    // measured at 67-81% benign-package prevalence with zero user-would-accept hits and STOPPED gating --strict.
+    // This now pins the opposite exit code from what it used to, by name, while still proving the manifest renders
+    // regardless — the two facts (rendering vs. gating) are independent and both asserted here.
     [Fact]
-    public void AnalyzeExitCode_StrictWithOnlyCapabilityFindings_StillExitsTwo_WhileManifestStillRenders()
+    public void AnalyzeExitCode_StrictWithOnlyCapabilityFindings_DoesNotGate_WhileManifestStillRenders()
     {
         var report = AssemblyReport(methodsTotal: 5, methodsSkipped: 0, findings: [Finding(Capability.FileSystem)]);
         var (console, writer) = PlainConsole();
@@ -324,7 +336,7 @@ public sealed class CapabilityManifestTests
         AssemblyReportRenderer.Render(console, report);
 
         Assert.Contains("Capability manifest", writer.ToString());
-        Assert.Equal(2, Program.AnalyzeExitCode(report, strict: true, allowIncomplete: false));
+        Assert.Equal(0, Program.AnalyzeExitCode(report, strict: true, allowIncomplete: false));
     }
 
     [Fact]
@@ -341,7 +353,7 @@ public sealed class CapabilityManifestTests
     }
 
     [Fact]
-    public void ScanPackageExitCode_StrictWithOnlyCapabilityFindings_StillExitsTwo_WhileManifestStillRenders()
+    public void ScanPackageExitCode_StrictWithOnlyCapabilityFindings_DoesNotGate_WhileManifestStillRenders()
     {
         var report = Package(Analyzed("lib/net10.0/A.dll", 5, 0, findings: [Finding(Capability.NativeInterop)]));
         var (console, writer) = PlainConsole();
@@ -349,7 +361,7 @@ public sealed class CapabilityManifestTests
         PackageReportRenderer.Render(console, report, "Some.Package.1.0.0.nupkg");
 
         Assert.Contains("Capability manifest", writer.ToString());
-        Assert.Equal(2, Program.ScanPackageExitCode(report, strict: true, allowIncomplete: false));
+        Assert.Equal(0, Program.ScanPackageExitCode(report, strict: true, allowIncomplete: false));
     }
 
     [Fact]
@@ -362,6 +374,25 @@ public sealed class CapabilityManifestTests
 
         AssertManifestListsAllCapabilities(writer.ToString(), NoCounts);
         Assert.Equal(0, Program.ScanPackageExitCode(report, strict: true, allowIncomplete: false));
+    }
+    #endregion
+
+    #region Methods — H: ADR-0027's CapabilityGateNote text itself (task E — this note has been wrong once already)
+    // The note's text is asserted directly (not just "appears once" — see helper below), for both rich and plain,
+    // because it is the report's ONE honesty statement about what the manifest does and does not control, and it has
+    // already been shipped wrong once (see the class doc's CORRECTION above): a blanket "do not touch the manifest"
+    // constraint preserved a now-false sentence past the moment ADR-0027 made it false. Pinning only "appears once"
+    // would not have caught that regression — the note appeared exactly once either way.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CapabilityGateNote_StatesCapabilityPresenceDoesNotFailTheBuild(bool rich)
+    {
+        var note = ReportTheme.CapabilityGateNote(rich);
+
+        Assert.Contains("does not fail the build", note, StringComparison.Ordinal);
+        Assert.Contains("ADR-0027", note, StringComparison.Ordinal);
+        Assert.DoesNotContain("still fails the build", note, StringComparison.Ordinal);
     }
     #endregion
 
@@ -459,12 +490,16 @@ public sealed class CapabilityManifestTests
         }
     }
 
+    // ADR-0027 re-aim: the note's WORDING changed from "--strict still fails the build on ANY capability present
+    // here" to "--strict does not fail the build on capability presence alone (ADR-0027)" — this helper only checks
+    // the note appears exactly once and names --strict; the exact CURRENT wording is pinned separately (and more
+    // strongly) by CapabilityGateNote_StatesCapabilityPresenceDoesNotFailTheBuild above, so a future wording change
+    // fails there with an unambiguous diff rather than silently loosening this shared "appears once" helper.
     private static void AssertGateNoteAppearsExactlyOnce(string output)
     {
         var lines = output.Split('\n').Select(l => l.TrimEnd('\r'));
         var line = Assert.Single(lines, l => l.Contains(GateNoteAnchor, StringComparison.Ordinal));
         Assert.Contains("--strict", line, StringComparison.Ordinal);
-        Assert.Contains("ANY capability present", line, StringComparison.Ordinal);
     }
 
     private static ApiCallFinding Finding(
@@ -580,6 +615,7 @@ public sealed class CapabilityManifestTests
     [
         "Package", "AnalyzedAt", "Assemblies", "Scripts", "ScriptFindings", "ProjectHealth",
         "YaraFindings", "Vulnerabilities", "VulnerabilitiesStatus", "ResolvedDependencies", "DependencyResolution",
+        "YaraScanStatus",
     ];
 
     private static readonly string CliExe = ApphostPath.Resolve(AppContext.BaseDirectory, "Silvergun.CLI");

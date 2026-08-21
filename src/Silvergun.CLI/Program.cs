@@ -341,11 +341,17 @@ internal static class Program
 
         var report = scanResult.Value;
 
-        // YARA was requested (not --no-yara) but no engine is available on this platform/config: note it on stderr
-        // (like --health) so stdout/JSON stay unaffected. On Windows the in-process backend is always present.
-        if (!noYara && !YaraScannerFactory.BackendAvailable)
+        // YARA was requested (not --no-yara) but the scan did not actually complete: note it on stderr (like
+        // --health) so stdout/JSON stay unaffected. Keyed on the REPORT's own YaraScanStatus — the ground truth of
+        // what just happened — rather than YaraScannerFactory.BackendAvailable, which only proves a backend was
+        // SELECTED, not that it worked: on the net10.0-windows build LibYaraScanner is always selected but can still
+        // fail to initialize (its native libyara.NET dependency missing), which previously produced zero findings
+        // with NO advisory at all — exactly the silent-zero defect this check exists to close. Printed at most once
+        // per run (report.YaraScanStatus is a single value for the whole scan, not per-file).
+        if (!noYara && report.YaraScanStatus == YaraScanStatus.Unavailable)
             Console.Error.WriteLine(
-                "scan-package: YARA malware-signature scanning unavailable (no engine; set SILVERGUN_YARA_PATH to the yara binary). Continuing without it.");
+                "scan-package: YARA malware-signature scanning did NOT run (backend unavailable or failed to initialize); " +
+                "findings for this package are NOT verified against the malware-signature ruleset.");
 
         // --health is the ONLY thing that adds a network call to scan-package (the offline scan above stays offline).
         // Repo resolution is offline (local nuspec); only the GitHub lookup is network. Advisory — never touches the
@@ -425,37 +431,45 @@ internal static class Program
         return ScanPackageExitCode(report, strict, allowIncomplete);
     }
 
-    // The analyze verb's exit code, as ONE seam over the whole report (ADR 0024). This exists so the gate predicate —
-    // which findings gate, and how incompleteness is derived — is written exactly once: the run method above and the
-    // invariant tests both call this, instead of the tests keeping a hand-written third copy that can silently drift
-    // from what ships. Recomputing the assessment here (rather than taking it as a parameter) is deliberate: it is
-    // pure, and it makes the exit code derive from the report itself, exactly as the footer does.
+    // The analyze verb's exit code, as ONE seam over the whole report (ADR 0024, gate narrowed by ADR 0027). This
+    // exists so the gate predicate — which findings gate, and how incompleteness is derived — is written exactly
+    // once: the run method above and the invariant tests both call this, instead of the tests keeping a hand-written
+    // third copy that can silently drift from what ships. Recomputing the assessment here (rather than taking it as
+    // a parameter) is deliberate: it is pure, and it makes the exit code derive from the report itself, exactly as
+    // the footer does.
+    //
+    // ⚠️ ADR 0027 KNOWN CONSEQUENCE, not an oversight: `analyze` never carries YARA or vulnerability data (both are
+    // scan-package-only, package/network-level checks) — only capability, obfuscation, and gating-indicator findings
+    // exist at the single-assembly level, and the first two stopped gating (ADR 0027 Table C: 67-81% and 29% benign
+    // prevalence respectively, zero user-would-accept hits). So `analyze --strict` gates on GATING INDICATOR FINDINGS
+    // ALONE (ADR 0026's three categories — CallbackDomain, DynamicDns, CredentialPath), plus incompleteness (exit 3)
+    // when the analysis could not fully run. Capability and obfuscation findings are still fully analyzed, rendered,
+    // and set the "Findings present" headline — they just never fail the build.
     internal static int AnalyzeExitCode(AssemblyAnalysisReport report, bool strict, bool allowIncomplete) =>
         ScanExitCode(
             strict,
-            report.Capabilities.Findings.Count > 0,
-            (report.Obfuscation?.Findings.Count ?? 0) > 0,
-            hasScriptFindings: false,
+            hasYaraFindings: false,
+            hasVulnerabilities: false,
             hasGatingIndicatorFindings: report.Indicators?.Findings.Any(f => ReportTheme.IsGatingIndicatorCategory(f.Category)) ?? false,
             isIncomplete: !CompletenessAssessment.ForAssembly(report).IsComplete,
             allowIncomplete: allowIncomplete);
 
-    // The scan-package verb's exit code, as ONE seam over the whole report (see AnalyzeExitCode).
-    // Only findings from real script/build content gate --strict. Findings from the declarative package manifest
-    // (ScriptFindingSource.PackageMetadata) are advisory: still reported in full — human report, footer counts and
-    // --json are unchanged — but they never fail CI on their own, mirroring the ADR 0015 "advisory never gates"
-    // precedent. Nothing in a .nuspec executes, and code-oriented rules over prose are noise by construction
-    // (docs/agent/tasks/script-rule-precision.md). Indicator findings gate too, but ONLY the three ADR 0026
-    // categories (ReportTheme.IsGatingIndicatorCategory), aggregated across every packaged assembly that produced an
-    // IndicatorReport — mirrors AllFindings' own "across every analyzed assembly" posture.
+    // The scan-package verb's exit code, as ONE seam over the whole report (see AnalyzeExitCode). Gate narrowed by
+    // ADR 0027 to three sources — vulnerabilities, YARA findings, and gating indicator findings — a 0/100 benign
+    // failure rate measured over the same pinned corpus that showed the PRIOR six-source gate failing 72% of benign
+    // packages, every single one for a noise-class reason (capability presence, obfuscation, or a script heuristic —
+    // never a real CVE, a YARA name-match, or a gating indicator). Capability, obfuscation, and Script-sourced script
+    // findings are STILL fully analyzed, rendered, and set the "Findings present" headline — they simply no longer
+    // fail the build. (Findings from the declarative package manifest, ScriptFindingSource.PackageMetadata, were
+    // already excluded from the gate before this ADR and remain so — nothing in a .nuspec executes.) Indicator
+    // findings gate too, but ONLY the three ADR 0026 categories (ReportTheme.IsGatingIndicatorCategory), aggregated
+    // across every packaged assembly that produced an IndicatorReport — mirrors AllFindings' own "across every
+    // analyzed assembly" posture.
     internal static int ScanPackageExitCode(PackageCapabilityReport report, bool strict, bool allowIncomplete) =>
         ScanExitCode(
             strict,
-            report.AllFindings.Any(),
-            report.Assemblies.Any(a => (a.Obfuscation?.Findings.Count ?? 0) > 0),
-            report.ScriptFindings.Any(f => f.Source == ScriptFindingSource.Script),
-            report.YaraFindings.Count > 0,
-            report.Vulnerabilities.Count > 0,
+            hasYaraFindings: report.YaraFindings.Count > 0,
+            hasVulnerabilities: report.Vulnerabilities.Count > 0,
             hasGatingIndicatorFindings: report.Assemblies
                 .Where(a => a.Indicators is not null)
                 .Any(a => a.Indicators!.Findings.Any(f => ReportTheme.IsGatingIndicatorCategory(f.Category))),
@@ -540,7 +554,10 @@ internal static class Program
         if (!emitted)
             return 1;
 
-        return ScanExitCode(strict, findings.Count > 0, hasObfuscation: false, hasScriptFindings: false);
+        // check-squat's typosquat findings are not one of ADR 0027's six analyze/scan-package sources — they are the
+        // ONLY finding this verb ever produces, so its --strict gate is direct rather than routed through
+        // ScanExitCode's per-source policy (which now names exactly three sources that do not apply here).
+        return strict && findings.Count > 0 ? 2 : 0;
     }
 
     // Runs the advisory project-health lookup for one package id (ADR 0015): resolve its GitHub repo from nuget.org
@@ -774,12 +791,22 @@ internal static class Program
     internal static bool IsValidSource(string? source) =>
         source is null || source.Trim().ToLowerInvariant() is "nuget" or "librariesio";
 
-    // The CI gate exit-code decision (ADR 0003, amended by ADR 0024, amended by ADR 0026). Pure — the run methods
-    // pass the concrete gate inputs so this stays independently testable. YARA findings are high-confidence IOCs and
-    // gate too (ADR 0016); known vulnerabilities gate too (ADR 0017); exactly three indicator categories gate too
-    // (ADR 0026 — CallbackDomain, DynamicDns, CredentialPath, per ReportTheme.IsGatingIndicatorCategory; every other
-    // indicator category, including the other four discriminating ones, is reported but never reaches this call as
-    // "true"). The trailing defaults keep the existing non-package callers/tests unchanged.
+    // The CI gate exit-code decision (ADR 0003, amended by ADR 0024/0026, NARROWED by ADR 0027). Pure — the run
+    // methods pass the concrete gate inputs so this stays independently testable.
+    //
+    // ⚠️ ADR 0027: capability findings, obfuscation findings, and Script-sourced script findings USED to gate here
+    // and no longer do — measured at 67-81%, 29%, and 25% benign-package prevalence respectively (100-package
+    // corpus), with EVERY one of the resulting 72/100 benign `--strict` failures landing on a noise-class reason,
+    // never one a user would accept as signal. Their booleans are REMOVED from this signature on purpose (not just
+    // ignored/defaulted): a future attempt to re-gate on them must fail to compile here, rather than silently
+    // reintroducing a 72%-false-positive policy. They are still fully analyzed, rendered, and set the "Findings
+    // present" headline — only build failure changed.
+    //
+    // What still gates, all three measured at 0/100 benign failures: YARA findings (ADR 0016 — a malware-family
+    // name-match is the strongest signal the tool has), known vulnerabilities (ADR 0017 — a real CVE should fail a
+    // build), and exactly three gating indicator categories (ADR 0026 — CallbackDomain, DynamicDns, CredentialPath,
+    // per ReportTheme.IsGatingIndicatorCategory; every other indicator category, including the other four
+    // discriminating ones, is reported but never reaches this call as "true").
     //
     // Precedence, exactly:
     //   1. strict && any finding gate  => 2. A tripped gate is accurate and actionable, so 2 BEATS 3 even when the
@@ -789,10 +816,9 @@ internal static class Program
     //   3. else => 0, which (with --allow-incomplete off) means the report's footer says "Clean".
     // --allow-incomplete only suppresses the GATE; the caveats are always disclosed (report + one stderr note).
     internal static int ScanExitCode(
-        bool strict, bool hasCapabilityFindings, bool hasObfuscation, bool hasScriptFindings,
-        bool hasYaraFindings = false, bool hasVulnerabilities = false, bool hasGatingIndicatorFindings = false,
-        bool isIncomplete = false, bool allowIncomplete = false) =>
-        strict && (hasCapabilityFindings || hasObfuscation || hasScriptFindings || hasYaraFindings || hasVulnerabilities || hasGatingIndicatorFindings) ? 2
+        bool strict, bool hasYaraFindings, bool hasVulnerabilities, bool hasGatingIndicatorFindings,
+        bool isIncomplete, bool allowIncomplete) =>
+        strict && (hasYaraFindings || hasVulnerabilities || hasGatingIndicatorFindings) ? 2
         : isIncomplete && !allowIncomplete ? 3
         : 0;
 

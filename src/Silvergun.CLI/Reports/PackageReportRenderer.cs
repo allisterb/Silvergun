@@ -45,9 +45,12 @@ internal static class PackageReportRenderer
         console.WriteLine();
 
         // Malware-signature (YARA) hits are the highest-signal section (named-family IOCs, ADR 0016) — render it
-        // prominently. Rendered consistently with Script findings (a green "(none)" when clean).
+        // prominently. Rendered consistently with Script findings (a green "(none)" when clean) EXCEPT that an
+        // Unavailable scan (backend never selected, or selected but failed to initialize/scan — the libyara.NET
+        // native-dependency defect this section exists to surface) is shown as a visible warning, never as the
+        // clean "(none)": an empty YaraFindings list is not evidence of a clean package unless the scan actually ran.
         console.Write(Section(rich, "Malware signatures (YARA)"));
-        console.Write(YaraFindingsWidget(rich, report.YaraFindings));
+        console.Write(YaraFindingsWidget(rich, report.YaraFindings, report.YaraScanStatus));
         console.WriteLine();
 
         // Known-vulnerability (OSV.dev) hits are concrete, actionable IOCs (ADR 0017) — render prominently, like YARA.
@@ -143,9 +146,10 @@ internal static class PackageReportRenderer
 
     // Text-rule (backdoor/LOLBAS) matches in packaged script/build content and package metadata (ADR 0012). Findings are
     // aggregated per (rule, file), so a rule matching N times renders once with an "xN" repetition marker; manifest-sourced
-    // rows carry a "[metadata]" marker (like "[dependency]" in the vulnerabilities section) because they are advisory and
-    // do not gate --strict. All rule/path text is untrusted package content and passes through Esc; the repetition glyph
-    // comes from the theme so the default mode stays ASCII-only (ADR 0014).
+    // rows carry a "[metadata]" marker (like "[dependency]" in the vulnerabilities section) because they are advisory —
+    // manifest content, not executable script. Neither Source gates --strict (ADR 0027 stopped Script-sourced findings
+    // gating too). All rule/path text is untrusted package content and passes through Esc; the repetition glyph comes
+    // from the theme so the default mode stays ASCII-only (ADR 0014).
     private static IRenderable ScriptFindingsWidget(bool rich, IReadOnlyList<ScriptFinding> findings)
     {
         if (findings.Count == 0)
@@ -178,8 +182,17 @@ internal static class PackageReportRenderer
     // Named-malware (YARA) matches across the extracted files (ADR 0016): rule name (red — high-confidence IOC),
     // malware family / detection-name, category, and the matched package-relative file. All fields are untrusted
     // package/rule content and pass through Esc; color is stripped in the default (ASCII) mode.
-    private static IRenderable YaraFindingsWidget(bool rich, IReadOnlyList<YaraFinding> findings)
+    //
+    // Keyed on YaraScanStatus exactly like VulnerabilitiesWidget is keyed on VulnerabilityScanStatus: Unavailable
+    // (no backend selected, or a selected backend failed to initialize/scan) is a prominent warning — NOT the clean
+    // "(none)" — because an empty finding list from a scan that never ran is not evidence of anything. NotRun
+    // (--no-yara) stays dim, like OSV's NotChecked. Only a genuinely Completed scan earns the green "(none)".
+    private static IRenderable YaraFindingsWidget(bool rich, IReadOnlyList<YaraFinding> findings, YaraScanStatus status)
     {
+        if (status == YaraScanStatus.NotRun)
+            return new Markup("[grey](not run)[/]");
+        if (status == YaraScanStatus.Unavailable)
+            return new Markup($"[yellow]{Esc(AlertGlyph(rich))} YARA malware-signature scan did NOT run (backend unavailable) {Dash(rich)} NOT verified[/]");
         if (findings.Count == 0)
             return new Markup("[green](none)[/]");
 
@@ -401,17 +414,20 @@ internal static class PackageReportRenderer
     // CompletenessAssessment (ADR 0024).
     //
     // "Attention" is DELIBERATELY WIDER than the --strict gate, and must not be confused with it. It counts ANY
-    // script finding (report.ScriptFindings.Count > 0); the gate in Program.ScanPackageExitCode filters them to
-    // Source == ScriptFindingSource.Script. So a package whose only finding comes from the .nuspec
-    // (Source = PackageMetadata) prints "Findings present" here and still exits 0 under --strict. Both sides are
-    // correct: a human should see manifest findings, and per script-rule-precision they must not fail CI because
-    // nothing in a .nuspec executes. This is exactly why ADR 0024's invariant is an IMPLICATION — footer says
-    // "Clean" ⇒ exit 0 — and not a biconditional (see the "CORRECTED AGAIN" note in that ADR). The same relationship
-    // held for indicators too (ARCHITECT DECISION 2026-08-03): the seven discriminating categories widen "Attention"
-    // regardless of --strict. As of ADR 0026 this is no longer purely one-directional for indicators — three of the
-    // seven (CallbackDomain, DynamicDns, CredentialPath) ALSO gate --strict — but "Attention" is still the wider set:
-    // a package whose only finding is one of the four non-gating discriminating categories (e.g. RawCodeHost) prints
-    // "Findings present" here and still exits 0 under --strict, exactly like the script/nuspec case above.
+    // script finding (report.ScriptFindings.Count > 0), from either Source. As of ADR 0027, Program.ScanPackageExitCode
+    // does not consult ScriptFindings at all — neither Source == Script (25% benign prevalence) nor Source ==
+    // PackageMetadata (always advisory) gates. So a package whose only findings are script/nuspec matches prints
+    // "Findings present" here and still exits 0 under --strict. Both sides are correct: a human should see every
+    // script/manifest finding, and CI must not fail on a source measured too common in ordinary packages to be
+    // signal. This is exactly why ADR 0024's invariant is an IMPLICATION — footer says "Clean" ⇒ exit 0 — and not a
+    // biconditional (see the "CORRECTED AGAIN" note in that ADR). The same relationship holds for capability,
+    // obfuscation, and indicators too (ARCHITECT DECISION 2026-08-03 for indicators): capability/obfuscation presence
+    // and the seven discriminating indicator categories widen "Attention" regardless of --strict. As of ADR 0026 this
+    // is no longer purely one-directional for indicators — three of the seven (CallbackDomain, DynamicDns,
+    // CredentialPath) ALSO gate --strict — but "Attention" is still the wider set: a package whose only finding is a
+    // capability/obfuscation presence, or one of the four non-gating discriminating indicator categories (e.g.
+    // RawCodeHost), prints "Findings present" here and still exits 0 under --strict, exactly like the script/nuspec
+    // case above.
     private static void Footer(IAnsiConsole console, bool rich, PackageCapabilityReport report)
     {
         var allFindings = report.AllFindings.ToList();
@@ -440,7 +456,12 @@ internal static class PackageReportRenderer
 
         console.MarkupLine(report.YaraFindings.Count > 0
             ? $"[grey]Malware signatures (YARA):[/] [bold red]{report.YaraFindings.Count} match(es)[/]"
-            : "[grey]Malware signatures (YARA):[/] [green]none[/]");
+            : report.YaraScanStatus switch
+            {
+                YaraScanStatus.Unavailable => "[grey]Malware signatures (YARA):[/] [yellow]not verified (scan did not run)[/]",
+                YaraScanStatus.NotRun => "[grey]Malware signatures (YARA):[/] [grey]not run[/]",
+                _ => "[grey]Malware signatures (YARA):[/] [green]none[/]",
+            });
 
         console.MarkupLine(report.Vulnerabilities.Count > 0
             ? $"[grey]Known vulnerabilities (OSV):[/] [bold red]{report.Vulnerabilities.Count} finding(s)[/]"

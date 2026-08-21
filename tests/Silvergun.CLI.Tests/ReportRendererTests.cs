@@ -12,6 +12,7 @@ using Silvergun.CodeAnalysis.IL;
 using Silvergun.Intel;
 using Silvergun.PackageAnalysis.NuGet;
 using Silvergun.PackageAnalysis.NuGet.Squats;
+using Silvergun.PackageAnalysis.NuGet.Yara;
 
 using Xunit;
 
@@ -243,10 +244,13 @@ public sealed class ReportRendererTests
     {
         var (console, writer) = PlainConsole();
         var pkg = new PackageIdentityInfo("Benign.Package", "1.0.0", "Author", null, []);
-        // A fully-clean scan is also a VERIFIED one: the OSV check completed and found nothing. Without Completed the
-        // footer would (correctly) read "not verified", so the clean headline requires an actually-completed vuln check.
+        // A fully-clean scan is also a VERIFIED one: the OSV check AND the YARA scan completed and found nothing.
+        // Without Completed on both the footer would (correctly) read "not verified" — ADR-0027 decision 4 wires
+        // YaraScanStatus.Unavailable (the record's own default) into the same completeness caveat as an OSV outage —
+        // so the clean headline requires both checks to be explicitly marked as having completed.
         var report = new PackageCapabilityReport(pkg, Epoch, [], [], [],
-            VulnerabilitiesStatus: VulnerabilityScanStatus.Completed);
+            VulnerabilitiesStatus: VulnerabilityScanStatus.Completed,
+            YaraScanStatus: YaraScanStatus.Completed);
 
         var ex = Record.Exception(() => PackageReportRenderer.Render(console, report, "Benign.nupkg"));
 

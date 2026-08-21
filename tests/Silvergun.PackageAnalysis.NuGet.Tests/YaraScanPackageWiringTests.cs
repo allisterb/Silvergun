@@ -38,6 +38,8 @@ public sealed class YaraScanPackageWiringTests : IClassFixture<PackageFixture>
 
         Assert.True(scan.IsSuccess, scan.Message);
         Assert.True(fake.Invoked, "The injected backend should have been driven by ScanYara.");
+        // Available + findings returned => Completed (ADR 0027 decision 4 status matrix).
+        Assert.Equal(YaraScanStatus.Completed, scan.Value.YaraScanStatus);
 
         var finding = Assert.Single(scan.Value.YaraFindings);
         Assert.Equal(RlRuleName, finding.RuleName);
@@ -93,10 +95,15 @@ public sealed class YaraScanPackageWiringTests : IClassFixture<PackageFixture>
         Assert.False(fake.Invoked, "runYara: false must short-circuit before touching the backend.");
         Assert.NotNull(scan.Value.YaraFindings);
         Assert.Empty(scan.Value.YaraFindings);
+        // runYara: false => NotRun, the explicit opt-out — never touched, never Completed/Unavailable.
+        Assert.Equal(YaraScanStatus.NotRun, scan.Value.YaraScanStatus);
     }
 
     // A backend that throws from ScanDirectory is swallowed (never-throws): Scan still succeeds with empty
-    // YaraFindings and the rest of the report intact (identity + inventoried assemblies).
+    // YaraFindings and the rest of the report intact (identity + inventoried assemblies). This is the regression pin
+    // for the real LibYaraScanner-with-missing-native shape (ADR 0027 decision 4): Available reports true (the fake
+    // never says otherwise), but the call itself faults, and the try/catch in PackageScanner.ScanYara — defense in
+    // depth, not the primary detection mechanism — must still map that to Unavailable, not Completed.
     [Fact]
     public void Scan_WithThrowingFakeScanner_SwallowsFailure_ReportIntact()
     {
@@ -108,10 +115,47 @@ public sealed class YaraScanPackageWiringTests : IClassFixture<PackageFixture>
         Assert.True(fake.Invoked, "The throwing backend should have been reached before it faulted.");
         Assert.NotNull(scan.Value.YaraFindings);
         Assert.Empty(scan.Value.YaraFindings);
+        Assert.Equal(YaraScanStatus.Unavailable, scan.Value.YaraScanStatus);
 
         // The rest of the report is untouched by the YARA failure.
         Assert.Equal(PackageFixture.PkgAId, scan.Value.Package.Id);
         Assert.Contains(scan.Value.Assemblies, a => Path.GetFileName(a.Assembly.RelativePath) == fixture.FixtureDllName);
+    }
+
+    // Available == false: PackageScanner.ScanYara must gate on the health signal BEFORE calling ScanDirectory at
+    // all — not merely discard whatever it returns. Made discriminating per the task brief: the unavailable fake
+    // still carries a real fileName/rule pair that WOULD produce a non-empty hit if ScanDirectory were called, so a
+    // regression that skips the Available check (and calls ScanDirectory anyway) would surface as a NON-EMPTY
+    // YaraFindings list here, not merely a wrong status enum.
+    [Fact]
+    public void Scan_WithUnavailableFakeScanner_NeverCallsScanDirectory_AndStatusIsUnavailable()
+    {
+        var fake = FakeYaraScanner.Unavailable(fixture.FixtureDllName, RlRuleName);
+
+        var scan = PackageScanner.Scan(fixture.PkgAPath, yaraScanner: fake);
+
+        Assert.True(scan.IsSuccess, scan.Message);
+        Assert.False(fake.Invoked, "An unavailable backend's ScanDirectory must never be called.");
+        Assert.NotNull(scan.Value.YaraFindings);
+        Assert.Empty(scan.Value.YaraFindings);
+        Assert.Equal(YaraScanStatus.Unavailable, scan.Value.YaraScanStatus);
+    }
+
+    // Available == true, but nothing in the tree matches: a healthy backend that scanned and found nothing must
+    // read Completed, not Unavailable — this is the "scanned, clean" case that must stay distinguishable from
+    // "did not scan" (the whole point of YaraScanStatus existing).
+    [Fact]
+    public void Scan_WithAvailableFakeScannerAndNoMatches_YieldsCompletedWithEmptyFindings()
+    {
+        var fake = FakeYaraScanner.NoMatches();
+
+        var scan = PackageScanner.Scan(fixture.PkgAPath, yaraScanner: fake);
+
+        Assert.True(scan.IsSuccess, scan.Message);
+        Assert.True(fake.Invoked, "An available backend must be driven by ScanYara.");
+        Assert.NotNull(scan.Value.YaraFindings);
+        Assert.Empty(scan.Value.YaraFindings);
+        Assert.Equal(YaraScanStatus.Completed, scan.Value.YaraScanStatus);
     }
 
     // --no-yara (runYara: false) short-circuits before any backend is touched: findings are empty, never null.
@@ -123,6 +167,7 @@ public sealed class YaraScanPackageWiringTests : IClassFixture<PackageFixture>
         Assert.True(scan.IsSuccess, scan.Message);
         Assert.NotNull(scan.Value.YaraFindings);
         Assert.Empty(scan.Value.YaraFindings);
+        Assert.Equal(YaraScanStatus.NotRun, scan.Value.YaraScanStatus);
     }
 
     // The opt-out path on a package with no assemblies is equally empty and safe (no engine, no throw).
@@ -133,11 +178,18 @@ public sealed class YaraScanPackageWiringTests : IClassFixture<PackageFixture>
 
         Assert.True(scan.IsSuccess, scan.Message);
         Assert.Empty(scan.Value.YaraFindings);
+        Assert.Equal(YaraScanStatus.NotRun, scan.Value.YaraScanStatus);
     }
 
     // Whatever the backend outcome, YaraFindings is a non-null list — the default runYara path never leaves it null.
     // (Offline with no engine configured this is also empty; on a real engine it is engine-dependent, so only the
     // non-null contract is asserted here — the injected-fake match flow above validates enrichment deterministically.)
+    // Deliberately NOT asserting YaraScanStatus here: this path drives the process-wide
+    // YaraScannerFactory.Shared, memoized on first touch by ANY test in this process from whatever
+    // SILVERGUN_YARA_PATH happened to be set at that moment (unlike YaraScannerTests, which scopes the env var
+    // per-test) — pinning a status here would coincidentally reflect execution order/host environment rather than
+    // this test's own behavior. NullYaraScanner/YaraCliScanner's own Available signal is pinned directly and
+    // deterministically in YaraScannerTests instead.
     [Fact]
     public void Scan_DefaultRunYara_LeavesYaraFindingsNonNull()
     {
@@ -152,23 +204,44 @@ public sealed class YaraScanPackageWiringTests : IClassFixture<PackageFixture>
     // A configurable fake IYaraScanner with no real engine. It overrides ScanDirectory to (optionally) enumerate the
     // real extraction dir and report a single hit against a chosen file, or to throw. It records whether it ran so a
     // test can assert the short-circuit / reached-before-fault paths. ScanFile is unused by these tests.
+    //
+    // Available is an explicit, constructible flag (ADR 0027 decision 4 code-review fix) so both the healthy and
+    // unhealthy paths are exercisable from the same fake. Unavailable() deliberately still wires a real
+    // fileName/rule pair, so ScanDirectory would return a NON-EMPTY hit if it were ever called — the point being to
+    // prove PackageScanner.ScanYara gates on Available BEFORE calling ScanDirectory at all, rather than merely
+    // discarding whatever ScanDirectory happens to return.
     private sealed class FakeYaraScanner : IYaraScanner
     {
-        private FakeYaraScanner(string? fileName, string rule, IReadOnlyList<string> tags, bool @throw)
+        private FakeYaraScanner(string? fileName, string rule, IReadOnlyList<string> tags, bool @throw, bool available)
         {
             _fileName = fileName;
             _rule = rule;
             _tags = tags;
             _throw = @throw;
+            Available = available;
         }
+
+        public bool Available { get; }
 
         public bool Invoked { get; private set; }
 
         public static FakeYaraScanner HittingFileNamed(string fileName, string rule, IReadOnlyList<string> tags) =>
-            new(fileName, rule, tags, @throw: false);
+            new(fileName, rule, tags, @throw: false, available: true);
+
+        // Available, but nothing in the tree matches _fileName (null) — a healthy backend that scanned and found
+        // nothing, distinguishable from "did not scan at all" only by YaraScanStatus.Completed.
+        public static FakeYaraScanner NoMatches() =>
+            new(fileName: null, rule: string.Empty, Array.Empty<string>(), @throw: false, available: true);
 
         public static FakeYaraScanner Throwing() =>
-            new(fileName: null, rule: string.Empty, Array.Empty<string>(), @throw: true);
+            new(fileName: null, rule: string.Empty, Array.Empty<string>(), @throw: true, available: true);
+
+        // Unhealthy: Available is false, so PackageScanner.ScanYara must never reach ScanDirectory at all. If it
+        // were (incorrectly) called anyway, this still reports a real hit — making a wiring regression that skips
+        // the Available check fail loudly (non-empty findings from a status that must read Unavailable) rather than
+        // passing by coincidence because the fake had nothing to find.
+        public static FakeYaraScanner Unavailable(string fileName, string rule) =>
+            new(fileName, rule, Array.Empty<string>(), @throw: false, available: false);
 
         public IReadOnlyList<YaraMatch> ScanFile(string fullPath) => Array.Empty<YaraMatch>();
 

@@ -46,8 +46,9 @@ public sealed record PackageScript(
 
 /// <summary>
 /// What kind of packaged content a <see cref="ScriptFinding"/> came from. <see cref="Script"/> is executable
-/// script/build content and gates <c>--strict</c>; <see cref="PackageMetadata"/> is declarative manifest content
-/// (the <c>.nuspec</c>), which is reported but advisory only — it never gates (mirrors ADR 0015).
+/// script/build content; <see cref="PackageMetadata"/> is declarative manifest content (the <c>.nuspec</c>). Both
+/// are reported but neither gates <c>--strict</c> (ADR-0027 stopped <see cref="Script"/> gating — 25% benign
+/// prevalence; <see cref="PackageMetadata"/> was always advisory-only, mirroring ADR 0015).
 /// </summary>
 public enum ScriptFindingSource { Script, PackageMetadata }
 
@@ -68,7 +69,7 @@ public sealed record ScriptFinding(
     string? Excerpt,            // matched snippet, when available
     IReadOnlyList<string> Tags,
     int Occurrences = 1,        // additive; number of matches of this rule in this file (>= 1)
-    ScriptFindingSource Source = ScriptFindingSource.Script);   // additive; Script gates --strict, PackageMetadata is advisory
+    ScriptFindingSource Source = ScriptFindingSource.Script);   // additive; neither Source gates --strict (ADR-0027)
 
 /// <summary>The outcome of scanning a single <see cref="PackageAssembly"/>.</summary>
 public sealed record AssemblyScanResult(
@@ -98,7 +99,11 @@ public sealed record PackageCapabilityReport(
     IReadOnlyList<VulnerabilityFinding>? Vulnerabilities = null,   // additive (ADR 0017); OSV known-vuln hits, attached by the CLI, empty when skipped/unavailable
     VulnerabilityScanStatus VulnerabilitiesStatus = VulnerabilityScanStatus.NotChecked,   // additive (ADR 0017 amendment); whether the OSV check ran — old JSON ⇒ NotChecked
     IReadOnlyList<ResolvedDependency>? ResolvedDependencies = null,   // additive (ADR 0018); resolver-lite transitive set, attached by the CLI, empty when depth 0 / not run
-    DependencyResolutionStatus DependencyResolution = DependencyResolutionStatus.NotRun)   // additive (ADR 0018); whether transitive resolution ran — old JSON ⇒ NotRun
+    DependencyResolutionStatus DependencyResolution = DependencyResolutionStatus.NotRun,   // additive (ADR 0018); whether transitive resolution ran — old JSON ⇒ NotRun
+    // additive; whether the YARA pass actually completed (see Yara/YaraScanStatus.cs). Old JSON — including every
+    // report the libyara.NET native-dependency defect silently produced — predates this tracking and deserializes
+    // to Unavailable ("not verified"), never a false Completed; PackageScanner.Scan sets the real value going forward.
+    YaraScanStatus YaraScanStatus = YaraScanStatus.Unavailable)
 {
     #region Properties
     /// <summary>

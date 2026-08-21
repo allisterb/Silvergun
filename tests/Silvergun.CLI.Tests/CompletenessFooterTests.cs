@@ -10,6 +10,7 @@ using Silvergun.CLI.Reports;
 using Silvergun.CodeAnalysis.IL;
 using Silvergun.Intel;
 using Silvergun.PackageAnalysis.NuGet;
+using Silvergun.PackageAnalysis.NuGet.Yara;
 
 using Xunit;
 
@@ -181,6 +182,40 @@ public sealed class CompletenessFooterTests
         PackageReportRenderer.Render(console, PackageWith(vulnStatus: status), "Some.Package.1.0.0.nupkg");
 
         Assert.Equal(FooterHeadline.NotVerified(console, caveat), FooterHeadline.Of(writer));
+    }
+
+    // ADR-0027 decision 4: an unverified YARA scan downgrades the footer exactly like an OSV outage does.
+    [Fact]
+    public void PackageFooter_WhenYaraScanUnavailable_SaysNotVerifiedNeverClean()
+    {
+        var (console, writer) = PlainConsole();
+
+        PackageReportRenderer.Render(
+            console, PackageWith(yaraStatus: YaraScanStatus.Unavailable), "Some.Package.1.0.0.nupkg");
+
+        Assert.Equal(
+            FooterHeadline.NotVerified(console, "the YARA malware-signature scan did not complete"),
+            FooterHeadline.Of(writer));
+    }
+
+    // The explicit --no-yara opt-out (NotRun) must NOT downgrade the footer: the caller chose to skip the scan,
+    // which is a different statement from an outage, so a report that is otherwise complete still reads "Clean".
+    [Fact]
+    public void PackageFooter_WhenYaraScanNotRun_StillSaysClean()
+    {
+        var (console, writer) = PlainConsole();
+
+        PackageReportRenderer.Render(
+            console,
+            Package(Analyzed("lib/net10.0/A.dll", methodsTotal: 7, methodsSkipped: 0)) with
+            {
+                YaraScanStatus = YaraScanStatus.NotRun
+            },
+            "Some.Package.1.0.0.nupkg");
+
+        Assert.Equal(
+            FooterHeadline.Clean(console, FooterHeadline.PackageCleanDetail),
+            FooterHeadline.Of(writer));
     }
 
     [Fact]

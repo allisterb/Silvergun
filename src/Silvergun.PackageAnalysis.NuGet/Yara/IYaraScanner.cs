@@ -12,6 +12,21 @@ namespace Silvergun.PackageAnalysis.NuGet.Yara;
 /// </summary>
 public interface IYaraScanner
 {
+    #region Properties
+    /// <summary>
+    /// Whether this backend actually initialized and can scan — a genuine health signal, not a "was a backend
+    /// selected" check. This exists because every implementation below contracts to <b>never throw</b>: an
+    /// unhealthy backend that quietly returns empty is otherwise indistinguishable from a healthy one that found
+    /// nothing, so callers (<c>PackageScanner.ScanYara</c>) must be able to ask the backend directly rather than
+    /// infer health from whether scanning throws. Deliberately has <b>no default implementation</b>: a health
+    /// signal that defaults to healthy is worthless, and this project has already shipped that exact defect
+    /// twice (once here, once as the <c>YaraScanStatus</c> gap it was added to close — see ADR 0027). Every
+    /// implementation, present and future, must state its health explicitly; there is no safe convention to
+    /// forget.
+    /// </summary>
+    bool Available { get; }
+    #endregion
+
     #region Methods
     /// <summary>
     /// Scans the single file at <paramref name="fullPath"/> and returns the rule hits, or an empty list

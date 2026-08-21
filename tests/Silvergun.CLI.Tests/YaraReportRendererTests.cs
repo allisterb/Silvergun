@@ -124,7 +124,11 @@ public sealed class YaraReportRendererTests
             YaraFindings: findings,
             // The YARA-clean footer asserts "Clean", which now requires a COMPLETED vuln check (an unverified scan reads
             // "not verified"). This section's tests aren't about OSV, so treat the vuln check as completed-and-clean.
-            VulnerabilitiesStatus: VulnerabilityScanStatus.Completed);
+            VulnerabilitiesStatus: VulnerabilityScanStatus.Completed,
+            // These tests are about the YARA widget's escaping/encoding, not about the Unavailable state (that has its
+            // own coverage) — the default status is now Unavailable (ADR: silent-zero fix), so a report built WITH
+            // findings must say so explicitly or the widget would (correctly) show "did not run" over real findings.
+            YaraScanStatus: YaraScanStatus.Completed);
     }
     #endregion
 
