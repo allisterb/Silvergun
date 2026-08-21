@@ -57,9 +57,11 @@ internal static class PackageReportRenderer
         console.WriteLine();
 
         // Indicator (network / sensitive-target) findings, aggregated across every packaged assembly — selective by
-        // design (see IndicatorsWidget). Excluded from the --strict exit-code gate (out of scope per the task spec —
-        // a presentation-only addition, not a gate), but the seven discriminating categories DO set the Assessment
-        // headline (ARCHITECT DECISION 2026-08-03) — see Footer below.
+        // design (see IndicatorsWidget). The seven discriminating categories set the Assessment headline (ARCHITECT
+        // DECISION 2026-08-03) — see Footer below. As of ADR 0026, a strict subset of three of those seven
+        // (CallbackDomain, DynamicDns, CredentialPath — ReportTheme.IsGatingIndicatorCategory) ALSO gate --strict
+        // (Program.ScanPackageExitCode); the remaining four discriminating categories, and every counts-only
+        // category, still never affect the exit code.
         console.Write(Section(rich, "Indicators"));
         console.Write(IndicatorsWidget(rich, report.Assemblies));
         console.WriteLine();
@@ -405,9 +407,11 @@ internal static class PackageReportRenderer
     // correct: a human should see manifest findings, and per script-rule-precision they must not fail CI because
     // nothing in a .nuspec executes. This is exactly why ADR 0024's invariant is an IMPLICATION — footer says
     // "Clean" ⇒ exit 0 — and not a biconditional (see the "CORRECTED AGAIN" note in that ADR). The same relationship
-    // now applies to indicators (ARCHITECT DECISION 2026-08-03): the seven discriminating categories also widen
-    // "Attention" without touching the exit code, so a CallbackDomain-only package prints "Findings present" and
-    // still exits 0 without --strict.
+    // held for indicators too (ARCHITECT DECISION 2026-08-03): the seven discriminating categories widen "Attention"
+    // regardless of --strict. As of ADR 0026 this is no longer purely one-directional for indicators — three of the
+    // seven (CallbackDomain, DynamicDns, CredentialPath) ALSO gate --strict — but "Attention" is still the wider set:
+    // a package whose only finding is one of the four non-gating discriminating categories (e.g. RawCodeHost) prints
+    // "Findings present" here and still exits 0 under --strict, exactly like the script/nuspec case above.
     private static void Footer(IAnsiConsole console, bool rich, PackageCapabilityReport report)
     {
         var allFindings = report.AllFindings.ToList();
@@ -447,13 +451,15 @@ internal static class PackageReportRenderer
                 _ => "[grey]Known vulnerabilities (OSV):[/] [green]none[/]",
             });
 
-        // Indicators are DELIBERATELY excluded from the exit code (out of scope per the task spec — a
-        // presentation-only addition, not a gate) but the seven discriminating categories (the same split
-        // IndicatorsWidget renders as detail rows, IsDiscriminatingIndicatorCategory) DO set "attention" below —
-        // ARCHITECT DECISION 2026-08-03: a CallbackDomain-only finding must not print "Clean" while the callback
-        // domain sits in the section right above it. The noisy categories (ReflectionTypeName/GenericUrl/
-        // PrivateIpLiteral) stay excluded from attention. Truncated is still surfaced here as a visible caveat,
-        // naming which assembly(ies): "could not analyse everything" must never read as a clean result.
+        // The seven discriminating categories (the same split IndicatorsWidget renders as detail rows,
+        // IsDiscriminatingIndicatorCategory) set "attention" below — ARCHITECT DECISION 2026-08-03: a
+        // CallbackDomain-only finding must not print "Clean" while the callback domain sits in the section right
+        // above it. The noisy categories (ReflectionTypeName/GenericUrl/PrivateIpLiteral) stay excluded from
+        // attention. As of ADR 0026, three of the seven discriminating categories (CallbackDomain, DynamicDns,
+        // CredentialPath — IsGatingIndicatorCategory) ALSO gate --strict via Program.ScanPackageExitCode; this
+        // "attention" count still counts all seven, since attention is always the wider set (see the Footer-level
+        // note above). Truncated is still surfaced here as a visible caveat, naming which assembly(ies): "could not
+        // analyse everything" must never read as a clean result.
         var indicatorReports = report.Assemblies.Where(a => a.Indicators is not null).ToList();
         var indicatorCount = indicatorReports.Sum(a => a.Indicators!.Findings.Count);
         var discriminatingIndicatorCount = indicatorReports

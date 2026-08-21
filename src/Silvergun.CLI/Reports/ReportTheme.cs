@@ -106,13 +106,35 @@ internal static class ReportTheme
     /// <para>ARCHITECT DECISION 2026-08-03: this same split also governs the Assessment headline — these seven
     /// categories DO set "attention" (so the headline reads "Findings present" rather than "Clean"), because a
     /// package whose only finding is e.g. a <see cref="IndicatorCategory.CallbackDomain"/> must not print "Clean"
-    /// with that finding listed in the section directly above it. It is still not a gate: neither this group nor
-    /// the counts-only categories ever affect the exit code.</para>
+    /// with that finding listed in the section directly above it. As of ADR 0026, a strict SUBSET of this group —
+    /// see <see cref="IsGatingIndicatorCategory"/> — also gates <c>--strict</c>; the remaining discriminating
+    /// categories, and every counts-only category, still never affect the exit code.</para>
     /// </summary>
     internal static bool IsDiscriminatingIndicatorCategory(IndicatorCategory category) => category is
         IndicatorCategory.CallbackDomain or IndicatorCategory.ExfilSink or IndicatorCategory.DynamicDns
         or IndicatorCategory.RawCodeHost or IndicatorCategory.CredentialPath or IndicatorCategory.AutorunRegistry
         or IndicatorCategory.PublicIpLiteral;
+
+    /// <summary>
+    /// The <see cref="IndicatorCategory"/> values that fail <c>--strict</c> (ADR 0026, "FINAL DECISION AS ACCEPTED"):
+    /// <see cref="IndicatorCategory.CallbackDomain"/>, <see cref="IndicatorCategory.DynamicDns"/>, and
+    /// <see cref="IndicatorCategory.CredentialPath"/> — each measured 0/113 contributing benign packages, including
+    /// groups hand-picked to trip them. <b>Gating set ⊂ discriminating set</b>, expressed structurally here (not just
+    /// documented) by requiring <see cref="IsDiscriminatingIndicatorCategory"/> first: a category can never gate
+    /// without also setting the headline, so the two lists cannot silently diverge.
+    /// <para>
+    /// Deliberately NOT gating, despite also being discriminating: <see cref="IndicatorCategory.ExfilSink"/> (0/78,
+    /// but 1/8 adversarial hits was a legitimate Discord logging sink), <see cref="IndicatorCategory.RawCodeHost"/>
+    /// and <see cref="IndicatorCategory.PublicIpLiteral"/> (both have measured legitimate uses), and
+    /// <see cref="IndicatorCategory.AutorunRegistry"/> (unmeasured — the adversarial corpus targeted Windows
+    /// Services, a different mechanism). <see cref="IndicatorCategory.ReflectionTypeName"/>,
+    /// <see cref="IndicatorCategory.GenericUrl"/>, and <see cref="IndicatorCategory.PrivateIpLiteral"/> are not
+    /// discriminating either, so they cannot reach this predicate's "true" branch.
+    /// </para>
+    /// </summary>
+    internal static bool IsGatingIndicatorCategory(IndicatorCategory category) =>
+        IsDiscriminatingIndicatorCategory(category) && category is
+            IndicatorCategory.CallbackDomain or IndicatorCategory.DynamicDns or IndicatorCategory.CredentialPath;
 
     /// <summary>
     /// Per-<see cref="IndicatorCategory"/> finding-count grid over EVERY category, including a count of zero — a

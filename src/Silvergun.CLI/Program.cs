@@ -293,7 +293,8 @@ internal static class Program
 
         // Indicators run off the SAME loaded analyzer too (indicator-cli-integration task, following the ADR 0010
         // obfuscation precedent exactly): one assembly load, three analyses. Best-effort — a failure leaves it null;
-        // deliberately NOT wired into completeness/the exit code (that gate is a separate ADR, see the task spec).
+        // deliberately NOT wired into completeness (still true). It IS wired into the exit code below, but ONLY for
+        // the three ADR 0026 gating categories (ReportTheme.IsGatingIndicatorCategory) — see AnalyzeExitCode.
         var indicatorResult = new IndicatorAnalysis(cci).Analyze();
         var indicators = indicatorResult.IsSuccess ? indicatorResult.Value : null;
 
@@ -435,6 +436,7 @@ internal static class Program
             report.Capabilities.Findings.Count > 0,
             (report.Obfuscation?.Findings.Count ?? 0) > 0,
             hasScriptFindings: false,
+            hasGatingIndicatorFindings: report.Indicators?.Findings.Any(f => ReportTheme.IsGatingIndicatorCategory(f.Category)) ?? false,
             isIncomplete: !CompletenessAssessment.ForAssembly(report).IsComplete,
             allowIncomplete: allowIncomplete);
 
@@ -443,7 +445,9 @@ internal static class Program
     // (ScriptFindingSource.PackageMetadata) are advisory: still reported in full — human report, footer counts and
     // --json are unchanged — but they never fail CI on their own, mirroring the ADR 0015 "advisory never gates"
     // precedent. Nothing in a .nuspec executes, and code-oriented rules over prose are noise by construction
-    // (docs/agent/tasks/script-rule-precision.md).
+    // (docs/agent/tasks/script-rule-precision.md). Indicator findings gate too, but ONLY the three ADR 0026
+    // categories (ReportTheme.IsGatingIndicatorCategory), aggregated across every packaged assembly that produced an
+    // IndicatorReport — mirrors AllFindings' own "across every analyzed assembly" posture.
     internal static int ScanPackageExitCode(PackageCapabilityReport report, bool strict, bool allowIncomplete) =>
         ScanExitCode(
             strict,
@@ -452,6 +456,9 @@ internal static class Program
             report.ScriptFindings.Any(f => f.Source == ScriptFindingSource.Script),
             report.YaraFindings.Count > 0,
             report.Vulnerabilities.Count > 0,
+            hasGatingIndicatorFindings: report.Assemblies
+                .Where(a => a.Indicators is not null)
+                .Any(a => a.Indicators!.Findings.Any(f => ReportTheme.IsGatingIndicatorCategory(f.Category))),
             isIncomplete: !CompletenessAssessment.ForPackage(report).IsComplete,
             allowIncomplete: allowIncomplete);
 
@@ -767,10 +774,12 @@ internal static class Program
     internal static bool IsValidSource(string? source) =>
         source is null || source.Trim().ToLowerInvariant() is "nuget" or "librariesio";
 
-    // The CI gate exit-code decision (ADR 0003, amended by ADR 0024). Pure — the run methods pass the concrete gate
-    // inputs so this stays independently testable. YARA findings are high-confidence IOCs and gate too (ADR 0016);
-    // known vulnerabilities gate too (ADR 0017). The trailing defaults keep the existing non-package callers/tests
-    // unchanged.
+    // The CI gate exit-code decision (ADR 0003, amended by ADR 0024, amended by ADR 0026). Pure — the run methods
+    // pass the concrete gate inputs so this stays independently testable. YARA findings are high-confidence IOCs and
+    // gate too (ADR 0016); known vulnerabilities gate too (ADR 0017); exactly three indicator categories gate too
+    // (ADR 0026 — CallbackDomain, DynamicDns, CredentialPath, per ReportTheme.IsGatingIndicatorCategory; every other
+    // indicator category, including the other four discriminating ones, is reported but never reaches this call as
+    // "true"). The trailing defaults keep the existing non-package callers/tests unchanged.
     //
     // Precedence, exactly:
     //   1. strict && any finding gate  => 2. A tripped gate is accurate and actionable, so 2 BEATS 3 even when the
@@ -781,9 +790,9 @@ internal static class Program
     // --allow-incomplete only suppresses the GATE; the caveats are always disclosed (report + one stderr note).
     internal static int ScanExitCode(
         bool strict, bool hasCapabilityFindings, bool hasObfuscation, bool hasScriptFindings,
-        bool hasYaraFindings = false, bool hasVulnerabilities = false,
+        bool hasYaraFindings = false, bool hasVulnerabilities = false, bool hasGatingIndicatorFindings = false,
         bool isIncomplete = false, bool allowIncomplete = false) =>
-        strict && (hasCapabilityFindings || hasObfuscation || hasScriptFindings || hasYaraFindings || hasVulnerabilities) ? 2
+        strict && (hasCapabilityFindings || hasObfuscation || hasScriptFindings || hasYaraFindings || hasVulnerabilities || hasGatingIndicatorFindings) ? 2
         : isIncomplete && !allowIncomplete ? 3
         : 0;
 

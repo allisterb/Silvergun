@@ -178,10 +178,13 @@ internal static class AssemblyReportRenderer
 
     // Qualitative footer: colored per-capability counts, obfuscation count, the IL coverage line, and the three-tier
     // Findings / Not verified / Clean headline. "Attention" is DELIBERATELY WIDER than the --strict gate (ARCHITECT
-    // DECISION 2026-08-03): the gate keys on capability OR obfuscation findings only, but the headline also fires on
-    // the seven discriminating indicator categories (IsDiscriminatingIndicatorCategory) so a CallbackDomain-only
-    // assembly cannot print "Clean" with the callback domain listed in the section above it. Neither indicator group
-    // affects the exit code. "Not verified" comes from the SHARED CompletenessAssessment the exit code uses
+    // DECISION 2026-08-03): the headline also fires on the seven discriminating indicator categories
+    // (IsDiscriminatingIndicatorCategory) so a CallbackDomain-only assembly cannot print "Clean" with the callback
+    // domain listed in the section above it. As of ADR 0026, the gate (Program.AnalyzeExitCode) keys on capability OR
+    // obfuscation findings OR one of three gating indicator categories (CallbackDomain, DynamicDns, CredentialPath —
+    // IsGatingIndicatorCategory); the remaining four discriminating categories, and every counts-only category,
+    // still never affect the exit code — "attention" stays the wider set. "Not verified" comes from the SHARED
+    // CompletenessAssessment the exit code uses
     // (ADR 0024) — so a run that skipped methods, or whose obfuscation analysis failed, can never read "Clean".
     private static void Footer(IAnsiConsole console, bool rich, AssemblyAnalysisReport report)
     {
@@ -201,13 +204,14 @@ internal static class AssemblyReportRenderer
             ? "[grey]Obfuscation:[/] [green]none[/]"
             : $"[grey]Obfuscation:[/] [orange1]{obfuscationCount} finding(s)[/]");
 
-        // Indicators are DELIBERATELY excluded from the exit code (out of scope per the task spec — a
-        // presentation-only addition, not a gate) but the seven discriminating categories (the same split
-        // IndicatorsWidget renders as detail rows, IsDiscriminatingIndicatorCategory) DO set "attention" below —
-        // ARCHITECT DECISION 2026-08-03: a CallbackDomain-only finding must not print "Clean" while the callback
-        // domain sits in the section right above it. The noisy categories (ReflectionTypeName/GenericUrl/
-        // PrivateIpLiteral) stay excluded from attention. Truncated is still surfaced here as a visible caveat:
-        // "could not analyse everything" must never read as a clean result.
+        // The seven discriminating categories (the same split IndicatorsWidget renders as detail rows,
+        // IsDiscriminatingIndicatorCategory) set "attention" below — ARCHITECT DECISION 2026-08-03: a
+        // CallbackDomain-only finding must not print "Clean" while the callback domain sits in the section right
+        // above it. The noisy categories (ReflectionTypeName/GenericUrl/PrivateIpLiteral) stay excluded from
+        // attention. As of ADR 0026, three of the seven (CallbackDomain, DynamicDns, CredentialPath —
+        // IsGatingIndicatorCategory) ALSO gate --strict via Program.AnalyzeExitCode; this "attention" count still
+        // counts all seven, since attention is always the wider set (see the Footer-level note above). Truncated is
+        // still surfaced here as a visible caveat: "could not analyse everything" must never read as a clean result.
         var indicatorCount = report.Indicators?.Findings.Count ?? 0;
         var discriminatingIndicatorCount = report.Indicators?.Findings
             .Count(f => IsDiscriminatingIndicatorCategory(f.Category)) ?? 0;
