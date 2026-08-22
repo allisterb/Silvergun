@@ -34,4 +34,18 @@ unexecuted assertions reads exactly like verification.
 - A wrong explanatory comment is worse than none — it persuades the next reader. Delete it, do not
   soften it.
 
+**Same rule at runtime, confirmed 2026-08-21 (the user pointed at it, and was right).** A caught,
+logged-and-ignored *runtime* diagnostic is the same defect signal as a suppressed compile warning.
+The in-process YARA scanner hung for >30 s per file; the whole team's hypotheses were about rule
+count, input size and matching cost. The actual culprit was a single warning line we had been
+printing and ignoring for weeks (`Failed to compile embedded YARA rules … unknown module "elf"`) —
+catching that per-file compile error left the native compiler poisoned, and the ruleset built from it
+was invalid (ADR-0028). The user's instinct — "start by capturing the compile warnings" — found it in
+three commands, before any code was written.
+
+**How to apply:** when a component misbehaves at *runtime*, read what its *load/compile/init* phase
+reported first, before theorising about the hot path. And treat `catch (X) { Warn(...); continue; }`
+over a third-party or native builder as suspect by default: an exception usually means the object is
+now invalid, and continuing to use it is worse than failing.
+
 Related: [[inert-guard-defect-class]], [[record-decisions-at-dispatch-time]], [[measure-before-designing]]

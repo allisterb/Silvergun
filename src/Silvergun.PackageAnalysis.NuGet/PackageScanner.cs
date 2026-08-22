@@ -118,13 +118,17 @@ public sealed class PackageScanner : Runtime
     // from YaraRuleIndex and a package-relative path.
     //
     // Status is derived from IYaraScanner.Available FIRST (ADR 0027 decision 4 code-review fix), not from whether
-    // ScanDirectory throws: every backend contracts to NEVER throw (IYaraScanner's doc comment) and swallows its
-    // own failures, so exception-absence carries no information — a NullYaraScanner (no backend configured at all,
-    // the common configuration) returns empty and throws nothing, which read as Completed before this fix. The
-    // try/catch below is kept as defense in depth, not the primary mechanism: it is what still catches
-    // LibYaraScanner when its native libyara.NET dependency fails to load — that failure can surface at a call
-    // site OUTSIDE any scanner's own guards (inside the interface's default ScanDirectory loop, or from
-    // LibYaraScanner.Available itself), so it genuinely escapes and is legitimately caught here. Never throws
+    // ScanDirectory throws: a backend swallows its own per-file failures (IYaraScanner's doc comment: never throws
+    // apart from one carve-out), so exception-absence carries no information — a NullYaraScanner (no backend
+    // configured at all, the common configuration) returns empty and throws nothing, which read as Completed before
+    // this fix. The try/catch below is therefore NOT redundant, and is more than defense in depth: it is what
+    // converts the one deliberate carve-out — a TimeoutException from LibYaraScanner.ScanFile, whose bound being
+    // reached means the engine's health can no longer be vouched for (ADR 0028 decision 10) — into Unavailable, and
+    // it is what still catches LibYaraScanner when its native libyara.NET dependency fails to load, since that
+    // failure can surface at a call site OUTSIDE any scanner's own guards (inside the interface's default
+    // ScanDirectory loop, or from LibYaraScanner.Available itself). What must NOT reach here is a single file's
+    // native scan error: that stays inside LibYaraScanner.ScanFile precisely because arriving here would discard
+    // every other file's findings and report a false Unavailable for the whole package. Never throws
     // overall — a failure (or an unhealthy backend) yields no findings AND YaraScanStatus.Unavailable, never a bare
     // empty list that would read as "scanned, clean". The catch is also why such a failure is logged exactly ONCE
     // per package scan, not once per file: an exception from ScanDirectory aborts its whole per-file loop

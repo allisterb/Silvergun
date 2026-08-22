@@ -1,7 +1,30 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <!-- The cross-platform suite is net10.0 and is validated on Linux/WSL; it must stay the ONLY TFM there.
+         On Windows we ALSO build net10.0-windows so the #if WINDOWS in-process YARA backend
+         (Silvergun.PackageAnalysis.NuGet.Yara.LibYaraScanner, ADR 0028) is reachable by a test at all — the
+         poisoned-compiler defect that ADR 0028 fixes was invisible to 70 Yara-named tests precisely because
+         that type is absent from the net10.0 build. Everything net10.0-windows-only lives behind #if WINDOWS
+         (see LibYaraScannerPoisoningTests.cs), so the net10.0 build is byte-for-byte the suite it always was. -->
+    <TargetFrameworks>net10.0</TargetFrameworks>
+    <TargetFrameworks Condition="'$(OS)' == 'Windows_NT'">net10.0;net10.0-windows</TargetFrameworks>
+    <!-- libyara.NET is a mixed-mode C++/CLI assembly with a native win-x64 payload: a RID-less (AnyCPU) test
+         host CANNOT load it. Pinning the RID on the inner net10.0-windows build (same reason as the
+         out-of-process YARA probe, docs/agent/tasks/yara-inprocess-timing-probe.md) makes a plain
+         `dotnet test` work as well as an explicit `-r win-x64`; the net10.0 build stays RID-less and
+         portable. -->
+    <RuntimeIdentifier Condition="'$(TargetFramework)' == 'net10.0-windows'">win-x64</RuntimeIdentifier>
+    <!-- A bare `dotnet test` on a multi-targeted test project dispatches one VSTest run PER TFM and, by
+         default, runs them CONCURRENTLY. The inner dispatch passes VSTestNoBuild=true, so what collides is
+         two concurrent TEST HOSTS over the same output — not the CS2012 build collision CLAUDE.md describes
+         for two parallel `dotnet test` invocations. It was observed here once as a run that silently
+         discovered 12 of 426 tests and still reported "Passed!". This is the knob the SDK added for exactly
+         that; BuildInParallel=false would also serialize ProjectReference builds and DispatchToInnerBuilds,
+         which is not needed. Prefer the explicit per-TFM commands anyway:
+           dotnet test <csproj> -f net10.0
+           dotnet test <csproj> -f net10.0-windows -r win-x64 -->
+    <TestTfmsInParallel>false</TestTfmsInParallel>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- net10.0-windows + an explicit win-x64 RID are BOTH required: libyara.NET is a mixed-mode C++/CLI
+         assembly with a native win-x64 payload, so a RID-less (AnyCPU) build produces an exe that cannot
+         load it. Build and run this probe as
+         `dotnet build <csproj> -c Release -r win-x64` then run bin/Release/net10.0-windows/win-x64/...exe.
+         A load failure without the RID is expected, not a bug to work around. -->
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- ProjectReference ONLY. libyara.NET arrives transitively from Silvergun.PackageAnalysis.NuGet's
+         net10.0-windows PackageReference; adding a PackageReference here is forbidden (CLAUDE.md). -->
+    <ProjectReference Include="..\..\src\Silvergun.PackageAnalysis.NuGet\Silvergun.PackageAnalysis.NuGet.csproj" />
+  </ItemGroup>
+
+</Project>

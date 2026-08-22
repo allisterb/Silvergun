@@ -13,6 +13,7 @@
 - [Reader choice: keep CCI](project_reader_choice_cci.md) — ILSpy/Cecil measured and rejected 2026-07-30; adoption scale ≠ hostile-input robustness; our robustness is in our layer
 - [Measure before designing](project_measure_before_designing.md) — spike first on ext/analysis-net claims; ALSO re-aggregate raw output yourself — 3 subagent reports contradicted their own data
 - [Opus cyber-filter on reviews](project_opus_cyber_filter_reviews.md) — Opus 4.8 specialists trip a cybersecurity safety filter on malware-adjacent code; re-dispatch on Sonnet with correctness-framed wording
+- [Test the shipping configuration](feedback_test_the_shipping_configuration.md) — a whole session of YARA measurements ran on an AnyCPU build the ADR never intended; check config before code
 - [Suppressed diagnostic = defect signal](feedback_suppressed_diagnostic_is_a_defect.md) — a subagent explaining why a warning is safe to suppress is usually wrong; the compiler isn't
 - [Record decisions at dispatch time](feedback_record_decisions_at_dispatch.md) — a dispatch prompt is invisible authorization; amend the spec BEFORE dispatching, not after review flags it
 - [Post-subagent repo hygiene checks](feedback_subagent_stray_memory.md) — stray `.claude/`, orphaned stash, and code-reviewer editing shipped src/ files
@@ -20,4 +21,5 @@
 - [Avoid the `find` command](feedback_avoid_find_command.md) — `find` AND `sed` are now DENIED in settings.json (find cost 3 incidents); use Glob/Grep/Read or PowerShell
 - [Email-literal redaction on file writes](feedback_email_literal_redaction.md) — literal `user@host` (e.g. `git@github.com`) is silently rewritten when written to a file; split the token
 - [docs/agent/ gitignored by design](feedback_agent_docs_gitignored.md) — user backs it up manually; stop raising it, but treat those files as append-mostly (no git history)
+- [Don't ship what Silvergun would flag](feedback_dogfood_constraint.md) — no runtime download-and-execute of engines; vendoring inside the signed artifact is the acceptable form
 - [Prefer PowerShell scripts](feedback_no_powershell.md) — REVERSED 2026-07-26: PowerShell now allowed/preferred over finicky Bash; also don't run test suites in parallel (CS2012)

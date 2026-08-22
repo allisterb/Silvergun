@@ -17,3 +17,5 @@
 - [Re-verify empirical code comments](feedback-reverify-empirical-code-comments.md) — reproduce cited timing/byte-count claims in scratchpad, don't trust the comment.
 - [indicator-cli-integration review](project_indicator-cli-integration.md) — clean CLI wiring; but bundled an out-of-scope src/ fix a sibling task's doc explicitly forbade making.
 - [capability-diff-versions review](project_capability-diff-versions.md) — live NUL-sentinel collision found by reproducing it, not reasoning about it; string-domain sentinels need this check whenever input is attacker-controlled.
+- [Task.Run + Wait(timeout) fault path](feedback_task-wait-timeout-fault-path.md) — Wait(timeout) throws on a faulted task, so a try/catch after the Wait never runs; trace all three exits.
+- [YARA compiler-poisoning review (ADR-0028)](project_yara-compiler-poisoning-review.md) — libyara.NET ownership facts, which quoted timings the TSV supports, and the round-2 test-host UB/parallelism hazards.
