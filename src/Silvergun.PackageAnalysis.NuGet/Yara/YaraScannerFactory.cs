@@ -10,7 +10,11 @@ namespace Silvergun.PackageAnalysis.NuGet.Yara;
 public static class YaraScannerFactory
 {
     #region Properties
-    /// <summary>The shared scanner for the whole process — the ruleset it wraps is compiled once.</summary>
+    /// <summary>The shared scanner for the whole process — the ruleset it wraps is compiled once.
+    /// <c>SILVERGUN_YARA_PATH</c> (and <c>SILVERGUN_YARAC_PATH</c>) are read exactly ONCE, when this property is
+    /// first touched: the backend selected then is the backend for the rest of the process lifetime, and changing
+    /// either variable afterwards has no effect on it. There is deliberately no reset hook — a security backend
+    /// that can be re-pointed mid-process is a backend an in-process caller can swap out.</summary>
     public static IYaraScanner Shared => shared.Value;
 
     /// <summary>

@@ -25,7 +25,10 @@ public enum YaraScanStatus
     /// status is derived by asking the backend directly, not by inferring health from a catch block. The remaining,
     /// rarer path is genuine defense in depth: a backend that reports <c>Available</c> can still fail at a call
     /// site outside its own guards (e.g. the Windows in-process engine's native dependency failing to load when its
-    /// types are first JIT-resolved), and that failure is still caught and mapped here.
+    /// types are first JIT-resolved), and that failure is still caught and mapped here. The same catch is how a
+    /// <b>partial</b> failure fails closed: a <see cref="YaraScanIncompleteException"/> means specific files are
+    /// known not to have been scanned (ADR 0029 decision 13), which is reported here rather than as a
+    /// <see cref="Completed"/> result that is quietly missing hits.
     /// <see cref="PackageCapabilityReport.YaraFindings"/> is empty in every case, but that emptiness is NOT
     /// evidence of a clean package — the files were never examined.</summary>
     Unavailable,

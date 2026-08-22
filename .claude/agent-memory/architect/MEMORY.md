@@ -21,5 +21,7 @@
 - [Avoid the `find` command](feedback_avoid_find_command.md) — `find` AND `sed` are now DENIED in settings.json (find cost 3 incidents); use Glob/Grep/Read or PowerShell
 - [Email-literal redaction on file writes](feedback_email_literal_redaction.md) — literal `user@host` (e.g. `git@github.com`) is silently rewritten when written to a file; split the token
 - [docs/agent/ gitignored by design](feedback_agent_docs_gitignored.md) — user backs it up manually; stop raising it, but treat those files as append-mostly (no git history)
+- [Empty is not clean](project_empty_is_not_clean.md) — 5 defects, one shape: a scan that never ran reporting zero findings; ADR-0030 is the invariant
+- [Linux-only defects](project_linux_only_defects.md) — 2 attacker-relevant path/filename bugs invisible on Windows; run WSL for anything parsing paths or subprocess output
 - [Don't ship what Silvergun would flag](feedback_dogfood_constraint.md) — no runtime download-and-execute of engines; vendoring inside the signed artifact is the acceptable form
 - [Prefer PowerShell scripts](feedback_no_powershell.md) — REVERSED 2026-07-26: PowerShell now allowed/preferred over finicky Bash; also don't run test suites in parallel (CS2012)

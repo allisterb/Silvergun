@@ -29,7 +29,13 @@ using Xunit;
 /// <c>LibYaraScanner.Available</c> needs a Windows machine with the native core actually present, which is exactly
 /// the "manual Windows smoke" this class already defers to.
 /// </para>
+/// <para>
+/// This class mutates the process-global <c>SILVERGUN_YARA_PATH</c>/<c>SILVERGUN_YARAC_PATH</c>, so it shares one
+/// xunit collection with every other class that does (see <see cref="YaraEnvCollection"/>); they used to run
+/// concurrently, and either could decide what the other's scanner latched onto.
+/// </para>
 /// </summary>
+[Collection(YaraEnvCollection.Name)]
 public sealed class YaraScannerTests
 {
     #region Methods
@@ -127,30 +133,6 @@ public sealed class YaraScannerTests
         {
             File.Delete(file);
         }
-    }
-    #endregion
-
-    #region Nested types
-    // Saves and restores both YARA path environment variables around a test (mirrors ProgramTests.ApiKeyScope),
-    // so a developer's real SILVERGUN_YARA_PATH cannot leak into — or be clobbered by — these tests.
-    private sealed class YaraEnvScope : IDisposable
-    {
-        public YaraEnvScope(string? yara, string? yarac)
-        {
-            _previousYara = Environment.GetEnvironmentVariable(YaraCliScanner.YaraPathVar);
-            _previousYarac = Environment.GetEnvironmentVariable(YaraCliScanner.YaracPathVar);
-            Environment.SetEnvironmentVariable(YaraCliScanner.YaraPathVar, yara);
-            Environment.SetEnvironmentVariable(YaraCliScanner.YaracPathVar, yarac);
-        }
-
-        public void Dispose()
-        {
-            Environment.SetEnvironmentVariable(YaraCliScanner.YaraPathVar, _previousYara);
-            Environment.SetEnvironmentVariable(YaraCliScanner.YaracPathVar, _previousYarac);
-        }
-
-        private readonly string? _previousYara;
-        private readonly string? _previousYarac;
     }
     #endregion
 }

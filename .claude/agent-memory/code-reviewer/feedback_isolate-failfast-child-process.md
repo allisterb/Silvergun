@@ -27,6 +27,18 @@ few minutes to revert -> rebuild -> run -> observe both output and host survival
 diff-check the restore, rather than accepting "the implementer reported X" as given. This is
 "verify, don't accept" applied specifically to uncatchable-crash regression tests.
 
+**Corollary — the tree-copy variant is strictly better than revert-in-place, and is an
+acceptable way for an implementer to establish "red".** Seen 2026-08-22 (ADR-0029 round 5): the
+author tar-copied `src/ ext/ tests/` into a scratch dir, restored the *defective* predicate in the
+copy, and measured there — repo never mutated, so there is no restore to forget or diff-check.
+Accept it when the numbers are self-validating: "N of the new cases fail" proves the mutation
+actually reached the compiled output, which is the one thing a copied tree can silently get wrong
+(a copied `obj/project.assets.json` holds absolute paths back to the original). Also check the
+report names which mutation each test caught — one mutation caught by exactly one test is evidence
+of targeting; the pre-existing suite passing under the mutation is the blind spot, measured.
+Repo-root files outside the copied set (here `nuget.config`) are a restore-only risk that fails
+loudly, not a silent one.
+
 **Corollary — a FailFast fixture goes blunt once the crash it names is point-fixed.** A *new*
 test that reuses an existing pathological shape to guard a *different* property is often
 non-discriminating, because the shape no longer crashes anything. Seen 2026-07-31 on

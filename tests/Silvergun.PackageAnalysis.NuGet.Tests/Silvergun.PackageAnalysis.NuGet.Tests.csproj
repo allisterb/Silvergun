@@ -41,6 +41,13 @@
     <ProjectReference Include="..\..\src\Silvergun.Intel\Silvergun.Intel.csproj" />
     <ProjectReference Include="..\..\src\Silvergun.PackageAnalysis.NuGet\Silvergun.PackageAnalysis.NuGet.csproj" />
     <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.Fixture\Silvergun.CodeAnalysis.IL.Tests.Fixture.csproj" />
+    <!-- Exe, so a plain ProjectReference copies its apphost next to this test assembly (the same mechanism
+         Silvergun.CodeAnalysis.IL.Tests uses for its child-process probes). The ADR 0029 fail-closed tests
+         spawn it two ways: as a stand-in `yara` binary that misbehaves on demand — which is what makes
+         "exited non-zero" and "outlived its timeout" testable on Windows as well as Linux — and as an
+         out-of-process host for YaraCliScanner, so the ruleset-preparation failure can be induced by
+         poisoning one process's temp directory instead of the whole test run's. -->
+    <ProjectReference Include="..\Silvergun.PackageAnalysis.NuGet.Tests.FakeYaraProbe\Silvergun.PackageAnalysis.NuGet.Tests.FakeYaraProbe.csproj" />
   </ItemGroup>
 
 </Project>

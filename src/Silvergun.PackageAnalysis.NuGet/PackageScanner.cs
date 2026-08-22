@@ -107,7 +107,8 @@ public sealed class PackageScanner : Runtime
         }
         catch (Exception ex)
         {
-            Warn("Script rule scanning failed for {0}: {1}", package.Identity.Id, ex.Message);
+            // Same reason as ScanYara's catch: the message can quote an attacker-authored entry name.
+            Warn("Script rule scanning failed for {0}: {1}", package.Identity.Id, YaraPathSafety.Escape(ex.Message));
             return Array.Empty<ScriptFinding>();
         }
     }
@@ -119,13 +120,15 @@ public sealed class PackageScanner : Runtime
     //
     // Status is derived from IYaraScanner.Available FIRST (ADR 0027 decision 4 code-review fix), not from whether
     // ScanDirectory throws: a backend swallows its own per-file failures (IYaraScanner's doc comment: never throws
-    // apart from one carve-out), so exception-absence carries no information — a NullYaraScanner (no backend
+    // apart from the two carve-outs), so exception-absence carries no information — a NullYaraScanner (no backend
     // configured at all, the common configuration) returns empty and throws nothing, which read as Completed before
     // this fix. The try/catch below is therefore NOT redundant, and is more than defense in depth: it is what
-    // converts the one deliberate carve-out — a TimeoutException from LibYaraScanner.ScanFile, whose bound being
-    // reached means the engine's health can no longer be vouched for (ADR 0028 decision 10) — into Unavailable, and
-    // it is what still catches LibYaraScanner when its native libyara.NET dependency fails to load, since that
-    // failure can surface at a call site OUTSIDE any scanner's own guards (inside the interface's default
+    // converts the deliberate carve-outs into Unavailable — a TimeoutException from LibYaraScanner.ScanFile, whose
+    // bound being reached means the engine's health can no longer be vouched for (ADR 0028 decision 10), and a
+    // YaraScanIncompleteException from YaraCliScanner.ScanDirectory, which means specific files (or, for a batch
+    // pass that never produced a usable run, all of them) are KNOWN not to have been scanned (ADR 0029 decisions 13
+    // and 14). It is also what still catches LibYaraScanner when its native libyara.NET dependency fails to load,
+    // since that failure can surface at a call site OUTSIDE any scanner's own guards (inside the interface's default
     // ScanDirectory loop, or from LibYaraScanner.Available itself). What must NOT reach here is a single file's
     // native scan error: that stays inside LibYaraScanner.ScanFile precisely because arriving here would discard
     // every other file's findings and report a false Unavailable for the whole package. Never throws
@@ -155,8 +158,12 @@ public sealed class PackageScanner : Runtime
         }
         catch (Exception ex)
         {
+            // ex.Message routinely quotes a path out of the package (a YaraScanIncompleteException names the
+            // offending entries; an IO error embeds the file name verbatim), and those names are attacker-authored:
+            // escape before logging so one cannot forge a line in our own log. Escape is idempotent, so a message
+            // that was already built from escaped text is unchanged.
             Warn("YARA scanning UNAVAILABLE for {0}: {1}. Malware-signature findings for this package are NOT verified.",
-                package.Identity.Id, ex.Message);
+                package.Identity.Id, YaraPathSafety.Escape(ex.Message));
             return (Array.Empty<YaraFinding>(), YaraScanStatus.Unavailable);
         }
     }

@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- An Exe, because the two things this fixture does BOTH need a real executable file on disk:
+         (1) stand in for the `yara` binary that YaraCliScanner launches by path, so a test can make that
+             process exit non-zero or outlive its timeout deterministically and on every platform; and
+         (2) host a YaraCliScanner in a CHILD process, so a test can poison that process's temp directory
+             (and only that process's) without mutating TMPDIR/TEMP for the rest of the xunit run.
+         A plain ProjectReference from the test project copies this apphost next to the test assembly, which
+         is how the tests locate it (ApphostPath.Resolve) — the same mechanism
+         Silvergun.CodeAnalysis.IL.Tests uses for its child-process probes. -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <!-- The name must not make YaraCliScanner.DeriveYarac find anything: it derives "<name>c" beside the
+         binary only when the name ends in "yara" (this one ends in "Probe"), and the fallback "yarac" does
+         not exist in the test output directory either. So no yarac process is ever launched on its behalf. -->
+    <AssemblyName>Silvergun.PackageAnalysis.NuGet.Tests.FakeYaraProbe</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- ProjectReference ONLY (CLAUDE.md forbids adding package references). Needed for harness mode, which
+         constructs the real YaraCliScanner. -->
+    <ProjectReference Include="..\..\src\Silvergun.PackageAnalysis.NuGet\Silvergun.PackageAnalysis.NuGet.csproj" />
+  </ItemGroup>
+
+</Project>
