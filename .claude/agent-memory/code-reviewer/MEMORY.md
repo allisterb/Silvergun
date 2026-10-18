@@ -19,4 +19,5 @@
 - [capability-diff-versions review](project_capability-diff-versions.md) — live NUL-sentinel collision found by reproducing it, not reasoning about it; string-domain sentinels need this check whenever input is attacker-controlled.
 - [Task.Run + Wait(timeout) fault path](feedback_task-wait-timeout-fault-path.md) — Wait(timeout) throws on a faulted task, so a try/catch after the Wait never runs; trace all three exits.
 - [YARA compiler-poisoning review (ADR-0028)](project_yara-compiler-poisoning-review.md) — libyara.NET ownership facts, which quoted timings the TSV supports, and the round-2 test-host UB/parallelism hazards.
+- [ADR-0030/0031 containment + anomalies review](project_adr0030-0031-containment-and-anomalies-review.md) — claim-once re-derived sound; the two shadowing shapes it still misses (trailing space/dot, duplicate names).
 - [ADR-0029 unsafe-path review](project_adr0029-unsafe-path-review.md) — rounds 1-5: the comparer mismatch, the truncate-at-C0 vs split-at-CR/LF mismatch in 17a, and why {LF,CR} is the real cut set.

@@ -39,31 +39,44 @@ internal static class YaraPathSafety
     }
 
     /// <summary>
-    /// Renders attacker-authored path text safe to log: every control, line/paragraph separator and bidi-control
-    /// character is replaced by a printable escape, so the text can never inject a line into our own log or
-    /// reorder what an operator reads. Ordinary paths (including non-ASCII segments) pass through unchanged.
-    /// Backslashes are NOT doubled — keeping Windows paths readable is worth the theoretical ambiguity, since the
-    /// escapes only ever stand in for characters that cannot legitimately appear in a path.
+    /// Renders attacker-authored path text safe to log: every control, line/paragraph separator, bidi-control and
+    /// invisible (zero-width, soft hyphen, Tag-block) character is replaced by a printable escape, so the text can
+    /// never inject a line into our own log, reorder what an operator reads, or hide itself from the reader
+    /// entirely. Ordinary paths (including non-ASCII segments and emoji) pass through unchanged. Backslashes are
+    /// NOT doubled — keeping Windows paths readable is worth the theoretical ambiguity, since the escapes only ever
+    /// stand in for characters that cannot legitimately appear in a path.
+    ///
+    /// Iteration is by <b>rune</b>, not by <c>char</c>: the Unicode Tag block (U+E0000–U+E007F) is astral, so a
+    /// char-wise loop only ever sees its surrogate halves, which are ≥ 0xD800 and match no predicate — the block
+    /// was structurally unreachable, and an escaper property-tested exhaustively "over the BMP" could not have
+    /// caught it (measured in <c>docs/agent/measurements/packaging-anomalies-top100-2026-08-22.md</c>). Escapes are
+    /// <c>\n</c>/<c>\r</c>/<c>\t</c>, then <c>\xNN</c> below U+0100, <c>\uXXXX</c> through the BMP, and
+    /// <c>\U000E0041</c> beyond it. A lone surrogate is not a code point at all; it decodes to U+FFFD and is
+    /// emitted as such, so no ill-formed UTF-16 reaches a log line or a JSON writer.
     /// </summary>
     internal static string Escape(string? text)
     {
-        if (string.IsNullOrEmpty(text) || !text.Any(NeedsEscape))
+        if (string.IsNullOrEmpty(text) || !text.Any(MayNeedEscape))
             return text ?? string.Empty;
 
         var sb = new StringBuilder(text.Length + 8);
-        foreach (var c in text)
+        foreach (var rune in text.EnumerateRunes())
         {
-            if (!NeedsEscape(c))
-                sb.Append(c);
-            else
-                sb.Append(c switch
+            var cp = rune.Value;
+            if (NeedsEscape(cp))
+                sb.Append(cp switch
                 {
                     Lf => "\\n",
                     Cr => "\\r",
                     Tab => "\\t",
-                    < (char)0x100 => "\\x" + ((int)c).ToString("x2"),
-                    _ => "\\u" + ((int)c).ToString("x4"),
+                    < 0x100 => "\\x" + cp.ToString("x2"),
+                    <= 0xFFFF => "\\u" + cp.ToString("x4"),
+                    _ => "\\U" + cp.ToString("X8"),
                 });
+            else if (rune.IsBmp)
+                sb.Append((char)cp);
+            else
+                sb.Append(rune.ToString());   // a surrogate pair, re-emitted verbatim (emoji, CJK ext, …)
         }
         return sb.ToString();
     }
@@ -71,15 +84,31 @@ internal static class YaraPathSafety
     // The C0 range — the definition of "unsafe name" (ADR 0029 decision 11).
     private static bool IsC0(char c) => c <= (char)0x1F;
 
-    // Everything the log must not carry raw: C0, DEL and the C1 controls, plus the Unicode line and paragraph
-    // separators and the bidirectional overrides/isolates (CLAUDE.md's hostile-text rules). A deliberate superset
-    // of IsC0: hiding or reordering text in front of a reader is a distinct attack from breaking the parser.
-    private static bool NeedsEscape(char c) =>
-        IsC0(c)
-        || c is >= (char)0x7F and <= (char)0x9F        // DEL and the C1 controls
-             or (char)0x2028 or (char)0x2029           // LINE / PARAGRAPH SEPARATOR
-             or >= (char)0x202A and <= (char)0x202E    // bidi embeddings and overrides
-             or >= (char)0x2066 and <= (char)0x2069;   // bidi isolates
+    // The cheap char-wise filter guarding the rune path: a string with no escapable BMP code unit AND no surrogate
+    // cannot change under Escape. Surrogates always route to the slow path — an astral code point may be Tag-block
+    // (invisible), and a lone surrogate must not be echoed back raw.
+    private static bool MayNeedEscape(char c) => NeedsEscape(c) || char.IsSurrogate(c);
+
+    // Everything the log must not carry raw, as a CODE POINT predicate. Three families, all of them things a
+    // package entry name has no legitimate use for (CLAUDE.md's hostile-text rules):
+    //   * parser attacks   — C0 (a deliberate superset of IsC0), DEL and the C1 controls;
+    //   * display attacks  — the line/paragraph separators and the bidi embeddings/overrides/isolates;
+    //   * invisibility     — zero-width characters, the marks, the word joiner and invisible operators, the BOM,
+    //                        the soft hyphen, and the astral Tag block (ADR 0031's InvisibleCharacter category,
+    //                        whose whole premise is that a reader cannot see it — reporting such a name with the
+    //                        character still in it reports nothing at all, ADR 0031 decision 4).
+    private static bool NeedsEscape(int cp) =>
+        cp <= 0x1F                                  // C0
+        || cp is 0x00AD                             // SOFT HYPHEN
+               or >= 0x7F and <= 0x9F               // DEL and the C1 controls
+               or >= 0x200B and <= 0x200D           // ZERO WIDTH SPACE / NON-JOINER / JOINER
+               or 0x200E or 0x200F                  // LEFT-TO-RIGHT and RIGHT-TO-LEFT MARK
+               or 0x2028 or 0x2029                  // LINE / PARAGRAPH SEPARATOR
+               or >= 0x202A and <= 0x202E           // bidi embeddings and overrides
+               or >= 0x2060 and <= 0x2064           // WORD JOINER and the invisible operators
+               or >= 0x2066 and <= 0x2069           // bidi isolates
+               or 0xFEFF                            // ZERO WIDTH NO-BREAK SPACE / BOM
+               or >= 0xE0000 and <= 0xE007F;        // Unicode Tag block (astral — see Escape)
     #endregion
 
     #region Fields

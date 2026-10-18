@@ -249,7 +249,11 @@ public sealed class YaraCliAttributionTests
         Assert.True(scan.IsSuccess, scan.Message);
         Assert.Equal(YaraScanStatus.Completed, scan.Value.YaraScanStatus);
         var finding = Assert.Single(scan.Value.YaraFindings);
-        Assert.Equal("content/a.bin\nZZZ", finding.RelativePath);
+        // The attributed path is the hostile entry, ESCAPED at the report boundary (ADR 0031 decision 4): the
+        // newline is rendered as a literal backslash-n, so the report/renderer/JSON never carry it raw. What
+        // matters for THIS test is unchanged — the hit is attributed to the hostile entry and not to its
+        // "content/a.bin" truncation, which the package also ships as a real, innocent file.
+        Assert.Equal(@"content/a.bin\nZZZ", finding.RelativePath);
         Assert.Equal(HermeticWiperSample.RuleName, finding.RuleName);
     }
     #endregion

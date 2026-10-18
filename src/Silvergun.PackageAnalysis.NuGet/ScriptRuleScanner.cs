@@ -399,12 +399,17 @@ public sealed class ScriptRuleScanner : Runtime
     }
 
     // Reads MatchRecord fields defensively — the engine populates a subset per match.
+    //
+    // RelativePath is escaped here, at the DTO boundary (ADR 0031 decision 4): it derives from an attacker-authored
+    // entry name, and on Linux the extractor writes control characters verbatim, so a "tools/pay<LF>load.ps1" would
+    // otherwise reach the report renderer raw and forge a table row. PackageScript.RelativePath already arrives
+    // escaped and Escape is idempotent, so this only adds cover for the arbitrary-path entry points.
     private static ScriptFinding MapFinding(MatchRecord match, string relativePath, ScriptFindingSource source) => new(
         RuleId: match.RuleId ?? match.Rule?.Id ?? string.Empty,
         RuleName: match.RuleName ?? match.Rule?.Name ?? string.Empty,
         Severity: match.Severity.ToString(),
         Confidence: match.Confidence.ToString(),
-        RelativePath: relativePath,
+        RelativePath: Yara.YaraPathSafety.Escape(relativePath),
         StartLine: match.StartLocationLine,
         Excerpt: NullIfEmpty(match.Excerpt) ?? NullIfEmpty(match.Sample),
         Tags: match.Tags?.ToArray() ?? Array.Empty<string>(),

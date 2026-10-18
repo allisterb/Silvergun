@@ -44,6 +44,15 @@ internal static class PackageReportRenderer
         console.Write(ScriptFindingsWidget(rich, report.ScriptFindings));
         console.WriteLine();
 
+        // Packaging anomalies (ADR 0031): hostile constructions in the DECLARED zip entry names. Placed here, with the
+        // container-level sections, because it describes the package as shipped rather than the content inside it —
+        // and it is read before the content findings for the same reason. An empty list is a genuine "(none)": unlike
+        // YARA/OSV this pass is pure, offline and cannot be unavailable, so there is no third state to distinguish.
+        // Reported only — nothing in this section gates --strict or moves any exit code (ADR 0031 decision 3).
+        console.Write(Section(rich, "Packaging anomalies"));
+        console.Write(PackagingAnomaliesWidget(rich, report.PackagingAnomalies));
+        console.WriteLine();
+
         // Malware-signature (YARA) hits are the highest-signal section (named-family IOCs, ADR 0016) — render it
         // prominently. Rendered consistently with Script findings (a green "(none)" when clean) EXCEPT that an
         // Unavailable scan (backend never selected, or selected but failed to initialize/scan — the libyara.NET
@@ -207,6 +216,28 @@ internal static class PackageReportRenderer
                 Esc(FamilyDetection(f)),
                 Esc(f.Category ?? "-"),
                 Esc(f.RelativePath));
+        return table;
+    }
+
+    // Packaging anomalies in the package's declared zip entry names (ADR 0031): the category (orange1 — evidence of
+    // intent, but never a gate), the offending entry, and a short detail (the offending code points, segment, or the
+    // colliding partner names). Both text fields arrive ALREADY escaped by YaraPathSafety.Escape — a control
+    // character or bidi override can no longer be in them by the time they get here — and still pass through Esc,
+    // which is Spectre markup escaping and a different concern entirely.
+    private static IRenderable PackagingAnomaliesWidget(bool rich, IReadOnlyList<PackagingAnomaly> anomalies)
+    {
+        if (anomalies.Count == 0)
+            return new Markup("[green](none)[/]");
+
+        var table = new Table().Border(TableBorderFor(rich)).Expand();
+        table.AddColumn("[bold]Anomaly[/]");
+        table.AddColumn("[bold]Entry[/]");
+        table.AddColumn("[bold]Detail[/]");
+        foreach (var a in anomalies)
+            table.AddRow(
+                $"[bold orange1]{Esc(a.Category.ToString())}[/]",
+                Esc(a.EntryName),
+                Esc(a.Detail));
         return table;
     }
 
@@ -453,6 +484,13 @@ internal static class PackageReportRenderer
         console.MarkupLine(hasObfuscation
             ? $"[grey]Obfuscation:[/] [orange1]present[/]"
             : "[grey]Obfuscation:[/] [green]none[/]");
+
+        // Packaging anomalies mirror their section (ADR 0013's count summary). Deliberately NOT folded into the
+        // "attention" predicate below: ADR 0031 decision 3 keeps this class of finding purely informational until its
+        // benign prevalence is measured, and "attention" is the headline the exit-code gate is written to mirror.
+        console.MarkupLine(report.PackagingAnomalies.Count > 0
+            ? $"[grey]Packaging anomalies:[/] [orange1]{report.PackagingAnomalies.Count} finding(s)[/]"
+            : "[grey]Packaging anomalies:[/] [green]none[/]");
 
         console.MarkupLine(report.YaraFindings.Count > 0
             ? $"[grey]Malware signatures (YARA):[/] [bold red]{report.YaraFindings.Count} match(es)[/]"

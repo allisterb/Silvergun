@@ -77,8 +77,10 @@ public sealed record AssemblyScanResult(
     // null when no capability report was produced — either nothing could be read out of the file OR analysis was
     // attempted and threw. Not a statement that the file is inherently un-analyzable; SkipReason carries the detail.
     CapabilityReport? Report,
-    // Non-null when Report is null. Carries no single cause: PackageScanner sets it both for a file nothing could be
-    // read out of AND for a valid managed assembly whose capability analysis threw — the more security-relevant case.
+    // Non-null when Report is null. Carries no single cause: PackageScanner sets it for a file nothing could be read
+    // out of, for a valid managed assembly whose capability analysis threw — the more security-relevant case — and
+    // for a DECLARED entry that never reached the inventory at all, where Assembly.FullPath/Sha256 are empty because
+    // no file exists (ADR 0030; e.g. an entry named COM1.dll, which Windows cannot write to disk).
     // Consumers must surface it verbatim and must not paraphrase it into a benign-sounding diagnosis.
     string? SkipReason,
     AssemblyMetadataInfo? Metadata,   // null if the metadata read failed or the assembly produced no analysis
@@ -103,7 +105,11 @@ public sealed record PackageCapabilityReport(
     // additive; whether the YARA pass actually completed (see Yara/YaraScanStatus.cs). Old JSON — including every
     // report the libyara.NET native-dependency defect silently produced — predates this tracking and deserializes
     // to Unavailable ("not verified"), never a false Completed; PackageScanner.Scan sets the real value going forward.
-    YaraScanStatus YaraScanStatus = YaraScanStatus.Unavailable)
+    YaraScanStatus YaraScanStatus = YaraScanStatus.Unavailable,
+    // additive (ADR 0031); hostile constructions in the package's DECLARED zip entry names — control characters,
+    // bidi overrides, zip slip, case-only collisions and friends. Already escaped (see PackagingAnomaly). Purely
+    // reported: no anomaly gates --strict or changes any exit code (ADR 0031 decision 3). Old JSON ⇒ empty.
+    IReadOnlyList<PackagingAnomaly>? PackagingAnomalies = null)
 {
     #region Properties
     /// <summary>
@@ -125,6 +131,14 @@ public sealed record PackageCapabilityReport(
     /// predates this field deserializes to empty, not <c>null</c>.
     /// </summary>
     public IReadOnlyList<ResolvedDependency> ResolvedDependencies { get; init; } = ResolvedDependencies ?? Array.Empty<ResolvedDependency>();
+
+    /// <summary>
+    /// Packaging anomalies found in the package's declared zip entry names (ADR 0031) — names a legitimate package
+    /// essentially never ships. Produced offline by <see cref="PackageEntryNameAnalyzer"/> during
+    /// <see cref="PackageScanner.Scan"/>; already escaped, and never gating. Normalized to an empty list when absent —
+    /// old JSON that predates this field deserializes to empty, not <c>null</c>.
+    /// </summary>
+    public IReadOnlyList<PackagingAnomaly> PackagingAnomalies { get; init; } = PackagingAnomalies ?? Array.Empty<PackagingAnomaly>();
 
     /// <summary>Every finding across all analyzed assemblies, flattened in stored order.</summary>
     [JsonIgnore]

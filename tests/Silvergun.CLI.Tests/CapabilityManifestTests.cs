@@ -616,6 +616,10 @@ public sealed class CapabilityManifestTests
         "Package", "AnalyzedAt", "Assemblies", "Scripts", "ScriptFindings", "ProjectHealth",
         "YaraFindings", "Vulnerabilities", "VulnerabilitiesStatus", "ResolvedDependencies", "DependencyResolution",
         "YaraScanStatus",
+        // Additive per ADR 0031: packaging anomalies in the DECLARED zip entry names. Listed here because this
+        // array is the oracle for "the report record's top-level shape did not change by accident" — a new member
+        // has to be acknowledged deliberately, which is exactly what adding this line is.
+        "PackagingAnomalies",
     ];
 
     private static readonly string CliExe = ApphostPath.Resolve(AppContext.BaseDirectory, "Silvergun.CLI");

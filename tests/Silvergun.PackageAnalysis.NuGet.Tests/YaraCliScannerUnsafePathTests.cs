@@ -157,7 +157,10 @@ public sealed class YaraCliScannerUnsafePathTests
         Assert.Equal(YaraScanStatus.Completed, scan.Value.YaraScanStatus);
         Assert.Equal(2, scan.Value.YaraFindings.Count);
         Assert.Single(scan.Value.YaraFindings, f => f.RelativePath == "content/safe.bin");
-        Assert.Single(scan.Value.YaraFindings, f => f.RelativePath == "content/n\nl.bin");
+        // Escaped at the report boundary (ADR 0031 decision 4): the newline is a literal backslash-n here, which is
+        // precisely the wart ADR 0029 left open (a raw newline reaching the report layer). The recovery behaviour
+        // this test pins is unchanged — BOTH hits are present and the scan still reads Completed.
+        Assert.Single(scan.Value.YaraFindings, f => f.RelativePath == @"content/n\nl.bin");
         Assert.All(scan.Value.YaraFindings, f => Assert.Equal(HermeticWiperSample.RuleName, f.RuleName));
     }
 

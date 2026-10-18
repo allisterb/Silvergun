@@ -5,6 +5,15 @@ metadata:
   type: project
 ---
 
+**A measurement tool can be inert too, and the environment can do it to you (2026-08-22).** An
+independent probe written to cross-check a corpus result returned "nothing found" — because **Windows
+PowerShell 5.1's .NET Framework `ZipArchive` silently truncates zip entry enumeration at a name
+containing a control character** (1 null name returned for a 10-entry archive). Rewritten on .NET 10,
+it worked. Two rules: **any zip tooling in this repo runs on .NET 10, not Windows PowerShell 5.1**, and
+**a probe that reports "nothing found" is not a result until it has reported something on a positive
+control.** Related, same day: an escaper property-tested "exhaustively over the BMP" could not reach
+the astral Tag block at all — *exhaustive over the wrong domain reads exactly like exhaustive*.
+
 Silvergun keeps producing artifacts that **exist, compile, load, and are structurally incapable of
 firing**. Three independent instances across three subsystems as of 2026-08-03:
 

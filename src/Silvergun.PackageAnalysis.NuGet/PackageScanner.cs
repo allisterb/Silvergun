@@ -31,7 +31,10 @@ public sealed class PackageScanner : Runtime
         using var package = opened.Value;
         try
         {
-            var results = package.Assemblies.Select(a => ScanAssembly(a, resolveReferences)).ToArray();
+            // The inventoried assemblies, then the declared entries that never reached the inventory (ADR 0030).
+            var results = package.Assemblies.Select(a => ScanAssembly(a, resolveReferences))
+                .Concat(package.UninventoriedDeclaredEntries.Select(e => NotInventoried(e.Declared, e.Reported)))
+                .ToArray();
 
             // Script content scanning runs while the package is still open (its extraction dir exists — ADR 0012).
             // Best-effort: a scanner failure yields empty findings and never sinks the whole scan.
@@ -45,6 +48,11 @@ public sealed class PackageScanner : Runtime
                 ? ScanYara(package, nupkgPath, yaraScanner)
                 : (Array.Empty<YaraFinding>(), YaraScanStatus.NotRun);
 
+            // Packaging anomalies (ADR 0031): a pure, offline pass over the DECLARED entry names — what the package
+            // author wrote in the central directory, not what the extractor managed to put on disk. Reported, never
+            // gating (ADR 0031 decision 3); every name it returns is already escaped.
+            var packagingAnomalies = PackageEntryNameAnalyzer.Analyze(package.DeclaredEntryNames);
+
             var report = new PackageCapabilityReport(
                 package.Identity,
                 DateTimeOffset.UtcNow,
@@ -52,7 +60,8 @@ public sealed class PackageScanner : Runtime
                 package.Scripts,
                 scriptFindings,
                 YaraFindings: yaraFindings,
-                YaraScanStatus: yaraStatus);
+                YaraScanStatus: yaraStatus,
+                PackagingAnomalies: packagingAnomalies);
             return Result.Success(report);
         }
         catch (Exception ex)
@@ -81,6 +90,37 @@ public sealed class PackageScanner : Runtime
         return analysis.IsSuccess
             ? new AssemblyScanResult(assembly, analysis.Value, null, metadata, obfuscation, indicators)
             : new AssemblyScanResult(assembly, null, analysis.Message ?? "Capability analysis failed.", metadata, obfuscation, indicators);
+    }
+
+    // A declared package entry that was contained but never inventoried (see NuGetPackage.UninventoriedEntryNames),
+    // reported as a scan result with NO CapabilityReport and a SkipReason.
+    //
+    // It travels through that channel deliberately: an AssemblyScanResult with a SkipReason is what
+    // CompletenessAssessment.ForPackage already reads as "a whole binary that produced no analysis", so this entry
+    // makes the package report NOT complete instead of vanishing. Without it, the sixth instance of ADR 0030 — a
+    // payload named COM1.dll, which Windows cannot even write to disk — produced a report that said "Clean".
+    // There is no file behind it, so FullPath and Sha256 are empty by construction, and role/TFM come from the entry
+    // name like every other inventoried file's. The two forms of that name are NOT interchangeable: what is PUBLISHED
+    // is `reportedName`, already escaped by NuGetPackage (ADR 0031 decision 4), while role and TFM are derived from the
+    // RAW `declaredName` — because escaping EMITS BACKSLASHES and the path splitter treats a backslash as a separator,
+    // so deriving from the escaped form re-segments the name and invents an answer: raw "lib/pay<LF>load.dll" has two
+    // segments (Lib, no TFM), and its escape has three, which reads the TFM off as "pay". Derived values are escaped
+    // where the DTO is built, on the same rule as RelativePath: a TFM segment is attacker-authored text that the
+    // renderer prints. (MakeAssembly derives an inventoried file's TFM from its raw path too, and does not escape it —
+    // the same latent exposure, left alone here because it is not this change.)
+    private static AssemblyScanResult NotInventoried(string declaredName, string reportedName)
+    {
+        var role = NuGetPackage.RoleOf(declaredName);
+        var tfm = NuGetPackage.TargetFrameworkOf(declaredName, role);
+        var assembly = new PackageAssembly(
+            reportedName, string.Empty, tfm is null ? null : YaraPathSafety.Escape(tfm), role, string.Empty);
+        return new AssemblyScanResult(
+            assembly,
+            null,
+            "declared package entry was NOT inventoried: no extracted file corresponds to it, so it was never " +
+            "analysed (coverage not delivered — not a clean result)",
+            null,
+            null);
     }
 
     // Best-effort script/content rule scan over the open package (ADR 0012); ScriptRuleScanner already never throws,
@@ -170,6 +210,11 @@ public sealed class PackageScanner : Runtime
 
     // Enriches a backend hit into the report DTO: rule metadata (family/detection-name/category) comes from the
     // embedded-rule index (the backends only reliably surface rule name + tags), the rest from the hit itself.
+    //
+    // This is the report boundary, and it is where the matched path stops being raw (ADR 0031 decision 4). The path
+    // derives from an attacker-authored entry name, so a hit on "content/pay\nload.bin" used to carry a real newline
+    // into the report, the renderer and the JSON — the known wart ADR 0029 left open. Escape is idempotent, so a
+    // backend that already escaped is unaffected.
     private static YaraFinding Enrich(YaraMatch match, string relativePath, YaraRuleIndex index)
     {
         var info = index.Lookup(match.Rule);
@@ -180,23 +225,22 @@ public sealed class PackageScanner : Runtime
             info?.DetectionName,
             info?.Category,
             match.Tags,
-            relativePath);
+            YaraPathSafety.Escape(relativePath));
     }
 
     // The package-relative path of an extracted file, matching the inventory convention (RecursiveExtractor nests
     // entries under a directory named after the .nupkg): relative to that content root, forward-slash normalized.
+    //
+    // Derived by NuGetPackage.RelativeUnderRoot — the same string-prefix computation the inventory itself uses —
+    // rather than by Path.GetRelativePath, which resolves both operands through the platform normalizer and answers
+    // "\\.\COM1" for a file named COM1.dll under the root (ADR 0030, sixth instance). It is also total, so the
+    // try/catch it replaces is gone: a throw here would have been caught by ScanYara and turned a real, attributable
+    // hit into a package-wide Unavailable — ADR 0030's converse, a detection downgraded to "we don't know".
     private static string PackageRelativePath(string extractionDir, string nupkgPath, string fullPath)
     {
-        try
-        {
-            var contentRoot = Path.Combine(extractionDir, Path.GetFileName(nupkgPath));
-            var root = Directory.Exists(contentRoot) ? contentRoot : extractionDir;
-            return Path.GetRelativePath(root, fullPath).Replace('\\', '/');
-        }
-        catch
-        {
-            return fullPath;
-        }
+        var contentRoot = Path.Combine(extractionDir, Path.GetFileName(nupkgPath));
+        var root = Directory.Exists(contentRoot) ? contentRoot : extractionDir;
+        return NuGetPackage.RelativeUnderRoot(root, fullPath);
     }
 
     // Best-effort CCI metadata read; a failure logs a warning and yields null — never fatal.

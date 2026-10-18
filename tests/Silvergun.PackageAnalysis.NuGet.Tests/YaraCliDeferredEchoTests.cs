@@ -226,7 +226,9 @@ public sealed class YaraCliDeferredEchoTests
         Assert.True(scan.IsSuccess, scan.Message);
         Assert.Equal(YaraScanStatus.Completed, scan.Value.YaraScanStatus);
         var finding = Assert.Single(scan.Value.YaraFindings);
-        Assert.Equal("content/pay\tload.bin", finding.RelativePath);
+        // Escaped at the report boundary (ADR 0031 decision 4): the tab is rendered as a literal backslash-t.
+        // The assertion this test is about is unchanged — the tab-named entry IS named by the finding.
+        Assert.Equal(@"content/pay\tload.bin", finding.RelativePath);
         Assert.Equal(HermeticWiperSample.RuleName, finding.RuleName);
     }
     #endregion
