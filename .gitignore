@@ -430,4 +430,5 @@ FodyWeavers.xsd
 
 docs/agent/*
 reference/*
+.claude/agent-memory/*
 /scratch-yara
