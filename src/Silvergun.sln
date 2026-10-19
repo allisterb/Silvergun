@@ -35,6 +35,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Docs", "Docs", "{399AC24F-6
 	ProjectSection(SolutionItems) = preProject
 		..\.gitignore = ..\.gitignore
 		..\CLAUDE.md = ..\CLAUDE.md
+		..\.claude\settings.json = ..\.claude\settings.json
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Tests", "Tests", "{F3CA7A48-1B99-4555-84CA-54FFFB3762EF}"

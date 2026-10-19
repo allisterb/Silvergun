@@ -127,7 +127,7 @@ Delegation rules:
 5. Hand off with concrete context: file paths, the spec in `docs/agent/tasks/`, the exact command that failed, and acceptance criteria. Subagents start with a fresh context window and only receive what's in the delegation prompt plus this file.
 6. On malware-adjacent code (capability detection, squatting, YARA rules) Opus intermittently trips a cybersecurity filter and refuses. You will need to override to `sonnet` when this happens.
 
-### Environment notes (Windows + Git Bash):
+### Environment notes:
 - `find` resolves to Windows `find.exe` and **hangs**: use an alternative.
 - **Never run two `dotnet test` invocations in parallel** when the projects share a referenced project — they collide on the same `obj`/`bin` DLL and fail with `CS2012`. Run suites sequentially.
 - `Silvergun.PackageAnalysis.NuGet` and `Silvergun.CLI` multi-target `net10.0;net10.0-windows`; pass `-f net10.0` when you want one.

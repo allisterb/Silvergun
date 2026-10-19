@@ -1,13 +1,27 @@
 {
   "agent": "architect",
   "permissions": {
-    "deny": [
-      "Bash(git push:*)",
-      "Bash(rm -rf:*)",
-	  "Bash(find:*)",
-	  "Bash(sed:*)",
-      "Edit(reference/**)",
-      "Write(reference/**)"
-    ]
+	"allow": [
+		"Bash(powershell -NoProfile -ExecutionPolicy Bypass -File:*)",
+		"Bash(python -I:*)"
+	],
+		"deny": [
+			"Bash(git push:*)",
+			"Bash(rm -rf:*)",
+			"Bash(find:*)",
+			"Bash(sed:*)",
+			"Bash(powershell -Command:*)",
+			"Bash(powershell -c:*)",
+			"Bash(powershell -enc:*)",
+			"Bash(powershell -EncodedCommand:*)",
+			"Bash(powershell -e:*)",
+			"Bash(python -I -c:*)",
+			"Bash(python -c:*)",
+			"Bash(python -I -m pip:*)",
+			"Bash(python -m pip:*)",
+			"Bash(pip:*)",
+			"Edit(reference/**)",
+			"Write(reference/**)"
+		]
   }
 }
