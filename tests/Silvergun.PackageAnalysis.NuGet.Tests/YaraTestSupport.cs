@@ -177,6 +177,85 @@ internal sealed class TrivialYaraStandIn : IDisposable
 }
 
 /// <summary>
+/// A POSIX <c>/bin/sh</c> stand-in for <c>yara</c> that does exactly two things, both cheaply: on the recursive pass
+/// (last argument a directory) it prints <c>"&lt;rule&gt; &lt;file&gt;"</c> for <c>&lt;root&gt;/&lt;payload&gt;</c>
+/// and <c>&lt;root&gt;/*/&lt;payload&gt;</c> when they exist (the second shape is a package's extraction directory,
+/// which nests the content under a folder named after the <c>.nupkg</c>), and on a single-file scan it prints
+/// nothing and exits with <paramref name="singleFileExitCode"/>.
+///
+/// <para>Why not the <c>FakeYaraProbe</c>: the ADR 0032 headline shape is a payload plus <b>65</b> unsafe names, which
+/// spends <c>MaxIndividualScans</c> = 64 single-file launches before the 65th overflows — 64 managed apphost starts
+/// would dominate the suite (the same reason <see cref="TrivialYaraStandIn"/> exists), while 64 <c>sh</c> starts cost
+/// milliseconds. The script is generated text holding only test-chosen constants (a rule name, a relative path with
+/// no quote characters, a number), and it is launched by the scanner's own argument-list <c>Process.Start</c>, never
+/// through a shell string.</para>
+/// </summary>
+internal sealed class ScriptedYaraStandIn : IDisposable
+{
+    #region Constructors
+    public ScriptedYaraStandIn(string rule, string payloadRelative, int singleFileExitCode = 0)
+    {
+        if (!OperatingSystem.IsLinux())
+            throw new InvalidOperationException("This stand-in is a /bin/sh script; [LinuxFact] must have gated its caller.");
+        if ((rule + payloadRelative).Any(c => c is '\'' or '\\' or '$' or '`' || c < ' '))
+            throw new ArgumentException("The stand-in embeds its parameters in single quotes; keep them plain.");
+
+        Directory = Path.Combine(Path.GetTempPath(), "silvergun-scripted-yara-" + Guid.NewGuid().ToString("N"));
+        System.IO.Directory.CreateDirectory(Directory);
+        // Named so that YaraCliScanner's "derive yarac beside yara" step finds nothing (see TrivialYaraStandIn).
+        BinaryPath = Path.Combine(Directory, "scripted-stand-in");
+        // On the recursive pass it also prints, like real yara, one coverage-sentinel line (ADR 0032 decision 9) per
+        // regular file under the root — the sentinel's name read from the rules file (the argument before the
+        // target), `-type f` so a symlink is skipped exactly as `yara -r -N` skips it — and nothing when the rules
+        // declare no sentinel. Without it every attributable file would read as unscanned and be re-scanned.
+        File.WriteAllText(BinaryPath,
+            "#!/bin/sh\n"
+            + "prev=; last=\n"
+            + "for a in \"$@\"; do prev=$last; last=$a; done\n"
+            + "if [ -d \"$last\" ]; then\n"
+            + $"  for f in \"$last\"/'{payloadRelative}' \"$last\"/*/'{payloadRelative}'; do\n"
+            + $"    if [ -f \"$f\" ]; then printf '%s %s\\n' '{rule}' \"$f\"; fi\n"
+            + "  done\n"
+            + "  s=$(grep -o 'rule SilvergunCoverageSentinel_[0-9a-f]\\{32\\}' \"$prev\" 2>/dev/null | head -n 1)\n"
+            + "  s=${s#rule }\n"
+            + "  if [ -n \"$s\" ]; then find \"$last\" -type f -exec printf '%s [] %s\\n' \"$s\" {} \\; ; fi\n"
+            + "  exit 0\n"
+            + "fi\n"
+            + $"exit {singleFileExitCode}\n");
+        File.SetUnixFileMode(
+            BinaryPath,
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+            | UnixFileMode.GroupRead | UnixFileMode.GroupExecute
+            | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+        _env = new YaraEnvScope(BinaryPath, yarac: null);
+    }
+    #endregion
+
+    #region Properties
+    public string Directory { get; }
+
+    public string BinaryPath { get; }
+    #endregion
+
+    #region Methods
+    public void Dispose()
+    {
+        _env.Dispose();
+        try
+        {
+            if (System.IO.Directory.Exists(Directory))
+                System.IO.Directory.Delete(Directory, recursive: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best-effort temp cleanup */ }
+    }
+    #endregion
+
+    #region Fields
+    private readonly YaraEnvScope _env;
+    #endregion
+}
+
+/// <summary>
 /// Points <c>SILVERGUN_YARA_PATH</c> at the <c>FakeYaraProbe</c> apphost (see that project) and configures its
 /// behaviour for the duration of a test: the exit code it returns, how long it sleeps before returning, and
 /// whether it records each invocation.
@@ -193,13 +272,46 @@ internal sealed class TrivialYaraStandIn : IDisposable
 /// shape ADR 0029 decision 17 is about. <paramref name="echoRule"/> makes a single-file scan print
 /// <c>"&lt;rule&gt; &lt;the file it was handed&gt;"</c>, which is the only way to stage a hit on the recovery
 /// pass's temp copy: the scanner generates that name, so a test cannot know it in advance.</para>
+///
+/// <para><paramref name="batchEchoRule"/>/<paramref name="batchEchoName"/>/<paramref name="batchGhost"/> are the
+/// recursive-pass equivalent for a root the test cannot name in advance (a package's extraction directory): the
+/// probe prints a hit for every file named <paramref name="batchEchoName"/>, plus, optionally, one for a sibling
+/// called <paramref name="batchGhost"/> that does not exist — an unattributable hit (ADR 0029 decision 17).</para>
+///
+/// <para><paramref name="batchStdErr"/> is printed on the recursive pass's <b>stderr</b> (same <c>\n</c> decoding as
+/// <paramref name="batchStdOut"/>) while the process still exits <paramref name="exitCode"/> — by default 0. That is
+/// how real <c>yara -r</c> reports a file it could not open or that outlasted its <c>--timeout</c> (ADR 0032
+/// decision 7), so it is what stages "the batch pass ran, exited 0, and did NOT scan everything".</para>
+///
+/// <para><b>Coverage sentinel (ADR 0032 decision 9).</b> Like real yara, the probe prints a
+/// <c>&lt;sentinel&gt; [] &lt;file&gt;</c> line for every file its recursive pass "scans", reading the sentinel rule's
+/// name from the rules file the scanner hands it — so by default every enumerated file is covered and a test that
+/// does not care about coverage sees the same scanner behaviour as before decision 9. <paramref name="sentinelSkip"/>
+/// (<c>'|'</c>-separated file names, a trailing <c>*</c> for a prefix, <c>"*"</c> for all) withholds the line for the
+/// files a real <c>yara -r</c> would have dropped at its one global <c>--timeout</c> deadline;
+/// <paramref name="sentinelForge"/> prints a coverage line under a <i>wrong</i> rule name in its place;
+/// <paramref name="sentinelGhost"/> adds a real sentinel line for a file that does not exist.
+/// <paramref name="singleFileExitCode"/> overrides the exit code of single-file scans only, and
+/// <paramref name="fakeYarac"/> also points <c>SILVERGUN_YARAC_PATH</c> at the probe (which then plays a <c>yarac</c>
+/// that byte-copies the source, or fails with <paramref name="yaracExitCode"/>), to reach the compiled-rules path.</para>
+///
+/// <para>Round E knobs. <paramref name="singleFileSleepMs"/> replaces <paramref name="sleepMs"/> for single-file scans
+/// only (a cheap recursive pass, slow re-scans: the recovery budget's shape); <paramref name="singleFileFail"/>
+/// (<c>'|'</c>-separated file names) fails only those files' single-file scans; <paramref name="batchEchoRepeat"/> prints
+/// the <paramref name="batchEchoRule"/> block that many times, byte-identical. <paramref name="sentinelForge"/> also
+/// takes <c>"@upper"</c> / <c>"@upper-suffix"</c>: the ruleset's real sentinel name in another case.</para>
 /// </summary>
 internal sealed class FakeYaraBinary : IDisposable
 {
     #region Constructors
     public FakeYaraBinary(
         int exitCode = 0, int sleepMs = 0, bool recordInvocations = false,
-        string? batchStdOut = null, string? echoRule = null)
+        string? batchStdOut = null, string? echoRule = null,
+        string? batchEchoRule = null, string? batchEchoName = null, string? batchGhost = null,
+        string? batchStdErr = null,
+        string? sentinelSkip = null, string? sentinelForge = null, string? sentinelGhost = null,
+        int? singleFileExitCode = null, bool fakeYarac = false, int yaracExitCode = 0,
+        int? singleFileSleepMs = null, string? singleFileFail = null, int batchEchoRepeat = 1)
     {
         Assert.True(
             File.Exists(ProbePath),
@@ -216,7 +328,19 @@ internal sealed class FakeYaraBinary : IDisposable
         Environment.SetEnvironmentVariable(LogVar, LogPath);
         Environment.SetEnvironmentVariable(StdOutVar, batchStdOut);
         Environment.SetEnvironmentVariable(EchoRuleVar, echoRule);
-        _env = new YaraEnvScope(ProbePath, yarac: null);
+        Environment.SetEnvironmentVariable(BatchEchoRuleVar, batchEchoRule);
+        Environment.SetEnvironmentVariable(BatchEchoNameVar, batchEchoName);
+        Environment.SetEnvironmentVariable(BatchGhostVar, batchGhost);
+        Environment.SetEnvironmentVariable(BatchStdErrVar, batchStdErr);
+        Environment.SetEnvironmentVariable(SentinelSkipVar, sentinelSkip);
+        Environment.SetEnvironmentVariable(SentinelForgeVar, sentinelForge);
+        Environment.SetEnvironmentVariable(SentinelGhostVar, sentinelGhost);
+        Environment.SetEnvironmentVariable(SingleExitCodeVar, singleFileExitCode?.ToString());
+        Environment.SetEnvironmentVariable(YaracExitCodeVar, yaracExitCode.ToString());
+        Environment.SetEnvironmentVariable(SingleSleepVar, singleFileSleepMs?.ToString());
+        Environment.SetEnvironmentVariable(SingleFailVar, singleFileFail);
+        Environment.SetEnvironmentVariable(BatchEchoRepeatVar, batchEchoRepeat.ToString());
+        _env = new YaraEnvScope(ProbePath, yarac: fakeYarac ? ProbePath : null);
     }
     #endregion
 
@@ -228,11 +352,23 @@ internal sealed class FakeYaraBinary : IDisposable
     /// <summary>Where the probe records its invocations, or <c>null</c> when recording was not requested.</summary>
     public string? LogPath { get; }
 
-    /// <summary>One entry per launch of the fake binary, in order: <c>argc=…|target=…|dirmode=…</c>.</summary>
+    /// <summary>One entry per launch of the fake binary, in order: <c>argc=…|target=…|dirmode=…|compiled=…|sentinel=…|rules=…</c>.</summary>
     public IReadOnlyList<string> Invocations =>
         LogPath is not null && File.Exists(LogPath)
             ? File.ReadAllLines(LogPath).Where(l => l.Length > 0).ToArray()
             : Array.Empty<string>();
+
+    /// <summary>
+    /// The temp directories holding the rulesets the logged launches were handed (the directory of each <c>rules=</c>
+    /// field), distinct, in launch order: where <see cref="YaraCliScanner"/> prepared them, which is what its lifetime
+    /// tests watch being deleted.
+    /// </summary>
+    public IReadOnlyList<string> RulesDirs =>
+        Invocations
+            .Select(i => i.Split('|').Select(p => p.Split('=', 2)).First(p => p[0] == "rules")[1])
+            .Select(p => Path.GetDirectoryName(p)!)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
     #endregion
 
     #region Methods
@@ -257,8 +393,26 @@ internal sealed class FakeYaraBinary : IDisposable
     private const string LogVar = "SILVERGUN_FAKEYARA_LOG";
     private const string StdOutVar = "SILVERGUN_FAKEYARA_STDOUT";
     private const string EchoRuleVar = "SILVERGUN_FAKEYARA_ECHO_RULE";
+    private const string BatchEchoRuleVar = "SILVERGUN_FAKEYARA_BATCH_ECHO_RULE";
+    private const string BatchEchoNameVar = "SILVERGUN_FAKEYARA_BATCH_ECHO_NAME";
+    private const string BatchGhostVar = "SILVERGUN_FAKEYARA_BATCH_GHOST";
+    private const string BatchStdErrVar = "SILVERGUN_FAKEYARA_BATCH_STDERR";
+    private const string SentinelSkipVar = "SILVERGUN_FAKEYARA_SENTINEL_SKIP";
+    private const string SentinelForgeVar = "SILVERGUN_FAKEYARA_SENTINEL_FORGE";
+    private const string SentinelGhostVar = "SILVERGUN_FAKEYARA_SENTINEL_GHOST";
+    private const string SingleExitCodeVar = "SILVERGUN_FAKEYARA_SINGLE_EXIT_CODE";
+    private const string YaracExitCodeVar = "SILVERGUN_FAKEYARA_YARAC_EXIT_CODE";
+    private const string SingleSleepVar = "SILVERGUN_FAKEYARA_SINGLE_SLEEP_MS";
+    private const string SingleFailVar = "SILVERGUN_FAKEYARA_SINGLE_FAIL";
+    private const string BatchEchoRepeatVar = "SILVERGUN_FAKEYARA_BATCH_ECHO_REPEAT";
 
-    private static readonly string[] Knobs = [ExitCodeVar, SleepVar, LogVar, StdOutVar, EchoRuleVar];
+    // Every knob is saved and restored by Dispose, so a test that leaves one unset cannot inherit a previous test's.
+    private static readonly string[] Knobs =
+    [
+        ExitCodeVar, SleepVar, LogVar, StdOutVar, EchoRuleVar, BatchEchoRuleVar, BatchEchoNameVar, BatchGhostVar, BatchStdErrVar,
+        SentinelSkipVar, SentinelForgeVar, SentinelGhostVar, SingleExitCodeVar, YaracExitCodeVar,
+        SingleSleepVar, SingleFailVar, BatchEchoRepeatVar,
+    ];
 
     private readonly Dictionary<string, string?> _previous;
     private readonly YaraEnvScope _env;
@@ -274,7 +428,35 @@ internal sealed class FakeYaraBinary : IDisposable
 internal static class YaraHarness
 {
     #region Methods
-    public static HarnessResult ScanDirectory(string root, string yaraPath, string? poisonTempWith = null, int? timeoutMs = null)
+    public static HarnessResult ScanDirectory(string root, string yaraPath, string? poisonTempWith = null, int? timeoutMs = null) =>
+        Run("--scan-directory", root, yaraPath, poisonTempWith, timeoutMs);
+
+    /// <summary>
+    /// One scanner instance scans <paramref name="warmup"/> first, then the temp directory is poisoned with
+    /// <paramref name="poisonTempAfterWarmupWith"/>, then it scans <paramref name="root"/> — so whichever ruleset the
+    /// warm-up did NOT prepare can no longer be prepared (ADR 0032 decision 9 keeps two, prepared lazily).
+    /// </summary>
+    public static HarnessResult ScanDirectoryAfterWarmup(string root, string warmup, string yaraPath, string poisonTempAfterWarmupWith) =>
+        Run("--scan-directory", root, yaraPath, poisonTempWith: null, timeoutMs: null,
+            ["--warmup", warmup, "--poison-temp-after-warmup", poisonTempAfterWarmupWith]);
+
+    /// <summary>The same harness over <see cref="YaraCliScanner.ScanFile"/> (ADR 0032 decision 5).</summary>
+    public static HarnessResult ScanFile(string file, string yaraPath, string? poisonTempWith = null) =>
+        Run("--scan-file", file, yaraPath, poisonTempWith, timeoutMs: null);
+
+    /// <summary>
+    /// The scanner-lifetime run: the child's temp directory is <paramref name="privateTemp"/> (TMP, TEMP and TMPDIR, so
+    /// <see cref="Path.GetTempPath"/> resolves there on Windows and Linux alike), it reports how many rules dirs exist
+    /// there once the scan is done (<c>rulesdirs=N</c>), and with <paramref name="dispose"/> false it never disposes the
+    /// scanner — leaving those dirs to the scanner's process-exit fallback, as the never-disposed shared instance does.
+    /// </summary>
+    public static HarnessResult ScanDirectoryInPrivateTemp(string root, string yaraPath, string privateTemp, bool dispose) =>
+        Run("--scan-directory", root, yaraPath, poisonTempWith: null, timeoutMs: null,
+            dispose ? ["--report-rules-dirs"] : ["--report-rules-dirs", "--no-dispose"], privateTemp);
+
+    private static HarnessResult Run(
+        string mode, string target, string yaraPath, string? poisonTempWith, int? timeoutMs, string[]? extra = null,
+        string? privateTemp = null)
     {
         var psi = new ProcessStartInfo
         {
@@ -284,8 +466,8 @@ internal static class YaraHarness
             RedirectStandardError = true,
             CreateNoWindow = true,
         };
-        psi.ArgumentList.Add("--scan-directory");
-        psi.ArgumentList.Add(root);
+        psi.ArgumentList.Add(mode);
+        psi.ArgumentList.Add(target);
         if (poisonTempWith is not null)
         {
             psi.ArgumentList.Add("--poison-temp");
@@ -296,10 +478,15 @@ internal static class YaraHarness
             psi.ArgumentList.Add("--timeout-ms");
             psi.ArgumentList.Add(timeoutMs.Value.ToString());
         }
+        foreach (var arg in extra ?? [])
+            psi.ArgumentList.Add(arg);
 
         // The child's own environment, not the test host's: the harness never relies on inherited YARA state.
         psi.Environment[YaraCliScanner.YaraPathVar] = yaraPath;
         psi.Environment.Remove(YaraCliScanner.YaracPathVar);
+        if (privateTemp is not null)
+            foreach (var variable in new[] { "TMPDIR", "TEMP", "TMP" })
+                psi.Environment[variable] = privateTemp;
 
         using var process = Process.Start(psi)
             ?? throw new InvalidOperationException($"Could not start the harness at '{FakeYaraBinary.ProbePath}'.");

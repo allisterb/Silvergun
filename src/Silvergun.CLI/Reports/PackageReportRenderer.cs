@@ -196,15 +196,29 @@ internal static class PackageReportRenderer
     // (no backend selected, or a selected backend failed to initialize/scan) is a prominent warning — NOT the clean
     // "(none)" — because an empty finding list from a scan that never ran is not evidence of anything. NotRun
     // (--no-yara) stays dim, like OSV's NotChecked. Only a genuinely Completed scan earns the green "(none)".
+    //
+    // Unavailable WITH findings is an incomplete scan that found real hits before it could not go on (ADR 0032): the
+    // hits are genuine detections and the other files are unverified, so BOTH are shown — the warning, reworded to
+    // say the scan was incomplete rather than that it did not run, above the same findings table a completed scan
+    // gets. Neither may hide the other.
     private static IRenderable YaraFindingsWidget(bool rich, IReadOnlyList<YaraFinding> findings, YaraScanStatus status)
     {
         if (status == YaraScanStatus.NotRun)
             return new Markup("[grey](not run)[/]");
         if (status == YaraScanStatus.Unavailable)
-            return new Markup($"[yellow]{Esc(AlertGlyph(rich))} YARA malware-signature scan did NOT run (backend unavailable) {Dash(rich)} NOT verified[/]");
+            return findings.Count == 0
+                ? new Markup($"[yellow]{Esc(AlertGlyph(rich))} YARA malware-signature scan did NOT run (backend unavailable) {Dash(rich)} NOT verified[/]")
+                : new Rows(
+                    new Markup($"[yellow]{Esc(AlertGlyph(rich))} YARA malware-signature scan INCOMPLETE {Dash(rich)} {findings.Count} match(es) found in the files that were scanned; other files NOT verified[/]"),
+                    YaraFindingsTable(rich, findings));
         if (findings.Count == 0)
             return new Markup("[green](none)[/]");
 
+        return YaraFindingsTable(rich, findings);
+    }
+
+    private static Table YaraFindingsTable(bool rich, IReadOnlyList<YaraFinding> findings)
+    {
         var table = new Table().Border(TableBorderFor(rich)).Expand();
         table.AddColumn("[bold]Rule[/]");
         table.AddColumn("[bold]Malware family / detection[/]");
@@ -492,8 +506,13 @@ internal static class PackageReportRenderer
             ? $"[grey]Packaging anomalies:[/] [orange1]{report.PackagingAnomalies.Count} finding(s)[/]"
             : "[grey]Packaging anomalies:[/] [green]none[/]");
 
+        // Findings from an incomplete scan (Unavailable, ADR 0032) are real and counted, but marked: the other files
+        // were not verified, so the count is a floor.
         console.MarkupLine(report.YaraFindings.Count > 0
             ? $"[grey]Malware signatures (YARA):[/] [bold red]{report.YaraFindings.Count} match(es)[/]"
+              + (report.YaraScanStatus == YaraScanStatus.Unavailable
+                  ? $" [yellow](scan INCOMPLETE {Dash(rich)} other files not verified)[/]"
+                  : string.Empty)
             : report.YaraScanStatus switch
             {
                 YaraScanStatus.Unavailable => "[grey]Malware signatures (YARA):[/] [yellow]not verified (scan did not run)[/]",

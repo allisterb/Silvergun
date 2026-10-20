@@ -35,6 +35,8 @@ public static class YaraScannerFactory
         // The in-process backend's compiled ruleset is a static Lazy, so a single instance suffices.
         return new LibYaraScanner();
 #else
+        // Process-lifetime and never disposed (callers share it, and any of them may be mid-scan): YaraCliScanner deletes
+        // its temp rules dirs at process exit instead. A no-engine instance created no dirs, so dropping it is enough.
         var cli = new YaraCliScanner();
         return cli.Available ? cli : NullYaraScanner.Instance;
 #endif

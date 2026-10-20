@@ -71,7 +71,8 @@ public sealed class YaraScannerTests
     {
         using var _ = new YaraEnvScope(yara: null, yarac: null);
 
-        Assert.False(new YaraCliScanner().Available);
+        using var cli = new YaraCliScanner();
+        Assert.False(cli.Available);
     }
 
     // ...and its scans return empty (degrades to a no-op) without throwing.
@@ -80,7 +81,7 @@ public sealed class YaraScannerTests
     {
         using var _ = new YaraEnvScope(yara: null, yarac: null);
 
-        var scanner = new YaraCliScanner();
+        using var scanner = new YaraCliScanner();
 
         Assert.Empty(scanner.ScanFile("/tmp/whatever.dll"));
     }
@@ -92,7 +93,7 @@ public sealed class YaraScannerTests
         var missing = Path.Combine(Path.GetTempPath(), "silvergun-no-such-yara-" + Guid.NewGuid().ToString("N"));
         using var _ = new YaraEnvScope(yara: missing, yarac: null);
 
-        var scanner = new YaraCliScanner();
+        using var scanner = new YaraCliScanner();
 
         Assert.False(scanner.Available);
         Assert.Empty(scanner.ScanFile("/tmp/whatever.dll"));
@@ -109,7 +110,8 @@ public sealed class YaraScannerTests
         using var _ = new YaraEnvScope(yara, yarac: null);
         try
         {
-            Assert.True(new YaraCliScanner().Available);
+            using var cli = new YaraCliScanner();
+            Assert.True(cli.Available);
         }
         finally
         {
@@ -127,7 +129,8 @@ public sealed class YaraScannerTests
         File.WriteAllText(file, "harmless content");
         try
         {
-            Assert.Empty(new YaraCliScanner().ScanFile(file));
+            using var cli = new YaraCliScanner();
+            Assert.Empty(cli.ScanFile(file));
         }
         finally
         {

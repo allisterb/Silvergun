@@ -56,7 +56,7 @@ public sealed class YaraCliScannerUnsafePathTests
         var hostile = tree.Write("lib/net8.0/n\nl.bin", HermeticWiperSample.Bytes);
         tree.Write("lib/net8.0/clean.txt", "no signature here\n");
 
-        var scanner = new YaraCliScanner();
+        using var scanner = new YaraCliScanner();
         Assert.True(scanner.Available, "The Linux integration tier requires a real yara binary.");
 
         var hits = scanner.ScanDirectory(tree.Root);
@@ -87,7 +87,7 @@ public sealed class YaraCliScannerUnsafePathTests
         tree.Write("content/be\rnign.bin", "nothing matching in here at all\n");
         tree.Write("content/car\nriage.txt", "still nothing\n");
 
-        var scanner = new YaraCliScanner();
+        using var scanner = new YaraCliScanner();
 
         var hits = scanner.ScanDirectory(tree.Root);
 
@@ -114,7 +114,7 @@ public sealed class YaraCliScannerUnsafePathTests
         File.SetUnixFileMode(unreadable, UnixFileMode.None);
         Assert.Throws<UnauthorizedAccessException>(() => File.ReadAllBytes(unreadable));
 
-        var scanner = new YaraCliScanner();
+        using var scanner = new YaraCliScanner();
 
         var ex = Assert.Throws<YaraScanIncompleteException>(() => scanner.ScanDirectory(tree.Root));
 
@@ -151,7 +151,8 @@ public sealed class YaraCliScannerUnsafePathTests
                 ("content/n\nl.bin", HermeticWiperSample.Bytes),
             ]);
 
-        var scan = PackageScanner.Scan(nupkg, runYara: true, yaraScanner: new YaraCliScanner());
+        using var cli = new YaraCliScanner();
+        var scan = PackageScanner.Scan(nupkg, runYara: true, yaraScanner: cli);
 
         Assert.True(scan.IsSuccess, scan.Message);
         Assert.Equal(YaraScanStatus.Completed, scan.Value.YaraScanStatus);
@@ -167,43 +168,54 @@ public sealed class YaraCliScannerUnsafePathTests
     // --- ScanFile's null-vs-empty contract, everywhere -------------------------------------------------------
 
     // The refactor that shipped with ADR 0029 moved ScanFile onto a ScanOne that returns NULL for "did not scan"
-    // (so the recovery pass can tell that apart from "scanned, no hits"). ScanFile must still flatten null to an
-    // empty list: a missing file is a per-file error the never-throws contract requires it to swallow.
+    // (so the recovery pass can tell that apart from "scanned, no hits"). REWRITTEN for ADR 0032 decision 5 (was
+    // ScanFile_WhenTheFileIsMissing_ReturnsEmptyAndDoesNotThrow): ScanFile used to flatten that null to an empty
+    // list, which is exactly the "did not scan reads as clean" confusion the null exists to prevent. It now throws
+    // the one fail-closed exception instead — the null-vs-empty distinction is preserved all the way out, rather
+    // than being thrown away at the last step. Never an unrelated exception type (e.g. FileNotFoundException).
     [Fact]
-    public void ScanFile_WhenTheFileIsMissing_ReturnsEmptyAndDoesNotThrow()
+    public void ScanFile_WhenTheFileIsMissing_ThrowsIncompleteRatherThanReturningEmpty()
     {
         using var fake = new PlaceholderYaraBinary();
-        var scanner = new YaraCliScanner();
+        using var scanner = new YaraCliScanner();
+        var missing = Path.Combine(fake.Directory, "no-such-file-" + Guid.NewGuid().ToString("N") + ".bin");
 
         Assert.True(scanner.Available, "A SILVERGUN_YARA_PATH that resolves to an existing file reads as available.");
-        Assert.Empty(scanner.ScanFile(Path.Combine(fake.Directory, "no-such-file-" + Guid.NewGuid().ToString("N") + ".bin")));
+        var ex = Assert.Throws<YaraScanIncompleteException>(() => scanner.ScanFile(missing));
+        Assert.Contains(Path.GetFileName(missing), ex.Message, StringComparison.Ordinal);
     }
 
-    // Degenerate paths take the same swallowed route — empty, never null, never a throw.
+    // Degenerate paths name no file that could have been scanned, so they take the same route — REWRITTEN for ADR
+    // 0032 (was ScanFile_ForDegeneratePaths_ReturnsEmptyAndDoesNotThrow): the one fail-closed exception, never an
+    // empty list and never an ArgumentException out of the path APIs.
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
-    public void ScanFile_ForDegeneratePaths_ReturnsEmptyAndDoesNotThrow(string path)
+    public void ScanFile_ForDegeneratePaths_ThrowsIncompleteRatherThanReturningEmpty(string path)
     {
         using var fake = new PlaceholderYaraBinary();
 
-        Assert.Empty(new YaraCliScanner().ScanFile(path));
+        using var cli = new YaraCliScanner();
+        Assert.Throws<YaraScanIncompleteException>(() => cli.ScanFile(path));
     }
 
-    // The yara "binary" exists (so the backend reports Available) but cannot be launched. ScanFile must return
-    // empty rather than propagating the Win32Exception — unlike ScanDirectory, which fails closed for the same
-    // condition (YaraCliFailClosedTests).
+    // The yara "binary" exists (so the backend reports Available) but cannot be launched. REWRITTEN for ADR 0032
+    // (was ScanFile_WhenTheYaraBinaryCannotBeLaunched_ReturnsEmptyAndDoesNotThrow): ScanFile now fails closed for
+    // this condition exactly as ScanDirectory does (YaraCliFailClosedTests). What survives of the original intent is
+    // that the launcher's own Win32Exception never escapes — only the contract's exception type does.
     [Fact]
-    public void ScanFile_WhenTheYaraBinaryCannotBeLaunched_ReturnsEmptyAndDoesNotThrow()
+    public void ScanFile_WhenTheYaraBinaryCannotBeLaunched_ThrowsIncompleteNotTheLaunchException()
     {
         using var fake = new PlaceholderYaraBinary();
         using var tree = new TempTree();
         var target = tree.Write("lib/net8.0/payload.bin", HermeticWiperSample.Bytes);
 
-        var scanner = new YaraCliScanner();
+        using var scanner = new YaraCliScanner();
 
         Assert.True(scanner.Available);
-        Assert.Empty(scanner.ScanFile(target));
+        var ex = Record.Exception(() => scanner.ScanFile(target));
+        Assert.IsType<YaraScanIncompleteException>(ex);
+        Assert.Contains("payload.bin", ex.Message, StringComparison.Ordinal);
     }
 
     // --- The two directory cases that are genuinely "nothing to scan" ----------------------------------------
@@ -215,7 +227,8 @@ public sealed class YaraCliScannerUnsafePathTests
         using var fake = new PlaceholderYaraBinary();
         var missing = Path.Combine(Path.GetTempPath(), "silvergun-no-such-dir-" + Guid.NewGuid().ToString("N"));
 
-        Assert.Empty(new YaraCliScanner().ScanDirectory(missing));
+        using var cli = new YaraCliScanner();
+        Assert.Empty(cli.ScanDirectory(missing));
     }
 
     // An empty directory is a completed scan with no hits — the trivial base case that must not be confused with
@@ -227,7 +240,8 @@ public sealed class YaraCliScannerUnsafePathTests
         using var fake = new PlaceholderYaraBinary();
         using var tree = new TempTree();
 
-        Assert.Empty(new YaraCliScanner().ScanDirectory(tree.Root));
+        using var cli = new YaraCliScanner();
+        Assert.Empty(cli.ScanDirectory(tree.Root));
     }
 
     // The name predicate the partition depends on agrees with the fixture this suite stages: if this ever read

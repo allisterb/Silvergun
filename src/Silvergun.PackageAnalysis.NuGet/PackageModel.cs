@@ -97,7 +97,10 @@ public sealed record PackageCapabilityReport(
     IReadOnlyList<PackageScript> Scripts,
     IReadOnlyList<ScriptFinding> ScriptFindings,
     ProjectHealth? ProjectHealth = null,   // additive (ADR 0015); populated only under scan-package --health, else null
-    IReadOnlyList<YaraFinding>? YaraFindings = null,   // additive (ADR 0016); YARA malware-signature hits, empty when disabled/unavailable
+    // additive (ADR 0016); YARA malware-signature hits. Empty when YARA was not run or there is no engine. Under
+    // YaraScanStatus.Unavailable it may hold the partial hits of an incomplete scan, which are real detections; an
+    // empty list is never by itself evidence of a clean package; read it with YaraScanStatus (ADR 0032 decision 3).
+    IReadOnlyList<YaraFinding>? YaraFindings = null,
     IReadOnlyList<VulnerabilityFinding>? Vulnerabilities = null,   // additive (ADR 0017); OSV known-vuln hits, attached by the CLI, empty when skipped/unavailable
     VulnerabilityScanStatus VulnerabilitiesStatus = VulnerabilityScanStatus.NotChecked,   // additive (ADR 0017 amendment); whether the OSV check ran — old JSON ⇒ NotChecked
     IReadOnlyList<ResolvedDependency>? ResolvedDependencies = null,   // additive (ADR 0018); resolver-lite transitive set, attached by the CLI, empty when depth 0 / not run

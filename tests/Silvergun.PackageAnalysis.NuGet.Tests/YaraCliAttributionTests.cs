@@ -45,7 +45,8 @@ public sealed class YaraCliAttributionTests
         var innocent = tree.Write("content/a.bin", "no signature here\n");
         var hostile = tree.Write("content/a.bin\nZZZ", HermeticWiperSample.Bytes);
 
-        var hits = new YaraCliScanner().ScanDirectory(tree.Root);
+        using var cli = new YaraCliScanner();
+        var hits = cli.ScanDirectory(tree.Root);
 
         var hit = Assert.Single(hits);
         Assert.Equal(hostile, hit.FullPath);
@@ -65,7 +66,8 @@ public sealed class YaraCliAttributionTests
         var innocent = tree.Write("content/a.bin", HermeticWiperSample.Bytes);
         tree.Write("content/a.bin\nZZZ", "no signature here\n");
 
-        var hits = new YaraCliScanner().ScanDirectory(tree.Root);
+        using var cli = new YaraCliScanner();
+        var hits = cli.ScanDirectory(tree.Root);
 
         var hit = Assert.Single(hits);
         Assert.Equal(innocent, hit.FullPath);
@@ -84,7 +86,8 @@ public sealed class YaraCliAttributionTests
         var matching = tree.Write("content/x.bin", HermeticWiperSample.Bytes);
         var padded = tree.Write("content/x.bin ", "no signature here\n");
 
-        var hits = new YaraCliScanner().ScanDirectory(tree.Root);
+        using var cli = new YaraCliScanner();
+        var hits = cli.ScanDirectory(tree.Root);
 
         var hit = Assert.Single(hits);
         Assert.Equal(matching, hit.FullPath);
@@ -104,7 +107,8 @@ public sealed class YaraCliAttributionTests
         var lower = tree.Write("content/a.bin", HermeticWiperSample.Bytes);
         var upper = tree.Write("content/A.bin", "no signature here\n");
 
-        var hits = new YaraCliScanner().ScanDirectory(tree.Root);
+        using var cli = new YaraCliScanner();
+        var hits = cli.ScanDirectory(tree.Root);
 
         var hit = Assert.Single(hits);
         Assert.Equal(lower, hit.FullPath);
@@ -129,7 +133,8 @@ public sealed class YaraCliAttributionTests
         var payload = tree.Write("content/mal.dll", HermeticWiperSample.Bytes);
         var decoy = tree.Write("content/MAL.dll\nx", Array.Empty<byte>());
 
-        var hits = new YaraCliScanner().ScanDirectory(tree.Root);
+        using var cli = new YaraCliScanner();
+        var hits = cli.ScanDirectory(tree.Root);
 
         var hit = Assert.Single(hits);
         Assert.Equal(payload, hit.FullPath);
@@ -151,7 +156,8 @@ public sealed class YaraCliAttributionTests
         var payload = tree.Write("content/a.bin", HermeticWiperSample.Bytes);
         var filler = tree.Write("content/a.bin ", "no signature here either\n");
 
-        var hits = new YaraCliScanner().ScanDirectory(tree.Root);
+        using var cli = new YaraCliScanner();
+        var hits = cli.ScanDirectory(tree.Root);
 
         var hit = Assert.Single(hits);
         Assert.Equal(payload, hit.FullPath);
@@ -179,7 +185,8 @@ public sealed class YaraCliAttributionTests
         var payload = tree.Write("content/payload.bin", HermeticWiperSample.Bytes);
         tree.Write("content/decoy.bin\nx", Array.Empty<byte>());
 
-        var hits = new YaraCliScanner().ScanDirectory(tree.Root);
+        using var cli = new YaraCliScanner();
+        var hits = cli.ScanDirectory(tree.Root);
 
         var hit = Assert.Single(hits);
         Assert.Equal(payload, hit.FullPath);
@@ -212,7 +219,8 @@ public sealed class YaraCliAttributionTests
                 ("content/MAL.bin\nx", Array.Empty<byte>()),
             ]);
 
-        var scan = PackageScanner.Scan(nupkg, runYara: true, yaraScanner: new YaraCliScanner());
+        using var cli = new YaraCliScanner();
+        var scan = PackageScanner.Scan(nupkg, runYara: true, yaraScanner: cli);
 
         Assert.True(scan.IsSuccess, scan.Message);
         Assert.Equal(YaraScanStatus.Completed, scan.Value.YaraScanStatus);
@@ -244,7 +252,8 @@ public sealed class YaraCliAttributionTests
                 ("content/a.bin\nZZZ", HermeticWiperSample.Bytes),
             ]);
 
-        var scan = PackageScanner.Scan(nupkg, runYara: true, yaraScanner: new YaraCliScanner());
+        using var cli = new YaraCliScanner();
+        var scan = PackageScanner.Scan(nupkg, runYara: true, yaraScanner: cli);
 
         Assert.True(scan.IsSuccess, scan.Message);
         Assert.Equal(YaraScanStatus.Completed, scan.Value.YaraScanStatus);

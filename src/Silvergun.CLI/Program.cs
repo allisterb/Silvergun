@@ -347,11 +347,15 @@ internal static class Program
         // SELECTED, not that it worked: on the net10.0-windows build LibYaraScanner is always selected but can still
         // fail to initialize (its native libyara.NET dependency missing), which previously produced zero findings
         // with NO advisory at all — exactly the silent-zero defect this check exists to close. Printed at most once
-        // per run (report.YaraScanStatus is a single value for the whole scan, not per-file).
+        // per run (report.YaraScanStatus is a single value for the whole scan, not per-file). Unavailable WITH findings
+        // is a scan that started and could not finish (ADR 0032): saying it "did NOT run" would contradict the
+        // matches in the report, so that case says what actually happened — hits found, the rest unverified.
         if (!noYara && report.YaraScanStatus == YaraScanStatus.Unavailable)
-            Console.Error.WriteLine(
-                "scan-package: YARA malware-signature scanning did NOT run (backend unavailable or failed to initialize); " +
-                "findings for this package are NOT verified against the malware-signature ruleset.");
+            Console.Error.WriteLine(report.YaraFindings.Count > 0
+                ? $"scan-package: YARA malware-signature scanning did NOT complete; {report.YaraFindings.Count} match(es) were found " +
+                  "in the files that were scanned, and the remaining files are NOT verified against the malware-signature ruleset."
+                : "scan-package: YARA malware-signature scanning did NOT run (backend unavailable or failed to initialize); " +
+                  "findings for this package are NOT verified against the malware-signature ruleset.");
 
         // --health is the ONLY thing that adds a network call to scan-package (the offline scan above stays offline).
         // Repo resolution is offline (local nuspec); only the GitHub lookup is network. Advisory — never touches the

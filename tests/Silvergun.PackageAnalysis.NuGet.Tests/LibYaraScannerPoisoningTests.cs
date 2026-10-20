@@ -255,10 +255,12 @@ public sealed class LibYaraScannerPoisoningTests : IClassFixture<PackageFixture>
         Assert.True(canaryTimeout > TimeSpan.Zero);
     }
 
-    // C1 (ADR 0027 decision 4 / ADR 0016 "never throws"): a NATIVE scan fault is a single file's problem and must
-    // be logged and swallowed, never propagated. The reviewed regression let a faulted bounded scan escape
-    // ScanFile as an AggregateException, which PackageScanner.ScanYara turns into a whole-package
-    // YaraScanStatus.Unavailable — a false Unavailable that also discards every other file's findings.
+    // C1, REWRITTEN for ADR 0032 decision 5 (was ScanFile_WhenTheNativeScanFaults_ReturnsEmptyAndDoesNotThrow). A
+    // native scan fault is still a single file's problem, and the reviewed regression it guarded against — a faulted
+    // bounded scan escaping ScanFile as a raw AggregateException — is still wrong. But the old resolution, swallowing
+    // the fault as an EMPTY list, made "this file was never scanned" read as "scanned, clean" (ADR 0030's carve-out,
+    // closed by ADR 0032). The fault now leaves as the contract's one fail-closed exception, naming the file, with
+    // the native cause preserved as InnerException; the default ScanDirectory loop isolates it (next test).
     //
     // The seam is deterministic and needs no fault injection into src/: hold the target open with
     // FileShare.None. Our own File.Exists guard is satisfied (GetFileAttributes does not need the share), but
@@ -266,7 +268,7 @@ public sealed class LibYaraScannerPoisoningTests : IClassFixture<PackageFixture>
     // wrapper throws — exactly the "CreateFile failing on a share-denied path even after File.Exists said
     // otherwise" path named in ScanFile's own contract.
     [Fact]
-    public void ScanFile_WhenTheNativeScanFaults_ReturnsEmptyAndDoesNotThrow()
+    public void ScanFile_WhenTheNativeScanFaults_ThrowsIncompleteNamingTheFile()
     {
         var scanner = new LibYaraScanner();
         Assert.True(scanner.Available, "The in-process engine did not build; ScanFile would short-circuit before reaching the native call.");
@@ -281,17 +283,37 @@ public sealed class LibYaraScannerPoisoningTests : IClassFixture<PackageFixture>
 
         IReadOnlyList<YaraMatch>? matches = null;
         var thrown = Record.Exception(() => matches = scanner.ScanFile(target));
-        output.WriteLine($"ScanFile over a share-denied file threw {thrown?.GetType().Name ?? "nothing"} and returned {matches?.Count.ToString() ?? "<no result>"} match(es).");
+        output.WriteLine($"ScanFile over a share-denied file threw {thrown?.GetType().Name ?? "nothing"} ({thrown?.Message}) and returned {matches?.Count.ToString() ?? "<no result>"} match(es).");
 
-        Assert.Null(thrown);
-        Assert.NotNull(matches);
-        Assert.Empty(matches!);
+        var ex = Assert.IsType<YaraScanIncompleteException>(thrown);
+        Assert.Null(matches);
+        Assert.Contains("target.bin", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("must not be reported as clean", ex.Message, StringComparison.Ordinal);
+        Assert.NotNull(ex.InnerException);                          // the native cause, kept machine-readable
+        Assert.IsNotType<YaraScanIncompleteException>(ex.InnerException);   // ...and not re-wrapped
     }
 
-    // C1's user-visible consequence, and the reason it was Critical: one unreadable file must not sink the rest of
-    // the package. Over a tree holding several readable files and one share-denied file, the ScanDirectory loop
-    // must visit EVERY file and return normally; pre-fix the native fault escaped the first faulting ScanFile,
-    // aborted the loop, and PackageScanner reported the whole package Unavailable with zero findings.
+    // ADR 0032 decision 5, the other half of the same branch: a path that does not exist was not scanned either.
+    // It used to log and return empty.
+    [Fact]
+    public void ScanFile_WhenTheFileIsMissing_ThrowsIncompleteNamingTheFile()
+    {
+        var scanner = new LibYaraScanner();
+        Assert.True(scanner.Available, "The in-process engine did not build; ScanFile would short-circuit before the missing-file check.");
+
+        var missing = Path.Combine(Path.GetTempPath(), $"silvergun-yara-missing-{Guid.NewGuid():N}.bin");
+
+        var ex = Assert.Throws<YaraScanIncompleteException>(() => scanner.ScanFile(missing));
+        Assert.Contains(Path.GetFileName(missing), ex.Message, StringComparison.Ordinal);
+        Assert.Contains("must not be reported as clean", ex.Message, StringComparison.Ordinal);
+    }
+
+    // C1's user-visible consequence, REWRITTEN for ADR 0032 decision 6 (was
+    // ScanDirectory_WhenOneFileFaults_StillScansEveryOtherFileAndDoesNotThrow). The part of the original intent that
+    // holds is unchanged and still asserted: one unreadable file must not sink the rest of the package — the
+    // ScanDirectory loop visits EVERY file, and the locked file contributes no hit. What changed is how it ends: it
+    // used to "return normally", which reported a package with an UNSCANNED file as a completed clean scan. It now
+    // throws the fail-closed exception naming the locked file, carrying every other file's hits in PartialFindings.
     //
     // "Visited every file" is observed through a pass-through decorator rather than by asserting on returned hits:
     // the embedded ReversingLabs ruleset has no benign trigger (no EICAR-style rule), so no file this test is
@@ -299,7 +321,7 @@ public sealed class LibYaraScannerPoisoningTests : IClassFixture<PackageFixture>
     // loop. The decorator overrides nothing but ScanFile, so the loop under test is the same default-interface
     // ScanDirectory the product runs.
     [Fact]
-    public void ScanDirectory_WhenOneFileFaults_StillScansEveryOtherFileAndDoesNotThrow()
+    public void ScanDirectory_WhenOneFileFaults_StillScansEveryOtherFileAndThrowsIncompleteNamingIt()
     {
         var real = new LibYaraScanner();
         Assert.True(real.Available, "The in-process engine did not build; every file below would short-circuit.");
@@ -313,16 +335,19 @@ public sealed class LibYaraScannerPoisoningTests : IClassFixture<PackageFixture>
         IReadOnlyList<(string FullPath, YaraMatch Match)>? hits = null;
         var thrown = Record.Exception(() => hits = observed.ScanDirectory(tree.Root));
         var visited = ((RecordingScanner)observed).Visited;
-        output.WriteLine($"ScanDirectory over 1 share-denied + {readable.Length} readable file(s) threw {thrown?.GetType().Name ?? "nothing"}, visited {visited.Count} file(s), returned {hits?.Count.ToString() ?? "<no result>"} hit(s).");
+        output.WriteLine($"ScanDirectory over 1 share-denied + {readable.Length} readable file(s) threw {thrown?.GetType().Name ?? "nothing"}, visited {visited.Count} file(s).");
 
-        Assert.Null(thrown);
-        Assert.NotNull(hits);
         // The faulting file did not abort the loop: every readable file was still handed to the backend...
         Assert.All(readable, file => Assert.Contains(file, visited));
         Assert.Contains(locked, visited);
         Assert.Equal(readable.Length + 1, visited.Count);
+        // ...and the scan is NOT reported as complete: it names the file that was not scanned...
+        var ex = Assert.IsType<YaraScanIncompleteException>(thrown);
+        Assert.Null(hits);
+        Assert.Contains("could not scan 1 of 4 file(s)", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("'0-locked.bin'", ex.Message, StringComparison.Ordinal);
         // ...and the file that could not be read contributed no hits of its own.
-        Assert.DoesNotContain(hits!, hit => string.Equals(hit.FullPath, locked, StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(ex.PartialFindings, hit => string.Equals(hit.FullPath, locked, StringComparison.OrdinalIgnoreCase));
     }
 
     // The other half of C1: swallowing must NOT have been widened into swallowing the deliberate carve-out. Past

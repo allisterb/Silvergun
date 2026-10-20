@@ -51,7 +51,7 @@ public sealed class YaraCliDroppedHitTests
         var ghost = Path.Combine(tree.Root, "content", "ghost.bin");   // deliberately never created
         using var fake = new FakeYaraBinary(batchStdOut: $"Fake_Rule {ghost}");
 
-        var scanner = new YaraCliScanner();
+        using var scanner = new YaraCliScanner();
 
         Assert.True(scanner.Available);
         var ex = Assert.Throws<YaraScanIncompleteException>(() => scanner.ScanDirectory(tree.Root));
@@ -78,7 +78,8 @@ public sealed class YaraCliDroppedHitTests
         var elsewhere = outside.Write("outside-the-package.bin", "not part of this package at all\n");
         using var fake = new FakeYaraBinary(batchStdOut: $"Fake_Rule {elsewhere}");
 
-        var hits = new YaraCliScanner().ScanDirectory(tree.Root);
+        using var cli = new YaraCliScanner();
+        var hits = cli.ScanDirectory(tree.Root);
 
         Assert.Empty(hits);
         Assert.DoesNotContain(hits, h => h.FullPath == elsewhere);
@@ -95,7 +96,8 @@ public sealed class YaraCliDroppedHitTests
         tree.Write("content/real.bin", "ordinary content\n");
         using var fake = new FakeYaraBinary(batchStdOut: $"Fake_Rule {tree.Root}\\nsome warning yara printed");
 
-        Assert.Empty(new YaraCliScanner().ScanDirectory(tree.Root));
+        using var cli = new YaraCliScanner();
+        Assert.Empty(cli.ScanDirectory(tree.Root));
     }
 
     // --- Decision 17a: the deferred set is excluded, or decision 12 is destroyed --------------------------------
@@ -123,7 +125,8 @@ public sealed class YaraCliDroppedHitTests
         var truncated = Path.Combine(tree.Root, "content", "n");
         using var fake = new FakeYaraBinary(batchStdOut: $"Fake_Rule {truncated}\\nl.bin", echoRule: "Fake_Rule");
 
-        var hits = new YaraCliScanner().ScanDirectory(tree.Root);
+        using var cli = new YaraCliScanner();
+        var hits = cli.ScanDirectory(tree.Root);
 
         var hit = Assert.Single(hits);
         Assert.Equal(hostile, hit.FullPath);
@@ -147,7 +150,8 @@ public sealed class YaraCliDroppedHitTests
         var truncated = Path.Combine(tree.Root, "content", "n");
         using var fake = new FakeYaraBinary(batchStdOut: $"Fake_Rule {truncated}\\nl.bin", echoRule: "Fake_Rule");
 
-        var ex = Assert.Throws<YaraScanIncompleteException>(() => new YaraCliScanner().ScanDirectory(tree.Root));
+        using var cli = new YaraCliScanner();
+        var ex = Assert.Throws<YaraScanIncompleteException>(() => cli.ScanDirectory(tree.Root));
 
         Assert.Contains("matched 1 target(s)", ex.Message, StringComparison.Ordinal);
         Assert.Contains("could not be attributed to any file it enumerated", ex.Message, StringComparison.Ordinal);
@@ -167,7 +171,8 @@ public sealed class YaraCliDroppedHitTests
         var shared = Path.Combine(tree.Root, "content", "dup.bin");
         using var fake = new FakeYaraBinary(batchStdOut: $"Fake_Rule {shared}", echoRule: "Fake_Rule");
 
-        var hits = new YaraCliScanner().ScanDirectory(tree.Root);
+        using var cli = new YaraCliScanner();
+        var hits = cli.ScanDirectory(tree.Root);
 
         Assert.Equal(2, hits.Count);
         Assert.Single(hits, h => h.FullPath == plain);
@@ -192,7 +197,8 @@ public sealed class YaraCliDroppedHitTests
         using var fake = new FakeYaraBinary(
             batchStdOut: $"Fake_Rule {truncated}\\nl.bin\\nFake_Rule {ghost}", echoRule: "Fake_Rule");
 
-        var ex = Assert.Throws<YaraScanIncompleteException>(() => new YaraCliScanner().ScanDirectory(tree.Root));
+        using var cli = new YaraCliScanner();
+        var ex = Assert.Throws<YaraScanIncompleteException>(() => cli.ScanDirectory(tree.Root));
 
         Assert.Contains("ghost.bin", ex.Message, StringComparison.Ordinal);
 
@@ -215,7 +221,8 @@ public sealed class YaraCliDroppedHitTests
         var ghost = Path.Combine(tree.Root, "content", "gh\tost.bin");
         using var fake = new FakeYaraBinary(batchStdOut: $"Fake_Rule {ghost}");
 
-        var ex = Assert.Throws<YaraScanIncompleteException>(() => new YaraCliScanner().ScanDirectory(tree.Root));
+        using var cli = new YaraCliScanner();
+        var ex = Assert.Throws<YaraScanIncompleteException>(() => cli.ScanDirectory(tree.Root));
 
         Assert.All(ex.Message, c => Assert.False(
             c < ' ' || c is >= (char)0x7F and <= (char)0x9F or (char)0x2028 or (char)0x2029

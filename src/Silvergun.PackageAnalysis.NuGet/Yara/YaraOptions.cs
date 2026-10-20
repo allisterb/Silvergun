@@ -23,7 +23,9 @@ public sealed class YaraOptions
     public bool? FastScan { get; init; }           // -f            fast mode (first match per rule)
     public bool? Compiled { get; init; }           // -C            rules file is compiled (yarac output)
     public bool? NoFollowSymlinks { get; init; }   // -N            do not follow symlinks
-    public int? Timeout { get; init; }             // --timeout N   skip a file after N seconds
+    public int? Timeout { get; init; }             // --timeout N   abort after N seconds: per file on a single-file scan, but ONE
+                                                   //               deadline for the whole run with -r — files still queued
+                                                   //               when it passes are dropped silently (exit 0, no stderr)
     public string? Tag { get; init; }              // -t TAG        only apply rules with this tag
     #endregion
 

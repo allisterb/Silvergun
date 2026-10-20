@@ -81,6 +81,31 @@ internal static class YaraPathSafety
         return sb.ToString();
     }
 
+    /// <summary>
+    /// <paramref name="path"/> relative to <paramref name="rootDir"/>, for display: a lexical prefix strip at a
+    /// separator boundary, or <paramref name="path"/> unchanged when it is not under the root. Deliberately not
+    /// <see cref="Path.GetRelativePath(string, string)"/>: that resolves through the platform normalizer, which turns
+    /// a device-named entry (<c>COM1.dll</c>) into <c>\\.\COM1</c> on Windows (ADR 0030, sixth instance). The result
+    /// is still package text; <see cref="Escape"/> it before it reaches a log line or a message.
+    /// </summary>
+    internal static string Relative(string? rootDir, string path) =>
+        !string.IsNullOrEmpty(rootDir) && path.Length > rootDir.Length && path.StartsWith(rootDir, StringComparison.Ordinal)
+        && (IsSeparator(rootDir[^1]) || IsSeparator(path[rootDir.Length]))
+            ? path[rootDir.Length..].TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            : path;
+
+    /// <summary>
+    /// Attacker-influenced text items (paths, yara's own output lines) rendered for a log line or an exception
+    /// message: each quoted and <see cref="Escape"/>d, at most <see cref="MaxListedItems"/> of them, the rest summarized
+    /// as <c>", and N more"</c> so a package full of them cannot flood either. The one rendering both the CLI backend
+    /// and the default <see cref="IYaraScanner.ScanDirectory"/> loop use, so every YARA message reads the same way.
+    /// </summary>
+    internal static string Bounded(IReadOnlyList<string> items) =>
+        string.Join(", ", items.Take(MaxListedItems).Select(p => "'" + Escape(p) + "'"))
+        + (items.Count > MaxListedItems ? $", and {items.Count - MaxListedItems} more" : string.Empty);
+
+    private static bool IsSeparator(char c) => c == Path.DirectorySeparatorChar || c == Path.AltDirectorySeparatorChar;
+
     // The C0 range — the definition of "unsafe name" (ADR 0029 decision 11).
     private static bool IsC0(char c) => c <= (char)0x1F;
 
@@ -112,6 +137,9 @@ internal static class YaraPathSafety
     #endregion
 
     #region Fields
+    /// <summary>How many items <see cref="Bounded"/> names before summarizing the rest as ", and N more".</summary>
+    internal const int MaxListedItems = 10;
+
     private const char Tab = (char)0x09;
     private const char Lf = (char)0x0A;
     private const char Cr = (char)0x0D;

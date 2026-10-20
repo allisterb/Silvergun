@@ -1,16 +1,14 @@
 namespace Silvergun.PackageAnalysis.NuGet.Tests;
 
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
 
-using Microsoft.Extensions.Logging;
-
 using Silvergun;
 using Silvergun.CodeAnalysis.IL.Tests.Fixture;
+using Silvergun.Tests.Shared;
 
 using Xunit;
 
@@ -326,23 +324,13 @@ public sealed class UninventoriedEntryTests : IClassFixture<UninventoriedPackage
         return open.Value;
     }
 
-    // Runtime.logger is a shared static field, so the swap window is kept to the single Open call and restored in a
-    // finally. A concurrently-running unrelated test's warnings may also land in the capture; every assertion below
-    // uses Contains/Single-with-predicate over a phrase unique to this code path, never an exact count of the whole
-    // capture, so nothing here depends on what any other test logged.
+    // The warnings the single Open call logs, through the shared WarningCapture: Runtime.logger is process-global, and
+    // this class used to swap it in and out itself, which could displace a YARA test's capture running in parallel (and
+    // be displaced by it). The capture is scoped to this test's own flow, so another test's warnings cannot land in it.
     private static (NuGetPackage Package, IReadOnlyList<string> Warnings) OpenCapturingWarnings(string nupkgPath)
     {
-        var capture = new WarningCapture();
-        var original = Runtime.logger;
-        Runtime.logger = capture;
-        try
-        {
-            return (Open(nupkgPath), capture.Messages.ToArray());
-        }
-        finally
-        {
-            Runtime.logger = original;
-        }
+        using var capture = new WarningCapture();
+        return (Open(nupkgPath), capture.Warnings);
     }
 
     // Everything an uninventoried entry's synthesized result must say: no analysis, a reason that says so, and the
@@ -359,8 +347,8 @@ public sealed class UninventoriedEntryTests : IClassFixture<UninventoriedPackage
         Assert.Equal(string.Empty, result.Assembly.Sha256);
     }
 
-    // The one coverage-loss warning for a given (escaped) entry name. Filtered by the name as well as the phrase
-    // because the capture is process-wide: a test running in parallel must not be able to satisfy — or break — this.
+    // The one coverage-loss warning for a given (escaped) entry name. Filtered by the name as well as the phrase, so
+    // the assertion names exactly the entry it is about even though the capture holds every warning Open logged.
     private static string CoverageLostWarning(IEnumerable<string> warnings, string escapedEntryName) =>
         Assert.Single(
             warnings,
@@ -382,31 +370,6 @@ public sealed class UninventoriedEntryTests : IClassFixture<UninventoriedPackage
     private const string CoverageLostPhrase = "was NOT inventoried";
 
     private readonly UninventoriedPackageFixture fixture;
-    #endregion
-
-    #region Child types
-    private sealed class WarningCapture : ILogger
-    {
-        public ConcurrentQueue<string> Messages { get; } = new();
-
-        public IDisposable BeginScope<TState>(TState state) where TState : notnull => NoopScope.Instance;
-
-        public bool IsEnabled(LogLevel logLevel) => true;
-
-        public void Log<TState>(
-            LogLevel logLevel, EventId eventId, TState state, Exception? exception,
-            Func<TState, Exception?, string> formatter)
-        {
-            if (logLevel == LogLevel.Warning)
-                Messages.Enqueue(formatter(state, exception));
-        }
-
-        private sealed class NoopScope : IDisposable
-        {
-            public static readonly NoopScope Instance = new();
-            public void Dispose() { }
-        }
-    }
     #endregion
 }
 

@@ -1,13 +1,13 @@
 namespace Silvergun.CodeAnalysis.IL.Tests;
 
 using System;
-using System.Collections.Concurrent;
 using System.Linq;
 using System.Reflection;
 
 using Silvergun;
 using Silvergun.CodeAnalysis.IL;
 using Silvergun.CodeAnalysis.IL.Tests.IndicatorCapFixture;
+using Silvergun.Tests.Shared;
 
 using Xunit;
 
@@ -170,27 +170,19 @@ public sealed class IndicatorAnalysisTruncationTests : IClassFixture<AssemblyAna
     }
     #endregion
 
-    // The truncation warns, same as every other bounded-output path in this codebase.
+    // The truncation warns, same as every other bounded-output path in this codebase. Observed through the shared
+    // WarningCapture (tests/Shared), never by swapping the process-global Runtime.logger, which a concurrent swap in
+    // another collection could undo mid-test.
     [Fact]
     public void Analyze_OnAssemblyWithMoreDistinctIndicatorsThanTheCap_Warns()
     {
-        var messages = new ConcurrentQueue<string>();
-        var capture = new CapturingLogger(messages);
-        var original = Runtime.logger;
-        Runtime.logger = capture;
-        Result<IndicatorReport> result;
-        try
-        {
-            result = new IndicatorAnalysis(capFixture.Assembly, maxDistinctIndicators: 5).Analyze();
-        }
-        finally
-        {
-            Runtime.logger = original;
-        }
+        using var capture = new WarningCapture();
+
+        var result = new IndicatorAnalysis(capFixture.Assembly, maxDistinctIndicators: 5).Analyze();
 
         Assert.True(result.IsSuccess, result.Message);
         Assert.True(result.Value.Truncated);
-        Assert.Contains(messages, m => m.Contains("truncated", StringComparison.OrdinalIgnoreCase) ||
+        Assert.Contains(capture.Warnings, m => m.Contains("truncated", StringComparison.OrdinalIgnoreCase) ||
                                         m.Contains("cap", StringComparison.OrdinalIgnoreCase));
     }
 
@@ -203,29 +195,6 @@ public sealed class IndicatorAnalysisTruncationTests : IClassFixture<AssemblyAna
         typeof(IndicatorAnalysis).GetMethod("ClampMaxDistinctIndicators", BindingFlags.NonPublic | BindingFlags.Static)
             ?? throw new InvalidOperationException(
                 "IndicatorAnalysis.ClampMaxDistinctIndicators not found by reflection — its shape changed; update this test.");
-
-    private sealed class CapturingLogger : Microsoft.Extensions.Logging.ILogger
-    {
-        public CapturingLogger(ConcurrentQueue<string> messages) => this.messages = messages;
-
-        public System.IDisposable BeginScope<TState>(TState state) where TState : notnull => NoopScope.Instance;
-
-        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
-
-        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state, System.Exception? exception, System.Func<TState, System.Exception?, string> formatter)
-        {
-            if (logLevel == Microsoft.Extensions.Logging.LogLevel.Warning)
-                messages.Enqueue(formatter(state, exception));
-        }
-
-        private readonly ConcurrentQueue<string> messages;
-
-        private sealed class NoopScope : System.IDisposable
-        {
-            public static readonly NoopScope Instance = new();
-            public void Dispose() { }
-        }
-    }
     #endregion
 
     private readonly AssemblyAnalyzerFixture assemblyFixture;

@@ -48,20 +48,20 @@ public sealed class YaraCliRecoveryBoundsTests
             tree.Write($"content/f{i:D2}.bin ", "ordinary content\n");
         }
 
-        var scanner = new YaraCliScanner();
+        using var scanner = new YaraCliScanner();
 
         var ex = Assert.Throws<YaraScanIncompleteException>(() => scanner.ScanDirectory(tree.Root));
         Assert.Contains($"could not scan 2 of {pairs * 2} file(s)", ex.Message, StringComparison.Ordinal);
     }
 
     // The aggregate wall clock (the scan timeout plus its grace, for the whole pass). Ten colliding files, each
-    // costing 1.5 s against a 5.25 s budget: the first few are scanned, the rest are over budget. Both halves
+    // costing 0.6 s against a 1.75 s budget: the first few are scanned, the rest are over budget. Both halves
     // matter — some files WERE recovered (so this is the budget, not a blanket failure) and the leftovers make
     // the package Unavailable instead of quietly clean.
     [LinuxFact]
     public void ScanDirectory_WhenTheRecoveryPassExceedsItsWallClockBudget_TreatsTheRemainderAsUnrecovered()
     {
-        using var fake = new FakeYaraBinary(sleepMs: 1_500);
+        using var fake = new FakeYaraBinary(sleepMs: 600);
         using var tree = new TempTree();
         const int pairs = 5;
         for (var i = 0; i < pairs; i++)
@@ -70,8 +70,9 @@ public sealed class YaraCliRecoveryBoundsTests
             tree.Write($"content/g{i}.bin ", "ordinary content\n");
         }
 
-        // 250 ms + the fixed 5 s grace: 10 files at 1.5 s each cannot fit, and the first one comfortably can.
-        var scanner = new YaraCliScanner(scanTimeoutMs: 250);
+        // 250 ms + a 1.5 s grace through the internal test seam (round E; it was the public constructor's 5 s): 10 files
+        // at 0.6 s each cannot fit, and the first one comfortably can, even with a slow cold launch.
+        using var scanner = new YaraCliScanner(250, 1_500);
 
         var ex = Assert.Throws<YaraScanIncompleteException>(() => scanner.ScanDirectory(tree.Root));
         var match = Regex.Match(ex.Message, @"could not scan (\d+) of (\d+) file\(s\)");
@@ -97,7 +98,7 @@ public sealed class YaraCliRecoveryBoundsTests
         tree.Write("content/k.bin", "ordinary content\n");
         tree.Write("content/k.bin ", "ordinary content\n");
 
-        var scanner = new YaraCliScanner();
+        using var scanner = new YaraCliScanner();
 
         Assert.True(scanner.Available, "Available is a one-time File.Exists; an engine that fails at run time still reads as available.");
         var ex = Assert.Throws<YaraScanIncompleteException>(() => scanner.ScanDirectory(tree.Root));
@@ -121,7 +122,7 @@ public sealed class YaraCliRecoveryBoundsTests
         Directory.CreateDirectory(Path.GetDirectoryName(link)!);
         File.CreateSymbolicLink(link, elsewhere);
 
-        var scanner = new YaraCliScanner();
+        using var scanner = new YaraCliScanner();
 
         var ex = Assert.Throws<YaraScanIncompleteException>(() => scanner.ScanDirectory(tree.Root));
         Assert.Contains(@"li\nnk.bin", ex.Message, StringComparison.Ordinal);
@@ -141,7 +142,7 @@ public sealed class YaraCliRecoveryBoundsTests
         tree.Write("lib/net8.0/safe.bin", "ordinary content\n");
         tree.Write("content/n\nl.bin", "ordinary content\n");
 
-        var scanner = new YaraCliScanner();
+        using var scanner = new YaraCliScanner();
         scanner.ScanDirectory(tree.Root);
 
         var staged = Assert.Single(fake.Invocations, i => i.Contains("silvergun-yara-safe-", StringComparison.Ordinal));
@@ -170,7 +171,7 @@ public sealed class YaraCliRecoveryBoundsTests
         var upper = tree.Write("content/A.bin", "different but equally ordinary content\n");
         tree.Write("content/b.bin", "ordinary content\n");
 
-        var scanner = new YaraCliScanner();
+        using var scanner = new YaraCliScanner();
         var hits = scanner.ScanDirectory(tree.Root);
 
         Assert.Empty(hits);
@@ -191,8 +192,10 @@ public sealed class YaraCliRecoveryBoundsTests
     //                               a whole new 5.25 s, so it completes at ~8 s; f3 is over. => 1 of 3
     //
     // The second shape overruns the wall clock a batch pass was allowed by almost one entire scan budget, which is
-    // the bound's whole purpose. The elapsed assertion is the secondary pin on exactly that overrun.
+    // the bound's whole purpose. The elapsed assertion is the secondary pin on exactly that overrun. Slow (round E): it
+    // waits out a 5.25 s budget by design, and the gap between the two shapes is what the 4 s sleep buys.
     [LinuxFact]
+    [Trait("Category", "Slow")]
     public void ScanDirectory_WhenTheRecoveryPassIsNearlyOutOfBudget_CutsTheNextScanToWhatRemains()
     {
         using var fake = new FakeYaraBinary(sleepMs: 4_000);
@@ -203,7 +206,7 @@ public sealed class YaraCliRecoveryBoundsTests
 
         // Every file collides, so nothing is attributable and no batch process runs: what is measured below is the
         // recovery pass alone.
-        var scanner = new YaraCliScanner(scanTimeoutMs: 250);
+        using var scanner = new YaraCliScanner(scanTimeoutMs: 250);
         var elapsed = System.Diagnostics.Stopwatch.StartNew();
 
         var ex = Assert.Throws<YaraScanIncompleteException>(() => scanner.ScanDirectory(tree.Root));

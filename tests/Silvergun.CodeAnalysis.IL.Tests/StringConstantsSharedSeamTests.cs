@@ -1,15 +1,14 @@
 namespace Silvergun.CodeAnalysis.IL.Tests;
 
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 
 using Microsoft.Cci;
-using Microsoft.Extensions.Logging;
 
 using Silvergun.CodeAnalysis.IL;
+using Silvergun.Tests.Shared;
 
 using Xunit;
 
@@ -61,26 +60,17 @@ public sealed class StringConstantsSharedSeamTests : IClassFixture<UnreadableMet
     }
 
     // The warning path fires, naming the skipped method, exactly like ObfuscationAnalysis's own guard.
-    // Runtime.logger is a shared static field; the swap window is kept to the single call under test and
-    // restored in a finally block. A concurrently-running unrelated test's warnings may also land in the
-    // capture (harmless — assertions below use Contains, not an exact count), but nothing here asserts
-    // about, or depends on, any OTHER test's logging.
+    // Observed through the shared WarningCapture (tests/Shared), never by swapping the process-global
+    // Runtime.logger: two overlapping swaps in parallel collections restore each other's logger, and one of
+    // them then goes deaf mid-test. The capture is scoped to this test's own flow.
     [Fact]
     public void StringConstants_WhenOneMethodBodyIsUnreadable_WarnsNamingTheMethod()
     {
-        var capture = new CapturingLogger();
-        var original = Runtime.logger;
-        Runtime.logger = capture;
-        try
-        {
-            _ = fixture.Patched.StringConstants().ToList();
-        }
-        finally
-        {
-            Runtime.logger = original;
-        }
+        using var capture = new WarningCapture();
 
-        Assert.Contains(capture.Messages, m =>
+        _ = fixture.Patched.StringConstants().ToList();
+
+        Assert.Contains(capture.Warnings, m =>
             m.Contains(UnreadableMethodBodyFixture.PatchedMethod, StringComparison.Ordinal) &&
             m.Contains("constant", StringComparison.OrdinalIgnoreCase));
     }
@@ -142,21 +132,13 @@ public sealed class StringConstantsSharedSeamTests : IClassFixture<UnreadableMet
     [Fact]
     public void SharedSeamAndObfuscationWalk_BothWarnForTheSameUnreadableMethod()
     {
-        var capture = new CapturingLogger();
-        var original = Runtime.logger;
-        Runtime.logger = capture;
-        try
-        {
-            _ = fixture.Patched.StringConstants().ToList();
-            var result = new ObfuscationAnalysis(fixture.Patched).Analyze();
-            Assert.True(result.IsSuccess, result.Message);
-        }
-        finally
-        {
-            Runtime.logger = original;
-        }
+        using var capture = new WarningCapture();
 
-        var loopWarnings = capture.Messages
+        _ = fixture.Patched.StringConstants().ToList();
+        var result = new ObfuscationAnalysis(fixture.Patched).Analyze();
+        Assert.True(result.IsSuccess, result.Message);
+
+        var loopWarnings = capture.Warnings
             .Where(m => m.Contains(UnreadableMethodBodyFixture.PatchedMethod, StringComparison.Ordinal))
             .ToList();
 
@@ -185,28 +167,6 @@ public sealed class StringConstantsSharedSeamTests : IClassFixture<UnreadableMet
         typeof(ObfuscationAnalysis).GetMethod("ScanMethod", BindingFlags.NonPublic | BindingFlags.Instance)
             ?? throw new InvalidOperationException(
                 "ObfuscationAnalysis.ScanMethod not found by reflection — its shape changed; update this test.");
-
-    // Captures Warning-level log messages so the guard's Runtime.Warn call can be observed from outside.
-    private sealed class CapturingLogger : ILogger
-    {
-        public ConcurrentQueue<string> Messages { get; } = new();
-
-        public IDisposable BeginScope<TState>(TState state) where TState : notnull => NoopScope.Instance;
-
-        public bool IsEnabled(LogLevel logLevel) => true;
-
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-        {
-            if (logLevel == LogLevel.Warning)
-                Messages.Enqueue(formatter(state, exception));
-        }
-
-        private sealed class NoopScope : IDisposable
-        {
-            public static readonly NoopScope Instance = new();
-            public void Dispose() { }
-        }
-    }
     #endregion
 
     private readonly UnreadableMethodBodyFixture fixture;

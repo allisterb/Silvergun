@@ -138,7 +138,8 @@ public sealed class YaraCliDeferredEchoTests
             "This theory covers the characters the output path does NOT cut a line at; an LF or CR case is the "
             + "shape that already worked and would not exercise this defect (the CR shape has its own test below).");
 
-        var hits = new YaraCliScanner().ScanDirectory(tree.Root);
+        using var cli = new YaraCliScanner();
+        var hits = cli.ScanDirectory(tree.Root);
 
         var hit = Assert.Single(hits);
         Assert.Equal(payload, hit.FullPath);
@@ -186,7 +187,8 @@ public sealed class YaraCliDeferredEchoTests
             YaraCliScanner.TryNormalize(benign),
             YaraCliScanner.TryNormalize(YaraPathSafety.TruncateAtFirstControl(payload)));
 
-        var hits = new YaraCliScanner().ScanDirectory(tree.Root);
+        using var cli = new YaraCliScanner();
+        var hits = cli.ScanDirectory(tree.Root);
 
         var hit = Assert.Single(hits);
         Assert.Equal(payload, hit.FullPath);
@@ -221,7 +223,8 @@ public sealed class YaraCliDeferredEchoTests
                 ("content/pay\tload.bin", HermeticWiperSample.Bytes),
             ]);
 
-        var scan = PackageScanner.Scan(nupkg, runYara: true, yaraScanner: new YaraCliScanner());
+        using var cli = new YaraCliScanner();
+        var scan = PackageScanner.Scan(nupkg, runYara: true, yaraScanner: cli);
 
         Assert.True(scan.IsSuccess, scan.Message);
         Assert.Equal(YaraScanStatus.Completed, scan.Value.YaraScanStatus);
@@ -269,7 +272,8 @@ public sealed class YaraCliDeferredEchoFakeEngineTests
         using var fake = new FakeYaraBinary(
             batchStdOut: $"Fake_Rule {payload}", echoRule: "Fake_Rule", recordInvocations: true);
 
-        var hits = new YaraCliScanner().ScanDirectory(tree.Root);
+        using var cli = new YaraCliScanner();
+        var hits = cli.ScanDirectory(tree.Root);
 
         var hit = Assert.Single(hits);
         Assert.Equal(payload, hit.FullPath);
@@ -297,7 +301,8 @@ public sealed class YaraCliDeferredEchoFakeEngineTests
         using var fake = new FakeYaraBinary(
             batchStdOut: $"Fake_Rule {payload}\\nFake_Rule {ghost}", echoRule: "Fake_Rule");
 
-        var ex = Assert.Throws<YaraScanIncompleteException>(() => new YaraCliScanner().ScanDirectory(tree.Root));
+        using var cli = new YaraCliScanner();
+        var ex = Assert.Throws<YaraScanIncompleteException>(() => cli.ScanDirectory(tree.Root));
 
         Assert.Contains("matched 1 target(s)", ex.Message, StringComparison.Ordinal);
         Assert.Contains("ghost.bin", ex.Message, StringComparison.Ordinal);
@@ -318,7 +323,8 @@ public sealed class YaraCliDeferredEchoFakeEngineTests
         tree.Write("content/benign.bin", "no signature here\n");
         using var fake = new FakeYaraBinary(batchStdOut: $"Fake_Rule {tree.Root}\\evil");
 
-        Assert.Empty(new YaraCliScanner().ScanDirectory(tree.Root));
+        using var cli = new YaraCliScanner();
+        Assert.Empty(cli.ScanDirectory(tree.Root));
     }
 
     // The control for the test above: the same ghost name, the same length of prefix, separated by '/' instead —
@@ -333,7 +339,8 @@ public sealed class YaraCliDeferredEchoFakeEngineTests
         tree.Write("content/benign.bin", "no signature here\n");
         using var fake = new FakeYaraBinary(batchStdOut: $"Fake_Rule {tree.Root}/evil");
 
-        var ex = Assert.Throws<YaraScanIncompleteException>(() => new YaraCliScanner().ScanDirectory(tree.Root));
+        using var cli = new YaraCliScanner();
+        var ex = Assert.Throws<YaraScanIncompleteException>(() => cli.ScanDirectory(tree.Root));
 
         Assert.Contains("matched 1 target(s)", ex.Message, StringComparison.Ordinal);
         Assert.Contains("evil", ex.Message, StringComparison.Ordinal);

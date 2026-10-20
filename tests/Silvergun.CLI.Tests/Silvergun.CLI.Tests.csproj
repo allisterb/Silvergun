@@ -33,6 +33,11 @@
          rather than duplicating a second copy: referenced (not merely built) so its dll lands in this project's
          output directory and IndicatorHeadlineAndJsonEndToEndTests can drive the real CLI against it by file name. -->
     <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.Fixture\Silvergun.CodeAnalysis.IL.Tests.Fixture.csproj" />
+    <!-- The stand-in `yara` binary of the NuGet suite (an Exe, so a ProjectReference copies its apphost here). Used by
+         YaraIncompleteScanCliTests to drive a real `scan-package` child process into an INCOMPLETE YARA scan that
+         still found hits (ADR 0032) — the only way to observe the stderr advisory and the end-to-end exit codes,
+         both of which live inline in Program.RunScanPackage. Nothing compiles against its types. -->
+    <ProjectReference Include="..\Silvergun.PackageAnalysis.NuGet.Tests.FakeYaraProbe\Silvergun.PackageAnalysis.NuGet.Tests.FakeYaraProbe.csproj" />
   </ItemGroup>
 
 </Project>

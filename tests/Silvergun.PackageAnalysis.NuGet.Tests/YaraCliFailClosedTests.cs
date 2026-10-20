@@ -33,6 +33,11 @@ using Xunit;
 /// so it runs in a child process (<see cref="YaraHarness"/>). Only the enumeration failure is Linux-gated: it
 /// needs a directory the user cannot read, and the Windows ACL APIs are not available to a <c>net10.0</c>
 /// build.</para>
+///
+/// <para><b>ADR 0032 extended the same rule to <see cref="YaraCliScanner.ScanFile"/>.</b> The two tests at the end of
+/// this class used to pin the per-file primitive <i>swallowing</i> a failed process as an empty list; they now pin
+/// it throwing, because the default <c>ScanDirectory</c> loop isolates a per-file failure and no longer needs the
+/// swallow — and an empty list there is read as "scanned, clean".</para>
 /// </summary>
 [Collection(YaraEnvCollection.Name)]
 public sealed class YaraCliFailClosedTests
@@ -51,7 +56,7 @@ public sealed class YaraCliFailClosedTests
         tree.Write("lib/net8.0/payload.bin", HermeticWiperSample.Bytes);
         tree.Write("content/notes.txt", "ordinary text\n");
 
-        var scanner = new YaraCliScanner();
+        using var scanner = new YaraCliScanner();
 
         Assert.True(scanner.Available, "Available is a one-time File.Exists, so an engine that fails at run time still reads as available.");
         var ex = Assert.Throws<YaraScanIncompleteException>(() => scanner.ScanDirectory(tree.Root));
@@ -70,7 +75,7 @@ public sealed class YaraCliFailClosedTests
         tree.Write("lib/net8.0/payload.bin", HermeticWiperSample.Bytes);
         tree.Write("content/notes.txt", "ordinary text\n");
 
-        var scanner = new YaraCliScanner();
+        using var scanner = new YaraCliScanner();
 
         Assert.True(scanner.Available, "A SILVERGUN_YARA_PATH that resolves to an existing file reads as available.");
         var ex = Assert.Throws<YaraScanIncompleteException>(() => scanner.ScanDirectory(tree.Root));
@@ -88,8 +93,9 @@ public sealed class YaraCliFailClosedTests
         using var tree = new TempTree();
         tree.Write("lib/net8.0/payload.bin", HermeticWiperSample.Bytes);
 
-        // The scanner's hard wall clock is this budget plus a fixed 5 s grace, so the test costs about that long.
-        var scanner = new YaraCliScanner(scanTimeoutMs: 250);
+        // The scanner's hard wall clock is this budget plus its grace — 5 s from the public constructor, 1.5 s here through
+        // the internal test seam — so the test costs about 1.75 s. The fake sleeps two minutes: only the kill ends it.
+        using var scanner = new YaraCliScanner(250, 1_500);
 
         Assert.True(scanner.Available);
         var ex = Assert.Throws<YaraScanIncompleteException>(() => scanner.ScanDirectory(tree.Root));
@@ -133,7 +139,7 @@ public sealed class YaraCliFailClosedTests
         Assert.Throws<UnauthorizedAccessException>(
             () => Directory.GetFiles(tree.Root, "*", SearchOption.AllDirectories));
 
-        var scanner = new YaraCliScanner();
+        using var scanner = new YaraCliScanner();
 
         var ex = Assert.Throws<YaraScanIncompleteException>(() => scanner.ScanDirectory(tree.Root));
         Assert.Contains("could not enumerate", ex.Message, StringComparison.Ordinal);
@@ -162,7 +168,7 @@ public sealed class YaraCliFailClosedTests
                 ("content/payload.bin", HermeticWiperSample.Bytes),
             ]);
 
-        var scanner = new YaraCliScanner();
+        using var scanner = new YaraCliScanner();
         Assert.True(scanner.Available, "The status must be Unavailable DESPITE the health signal reading available.");
 
         var scan = PackageScanner.Scan(nupkg, runYara: true, yaraScanner: scanner);
@@ -172,35 +178,78 @@ public sealed class YaraCliFailClosedTests
         Assert.Empty(scan.Value.YaraFindings);
     }
 
-    // --- ScanFile's opposite contract -------------------------------------------------------------------------
+    // --- ScanFile: the same contract, per file (ADR 0032 decision 5) ------------------------------------------
 
-    // ScanFile is NOT part of the fail-closed change and must stay as it was: a per-file failure is swallowed so
-    // the rest of a scan continues. (Its caller cannot mistake this for a clean package — ScanDirectory is what
-    // decides the status, and the recovery pass distinguishes "did not scan" from "scanned, no hits" internally.)
+    // REWRITTEN for ADR 0032 (was ScanFile_WhenTheYaraProcessExitsNonZero_ReturnsEmptyAndNeverThrows). The old test
+    // pinned ScanFile swallowing a failed process as an empty list, on the stated grounds that ScanDirectory decides
+    // the status — but ScanFile is also the primitive the interface's default ScanDirectory loop is built on, where
+    // an empty list reads as "scanned, clean" (ADR 0030 decision 6: a test asserting "returns empty when X fails" is
+    // very likely pinning the defect). A process that exited non-zero did not scan the file, so ScanFile now says so
+    // through the one fail-closed seam, naming the file. The original intent survives as "never returns a result it
+    // does not have".
     [Fact]
-    public void ScanFile_WhenTheYaraProcessExitsNonZero_ReturnsEmptyAndNeverThrows()
+    public void ScanFile_WhenTheYaraProcessExitsNonZero_ThrowsIncompleteNamingTheFile()
     {
         using var fake = new FakeYaraBinary(exitCode: 3);
         using var tree = new TempTree();
         var target = tree.Write("lib/net8.0/payload.bin", HermeticWiperSample.Bytes);
 
-        var scanner = new YaraCliScanner();
+        using var scanner = new YaraCliScanner();
 
         Assert.True(scanner.Available);
-        Assert.Empty(scanner.ScanFile(target));
+        var ex = Assert.Throws<YaraScanIncompleteException>(() => scanner.ScanFile(target));
+        Assert.Contains("payload.bin", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("must not be reported as clean", ex.Message, StringComparison.Ordinal);
     }
 
-    // The same for a timeout: the one condition ScanDirectory turns into an exception must still be swallowed by
-    // the per-file primitive.
+    // REWRITTEN for ADR 0032 (was ScanFile_WhenTheYaraProcessOutlivesItsTimeout_ReturnsEmptyAndNeverThrows). A killed
+    // process scanned nothing; the per-file primitive now reports it, exactly as ScanDirectory does for its batch.
     [Fact]
-    public void ScanFile_WhenTheYaraProcessOutlivesItsTimeout_ReturnsEmptyAndNeverThrows()
+    public void ScanFile_WhenTheYaraProcessOutlivesItsTimeout_ThrowsIncomplete()
     {
         using var fake = new FakeYaraBinary(sleepMs: 120_000);
         using var tree = new TempTree();
         var target = tree.Write("lib/net8.0/payload.bin", HermeticWiperSample.Bytes);
 
-        var scanner = new YaraCliScanner(scanTimeoutMs: 250);
+        // 250 ms + a 1.5 s grace through the internal test seam (the public constructor's grace is 5 s).
+        using var scanner = new YaraCliScanner(250, 1_500);
 
+        var ex = Assert.Throws<YaraScanIncompleteException>(() => scanner.ScanFile(target));
+        Assert.Contains("payload.bin", ex.Message, StringComparison.Ordinal);
+    }
+
+    // The ruleset would not prepare, so this file was scanned against nothing. ScanDirectory already failed closed
+    // here (site 4 above); ScanFile used to swallow it "to keep its contract" and return empty. Same out-of-process
+    // poisoning, through the harness's --scan-file mode.
+    [Fact]
+    public void ScanFile_WhenTheEmbeddedRulesetCannotBePrepared_ThrowsIncomplete()
+    {
+        using var tree = new TempTree();
+        var target = tree.Write("content/notes.txt", "ordinary text\n");
+        var notADirectory = tree.Write("temp-stand-in.bin", "a regular file, standing in for the temp directory\n");
+
+        var result = YaraHarness.ScanFile(target, yaraPath: FakeYaraBinary.ProbePath, poisonTempWith: notADirectory);
+
+        Assert.True(result["available"] == "True", "The backend must still report Available.\n" + result.Report);
+        Assert.True(result.ExitCode == 1, "The harness must have caught a YaraScanIncompleteException.\n" + result.Report);
+        Assert.True(result["outcome"] == "incomplete", result.Report);
+        Assert.Contains("could not prepare its embedded ruleset", result["message"] ?? string.Empty, StringComparison.Ordinal);
+        Assert.Contains("notes.txt", result["message"] ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    // The one empty result ScanFile may still return without scanning: there is no engine at all. That is not a
+    // failure being hidden — Available already says false, and PackageScanner gates on it before scanning — so it
+    // must stay a quiet empty list, never an exception (NullYaraScanner's contract, unchanged by ADR 0032).
+    [Fact]
+    public void ScanFile_WhenNoYaraBinaryIsConfigured_ReturnsEmptyWithoutThrowing()
+    {
+        using var env = new YaraEnvScope(yara: null, yarac: null);
+        using var tree = new TempTree();
+        var target = tree.Write("lib/net8.0/payload.bin", HermeticWiperSample.Bytes);
+
+        using var scanner = new YaraCliScanner();
+
+        Assert.False(scanner.Available);
         Assert.Empty(scanner.ScanFile(target));
     }
     #endregion

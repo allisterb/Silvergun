@@ -32,6 +32,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Shared with Silvergun.CodeAnalysis.IL.Tests (linked, not project-referenced): the one way a test observes
+         Runtime.Warn, so no test swaps the process-global Runtime.logger itself. See tests/Shared/WarningCapture.cs. -->
+    <Compile Include="..\Shared\WarningCapture.cs" Link="Shared\WarningCapture.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />

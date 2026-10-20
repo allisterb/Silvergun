@@ -16,20 +16,24 @@ public enum YaraScanStatus
     /// reflects the real (possibly empty) result.</summary>
     Completed,
 
-    /// <summary>YARA was requested but could not actually run. The primary cause is a backend whose
-    /// <see cref="IYaraScanner.Available"/> reports <c>false</c> — no engine ever initialized, e.g.
-    /// <see cref="NullYaraScanner"/> (no backend configured at all) or a <c>LibYaraScanner</c>/<c>YaraCliScanner</c>
-    /// whose native/CLI dependency did not come up. This is NOT the "a selected backend threw" case that older
-    /// code assumed: every <see cref="IYaraScanner"/> implementation contracts to never throw and swallows its own
-    /// failures, so exception-absence from scanning carries no information about whether it actually worked — this
-    /// status is derived by asking the backend directly, not by inferring health from a catch block. The remaining,
-    /// rarer path is genuine defense in depth: a backend that reports <c>Available</c> can still fail at a call
-    /// site outside its own guards (e.g. the Windows in-process engine's native dependency failing to load when its
-    /// types are first JIT-resolved), and that failure is still caught and mapped here. The same catch is how a
-    /// <b>partial</b> failure fails closed: a <see cref="YaraScanIncompleteException"/> means specific files are
-    /// known not to have been scanned (ADR 0029 decision 13), which is reported here rather than as a
-    /// <see cref="Completed"/> result that is quietly missing hits.
-    /// <see cref="PackageCapabilityReport.YaraFindings"/> is empty in every case, but that emptiness is NOT
-    /// evidence of a clean package — the files were never examined.</summary>
+    /// <summary>YARA was requested but the scan did not complete: some or all of the package's files were
+    /// <b>not verified</b>. The meaning, for every consumer: <b>findings present are real hits; absence of findings
+    /// is not evidence</b> of a clean package (ADR 0032 decision 3).
+    ///
+    /// Three ways in. (1) A backend whose <see cref="IYaraScanner.Available"/> reports <c>false</c> — no engine ever
+    /// initialized, e.g. <see cref="NullYaraScanner"/> (no backend configured at all) or a
+    /// <c>LibYaraScanner</c>/<c>YaraCliScanner</c> whose native/CLI dependency did not come up. Derived by asking the
+    /// backend directly, never inferred from the absence of an exception (ADR 0027 decision 4); findings are empty.
+    /// (2) A <b>partial</b> failure: a <see cref="YaraScanIncompleteException"/> means specific files are known not
+    /// to have been scanned (ADR 0029 decision 13; ADR 0032), and the hits already found in the files that were
+    /// scanned are reported in <see cref="PackageCapabilityReport.YaraFindings"/> — so the list may be
+    /// <b>non-empty</b>, and every entry in it is a genuine detection, never to be discounted because the scan was
+    /// incomplete (ADR 0030, "the converse also holds"). (3) Defense in depth: any other failure at a call site
+    /// outside a backend's own guards (e.g. the Windows in-process engine's native dependency failing to load when
+    /// its types are first JIT-resolved); findings are empty.
+    ///
+    /// Deliberately not split into a separate "partial" value: an additive enum member would read as verified to
+    /// every existing consumer that tests <c>== Unavailable</c> for "not verified" — fail-open (ADR 0032 decision 3).
+    /// </summary>
     Unavailable,
 }

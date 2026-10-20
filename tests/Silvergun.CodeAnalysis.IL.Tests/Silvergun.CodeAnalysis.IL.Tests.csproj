@@ -13,6 +13,9 @@
          body identically, and a second copy of the PE offset arithmetic is exactly the kind of duplicate that
          drifts. See tests/Shared/FatHeaderPatcher.cs. -->
     <Compile Include="..\Shared\FatHeaderPatcher.cs" Link="Shared\FatHeaderPatcher.cs" />
+    <!-- Shared with Silvergun.PackageAnalysis.NuGet.Tests: the one way a test observes Runtime.Warn, so no test swaps
+         the process-global Runtime.logger itself. See tests/Shared/WarningCapture.cs. -->
+    <Compile Include="..\Shared\WarningCapture.cs" Link="Shared\WarningCapture.cs" />
   </ItemGroup>
 
   <ItemGroup>

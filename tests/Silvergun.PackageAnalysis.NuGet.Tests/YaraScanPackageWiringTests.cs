@@ -130,19 +130,20 @@ public sealed class YaraScanPackageWiringTests : IClassFixture<PackageFixture>
         Assert.Contains(scan.Value.Assemblies, a => Path.GetFileName(a.Assembly.RelativePath) == fixture.FixtureDllName);
     }
 
-    // ADR 0029 decision 13 — THE fail-closed wiring test, and the one that would catch a regression of the whole
-    // ADR. A backend that reports Available == true but throws YaraScanIncompleteException from ScanDirectory is
-    // saying "specific files under this root are KNOWN not to have been scanned" (on the CLI backend: entries whose
-    // control-character names defeated the batch pass and could not be recovered through a safely named copy).
-    // PackageScanner.ScanYara must report that as Unavailable with ZERO findings — never as Completed over a
-    // partial list, which is exactly the attacker-controlled false negative ADR 0029 exists to close.
+    // ADR 0029 decision 13 — the fail-closed wiring test. A backend that reports Available == true but throws
+    // YaraScanIncompleteException from ScanDirectory is saying "specific files under this root are KNOWN not to have
+    // been scanned". PackageScanner.ScanYara must report that as Unavailable — never as Completed over a partial
+    // list, which is exactly the attacker-controlled false negative ADR 0029 exists to close.
     //
-    // Deliberately discriminating: the fake computes a REAL hit over the extraction dir before it throws, so the
-    // "regression" shape — a ScanDirectory that returns its partial list instead of throwing — does not merely flip
-    // the status enum, it also surfaces that hit. Such a regression therefore fails here twice: Completed instead
-    // of Unavailable, and one finding instead of none.
+    // NARROWED by ADR 0032 (renamed from ..._YieldsUnavailableWithZeroFindings). This used to be the only incomplete-
+    // scan wiring test and it pinned "Unavailable => zero findings", which ADR 0030 decision 6 calls pinning the
+    // defect. It now covers the case where that is still true: the exception carries NO partial hits (this fake
+    // computes one but deliberately does not pass it), so there is nothing real to report and PackageScanner must
+    // not invent anything. The case that used to be lost — an exception that DOES carry hits — is the next test.
+    // Still discriminating against a backend that returns its partial list instead of throwing: that regression
+    // reads Completed with one finding here.
     [Fact]
-    public void Scan_WithFakeScannerReportingIncompleteScan_YieldsUnavailableWithZeroFindings()
+    public void Scan_WithFakeScannerReportingIncompleteScanWithoutPartialHits_YieldsUnavailableWithZeroFindings()
     {
         var fake = FakeYaraScanner.PartialThenIncomplete(fixture.FixtureDllName, RlRuleName);
 
@@ -150,7 +151,7 @@ public sealed class YaraScanPackageWiringTests : IClassFixture<PackageFixture>
 
         Assert.True(scan.IsSuccess, scan.Message);
         Assert.True(fake.Invoked, "The backend should have been reached before it reported an incomplete scan.");
-        Assert.True(fake.FoundHitBeforeFailing, "The fake must have a real partial hit to discard, else this test is vacuous.");
+        Assert.True(fake.FoundHitBeforeFailing, "The fake must have had a real hit to withhold, else this test is vacuous.");
 
         // Fail closed: a scan known to be missing hits must never read as a clean, completed scan.
         Assert.Equal(YaraScanStatus.Unavailable, scan.Value.YaraScanStatus);
@@ -158,6 +159,72 @@ public sealed class YaraScanPackageWiringTests : IClassFixture<PackageFixture>
         Assert.Empty(scan.Value.YaraFindings);
 
         // ...and the incompleteness is confined to YARA: the rest of the report is intact.
+        Assert.Equal(PackageFixture.PkgAId, scan.Value.Package.Id);
+        Assert.Contains(scan.Value.Assemblies, a => Path.GetFileName(a.Assembly.RelativePath) == fixture.FixtureDllName);
+    }
+
+    // ADR 0032 decision 2 — the converse of the test above, and the defect it closes. The incomplete scan DID find
+    // the payload before it could not finish, and says so in PartialFindings. That hit is a real detection:
+    // PackageScanner must report it, enriched exactly like a completed scan's, ALONGSIDE Unavailable (the rest is
+    // still not verified). Before ADR 0032 it mapped every exception to (empty, Unavailable), so a package could
+    // erase its own detection by making the scan incomplete — `--strict` then exited 3 instead of 2.
+    [Fact]
+    public void Scan_WithFakeScannerReportingIncompleteScanWithAPartialHit_YieldsUnavailableAndThatFinding()
+    {
+        var fake = FakeYaraScanner.IncompleteCarryingTheHit(fixture.FixtureDllName, RlRuleName);
+
+        var scan = PackageScanner.Scan(fixture.PkgAPath, yaraScanner: fake);
+
+        Assert.True(scan.IsSuccess, scan.Message);
+        Assert.True(fake.FoundHitBeforeFailing, "The fake must have had a real hit to carry, else this test is vacuous.");
+        Assert.Equal(YaraScanStatus.Unavailable, scan.Value.YaraScanStatus);
+
+        var finding = Assert.Single(scan.Value.YaraFindings);
+        var fixtureAssembly = scan.Value.Assemblies
+            .Single(a => Path.GetFileName(a.Assembly.RelativePath) == fixture.FixtureDllName);
+        Assert.Equal(fixtureAssembly.Assembly.RelativePath, finding.RelativePath);
+        Assert.Equal(RlRuleName, finding.RuleName);
+        // Enriched the same way as a completed scan's hit — not a bare rule name.
+        Assert.Equal("LIMERAT", finding.MalwareFamily);
+        Assert.Equal("LimeRAT", finding.DetectionName);
+        Assert.Equal("MALWARE", finding.Category);
+    }
+
+    // The partial hits' paths are raw (they must resolve against the extraction root) and attacker-authored, so they
+    // are escaped at the report boundary exactly like a completed scan's (ADR 0031 decision 4). The carried path is
+    // lexical only — no file of that name exists — which is precisely the shape of an unattributable batch hit
+    // reported under yara's echoed target (ADR 0032 decision 4), and a newline is NTFS-unrepresentable anyway.
+    [Fact]
+    public void Scan_WithAPartialHitOnAHostilePath_ReportsItEscaped()
+    {
+        var fake = FakeYaraScanner.IncompleteCarrying(fixture.FixtureDllName, target =>
+            [(Path.Combine(Path.GetDirectoryName(target)!, $"pay\nload{Rlo}.bin"), Match(RlRuleName))]);
+
+        var scan = PackageScanner.Scan(fixture.PkgAPath, yaraScanner: fake);
+
+        Assert.True(scan.IsSuccess, scan.Message);
+        Assert.Equal(YaraScanStatus.Unavailable, scan.Value.YaraScanStatus);
+        var finding = Assert.Single(scan.Value.YaraFindings);
+        Assert.Equal(@"lib/netstandard2.0/pay\nload" + EscapedRlo + ".bin", finding.RelativePath);
+        Assert.DoesNotContain(finding.RelativePath, c => c < ' ' || c == Rlo);
+    }
+
+    // The catch path must itself be total (ADR 0032 decision 2). A partial hit that cannot be enriched — here a null
+    // Match, which makes enrichment throw — must degrade to (empty, Unavailable): still fail-closed, and never
+    // escaping to fail the whole package scan (which would lose the capability, script and anomaly results too).
+    [Fact]
+    public void Scan_WhenAPartialHitCannotBeEnriched_DegradesToUnavailableWithoutFailingTheScan()
+    {
+        var fake = FakeYaraScanner.IncompleteCarrying(fixture.FixtureDllName, target =>
+            [(target, Match(RlRuleName)), (target, null!)]);
+
+        var scan = PackageScanner.Scan(fixture.PkgAPath, yaraScanner: fake);
+
+        Assert.True(scan.IsSuccess, scan.Message);
+        Assert.True(fake.Invoked);
+        Assert.Equal(YaraScanStatus.Unavailable, scan.Value.YaraScanStatus);
+        Assert.NotNull(scan.Value.YaraFindings);
+        Assert.Empty(scan.Value.YaraFindings);
         Assert.Equal(PackageFixture.PkgAId, scan.Value.Package.Id);
         Assert.Contains(scan.Value.Assemblies, a => Path.GetFileName(a.Assembly.RelativePath) == fixture.FixtureDllName);
     }
@@ -269,7 +336,7 @@ public sealed class YaraScanPackageWiringTests : IClassFixture<PackageFixture>
     {
         private FakeYaraScanner(
             string? fileName, string rule, IReadOnlyList<string> tags, bool @throw, bool available,
-            bool incomplete = false)
+            Func<string, IReadOnlyList<(string FullPath, YaraMatch Match)>, YaraScanIncompleteException>? incomplete = null)
         {
             _fileName = fileName;
             _rule = rule;
@@ -298,13 +365,26 @@ public sealed class YaraScanPackageWiringTests : IClassFixture<PackageFixture>
         public static FakeYaraScanner Throwing() =>
             new(fileName: null, rule: string.Empty, Array.Empty<string>(), @throw: true, available: true);
 
-        // ADR 0029 decision 13, modelled on what YaraCliScanner.ScanDirectory actually does: the batch pass DID
-        // produce hits, but at least one control-character-named file could not be re-scanned through a safely
-        // named copy, so the partial list is thrown away in favour of YaraScanIncompleteException. The fake still
-        // computes that partial hit (and records having found it) so a regression which returns the partial list
-        // instead of throwing shows up as a NON-EMPTY, Completed report rather than merely a different enum.
+        // ADR 0029 decision 13's shape with NO partial hits carried: the fake computes a hit (and records having found
+        // it) but throws an exception that does not carry it. Since ADR 0032 that is a backend bug rather than the
+        // design, but it is still the right input for "an incomplete scan with nothing to report yields nothing" —
+        // and a regression which returns the partial list instead of throwing shows up as a NON-EMPTY, Completed
+        // report rather than merely a different enum.
         public static FakeYaraScanner PartialThenIncomplete(string fileName, string rule) =>
-            new(fileName, rule, Array.Empty<string>(), @throw: false, available: true, incomplete: true);
+            new(fileName, rule, Array.Empty<string>(), @throw: false, available: true,
+                incomplete: (_, _) => new YaraScanIncompleteException(IncompleteMessage));
+
+        // ADR 0032 decision 1: the same incomplete scan, but the exception carries the hit it found — what every
+        // backend now does with the hits in hand.
+        public static FakeYaraScanner IncompleteCarryingTheHit(string fileName, string rule) =>
+            new(fileName, rule, Array.Empty<string>(), @throw: false, available: true,
+                incomplete: (_, partial) => new YaraScanIncompleteException(IncompleteMessage, null, partial));
+
+        // An incomplete scan whose PartialFindings are whatever the test builds from the located target path.
+        public static FakeYaraScanner IncompleteCarrying(
+            string fileName, Func<string, IReadOnlyList<(string FullPath, YaraMatch Match)>> carried) =>
+            new(fileName, string.Empty, Array.Empty<string>(), @throw: false, available: true,
+                incomplete: (_, partial) => new YaraScanIncompleteException(IncompleteMessage, null, carried(partial[0].FullPath)));
 
         // Unhealthy: Available is false, so PackageScanner.ScanYara must never reach ScanDirectory at all. If it
         // were (incorrectly) called anyway, this still reports a real hit — making a wiring regression that skips
@@ -330,23 +410,29 @@ public sealed class YaraScanPackageWiringTests : IClassFixture<PackageFixture>
             var match = new YaraMatch(_rule, null, _tags, Array.Empty<YaraStringMatch>());
             var partial = new[] { (target, match) };
 
-            if (!_incomplete)
+            if (_incomplete is null)
                 return partial;
 
             // The ADR 0029 shape: real hits in hand, but a control-character-named file was never scanned, so the
-            // partial list is discarded rather than reported as a completed scan. (`partial` is deliberately built
-            // first — mutating this to `return partial;` is the regression the wiring test must go red against.)
+            // scan is reported incomplete — carrying the hits or not, as the factory chose. (`partial` is
+            // deliberately built first — mutating this to `return partial;` is the regression the wiring tests must
+            // go red against.)
             FoundHitBeforeFailing = partial.Length > 0;
-            throw new YaraScanIncompleteException(
-                @"YARA could not scan 1 of 1 file(s) whose names contain control characters, so this package was NOT fully scanned and must not be reported as clean. Path(s), control characters escaped: 'lib/net8.0/n\nl.bin'");
+            throw _incomplete(target, partial);
         }
+
+        private const string IncompleteMessage =
+            @"YARA could not scan 1 of 1 file(s) whose names contain control characters, so this package was NOT fully scanned and must not be reported as clean. Path(s), control characters escaped: 'lib/net8.0/n\nl.bin'";
 
         private readonly string? _fileName;
         private readonly string _rule;
         private readonly IReadOnlyList<string> _tags;
         private readonly bool _throw;
-        private readonly bool _incomplete;
+        private readonly Func<string, IReadOnlyList<(string FullPath, YaraMatch Match)>, YaraScanIncompleteException>? _incomplete;
     }
+
+    private static YaraMatch Match(string rule) =>
+        new(rule, null, Array.Empty<string>(), Array.Empty<YaraStringMatch>());
     #endregion
 
     #region Fields
@@ -355,5 +441,10 @@ public sealed class YaraScanPackageWiringTests : IClassFixture<PackageFixture>
     // A real embedded ReversingLabs rule whose meta block declares malware / tc_detection_name / category — the
     // enrichment source asserted above (ext/reversinglabs-yara-rules/yara/backdoor/ByteCode.MSIL.Backdoor.LimeRAT.yara).
     private const string RlRuleName = "ByteCode_MSIL_Backdoor_LimeRAT";
+
+    // U+202E RIGHT-TO-LEFT OVERRIDE, built from its code point so the source itself never carries it raw, and the
+    // backslash-u form YaraPathSafety.Escape renders it as.
+    private const char Rlo = (char)0x202E;
+    private const string EscapedRlo = @"\" + "u202e";
     #endregion
 }
