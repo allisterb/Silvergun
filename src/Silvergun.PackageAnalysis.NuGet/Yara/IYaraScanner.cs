@@ -3,8 +3,9 @@ namespace Silvergun.PackageAnalysis.NuGet.Yara;
 /// <summary>
 /// A backend that scans a package's extracted files against the embedded YARA ruleset (ADR 0016).
 /// Implementations compile the embedded rules once (lazy/shared) and are selected at runtime:
-/// the Windows in-process <c>LibYaraScanner</c> (<c>#if WINDOWS</c>), the classic-CLI backend (Phase 2),
-/// or <see cref="NullYaraScanner"/> when no engine is available.
+/// on Windows (<c>#if WINDOWS</c>) the out-of-process <c>YaraXWorkerScanner</c> by default, or the in-process
+/// <c>LibYaraScanner</c> as an explicit fallback; elsewhere the classic-CLI backend (Phase 2), or
+/// <see cref="NullYaraScanner"/> when no engine is available.
 ///
 /// Contract: <b>an empty result means "scanned, nothing matched"</b> — or that there is no engine at all, which
 /// <see cref="Available"/> reports. It never means "something went wrong". All package content is hostile (threat
@@ -49,6 +50,14 @@ public interface IYaraScanner
     /// no safe convention to forget.
     /// </summary>
     bool Available { get; }
+
+    /// <summary>
+    /// Why <see cref="Available"/> is <c>false</c>, for an operator to act on (e.g. "the YARA-X DLL is missing"), or
+    /// <c>null</c> when it is available or the backend cannot say. Descriptive only, never a health signal, so unlike
+    /// <see cref="Available"/> it may default: a backend that does not say leaves its caller a generic reason. May be raw
+    /// text; <c>PackageScanner</c> escapes and bounds it before it reaches a report.
+    /// </summary>
+    string? UnavailableReason => null;
     #endregion
 
     #region Methods
@@ -71,8 +80,9 @@ public interface IYaraScanner
     /// file could not be examined (ADR 0032).
     ///
     /// The default implementation loops <see cref="ScanFile"/> over the files — the cheap primitive for the
-    /// in-memory backend, and the production path on Windows (<c>LibYaraScanner</c> does not override it); the
-    /// classic-CLI backend overrides this to run a single recursive <c>yara -r</c> process. Per file (ADR 0032
+    /// in-memory backend (<c>LibYaraScanner</c>, the explicit Windows fallback, does not override it); the
+    /// classic-CLI backend overrides this to run a single recursive <c>yara -r</c> process, and the default Windows
+    /// backend, <c>YaraXWorkerScanner</c>, to scan the whole tree in one worker run. Per file (ADR 0032
     /// decision 6): a <see cref="YaraScanIncompleteException"/> records that file as unscanned (its own partial hits,
     /// if any, are kept) and the loop <b>continues</b>; a <see cref="TimeoutException"/> <b>stops</b> the loop,
     /// because a bound that was reached means the engine's health can no longer be vouched for and the remaining

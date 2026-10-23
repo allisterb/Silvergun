@@ -28,6 +28,17 @@ internal static class Program
 {
     private static int Main(string[] args)
     {
+        // A third, unrelated set of modes: the process-isolation cost measurement (IsolationCost.cs,
+        // docs/agent/tasks/yara-process-isolation-measurement.md). Every one of them exits explicitly: a worker
+        // must not linger, and none of them may fall through to the timing probe's own argument parser.
+        if (IsolationCost.Handles(args))
+        {
+            var code = IsolationCost.Run(args);
+            Console.Out.Flush();
+            Console.Error.Flush();
+            Environment.Exit(code);
+        }
+
         // A second, unrelated mode: the ADR 0028 canary mutation check (see PoisonCanaryCheck). It lives here
         // because this project is the one place in tests/ that already loads native libyara under -r win-x64,
         // and it must NOT run in the xUnit host — it deliberately abandons a native thread walking a corrupt

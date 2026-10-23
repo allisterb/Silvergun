@@ -5,6 +5,7 @@ using System.Runtime.CompilerServices;
 namespace Silvergun.CLI;
 
 using System.CommandLine;
+using System.CommandLine.Parsing;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -16,6 +17,7 @@ using Silvergun.Intel;
 using Silvergun.PackageAnalysis.NuGet;
 using Silvergun.PackageAnalysis.NuGet.Squats;
 using Silvergun.PackageAnalysis.NuGet.Yara;
+using Silvergun.PackageAnalysis.NuGet.Yara.Worker;
 
 /// <summary>
 /// Entry point for the Silvergun CLI. Exposes the <c>analyze</c> verb, which runs
@@ -131,7 +133,7 @@ internal static class Program
 
         // --json (machine) and --rich (rich) are two mutually-exclusive format selectors; reject both at parse
         // time (non-zero exit, message on stderr) before any handler runs, mirroring the --source validation posture.
-        void RejectJsonWithRich(System.CommandLine.Parsing.CommandResult result)
+        void RejectJsonWithRich(CommandResult result)
         {
             if (result.GetValue(jsonOption) && result.GetValue(richOption))
                 result.AddError("--json and --rich are mutually exclusive; specify at most one output format.");
@@ -259,12 +261,47 @@ internal static class Program
             parse.GetValue(allowIncompleteOption),
             parse.GetValue(allowTfmMismatchOption)));
 
+        // __worker (ADR 0033 FINAL FORM): HIDDEN internal verbs the CLI runs as its own child processes; never listed in
+        // --help. `__worker yara --protocol 1` speaks worker protocol v1 (docs/agent/tasks/yarax-worker.md) on
+        // stdin/stdout. The protocol value is taken as a string and checked by the worker itself, so an unsupported one
+        // gets a protocol `fatal` (exit 3) rather than a parser error.
+        var protocolOption = new Option<string?>("--protocol")
+        {
+            Description = "Worker protocol version (only 1 is supported)."
+        };
+        // --timeout (amendment G3) is taken as a string for the same reason: absent means the product default, and an
+        // invalid value — out of range (W-D), or a bare `--timeout` with no value — is a protocol `fatal` (exit 3).
+        var timeoutOption = new Option<string?>("--timeout")
+        {
+            Description = $"Per-file engine scan timeout in whole seconds ({WorkerProtocol.MinTimeoutSeconds} to {WorkerProtocol.MaxTimeoutSeconds}; default {WorkerProtocol.DefaultTimeoutSeconds}).",
+            Arity = ArgumentArity.ZeroOrOne
+        };
+        var workerYaraCommand = new Command("yara", "Internal: the out-of-process YARA scan worker.")
+        {
+            protocolOption, timeoutOption
+        };
+        workerYaraCommand.SetAction(parse => RunYaraWorker(
+            parse.GetValue(protocolOption),
+            parse.GetResult(timeoutOption) is { } timeout ? timeout.Tokens.FirstOrDefault()?.Value ?? string.Empty : null));
+        var workerCommand = new Command("__worker", "Internal: worker processes started by Silvergun itself.")
+        {
+            workerYaraCommand
+        };
+        workerCommand.Hidden = true;
+
         var root = new RootCommand("Silvergun — static capability analysis for .NET assemblies.")
         {
-            analyzeCommand, scanPackageCommand, checkSquatCommand, healthCommand, capabilityDiffCommand
+            analyzeCommand, scanPackageCommand, checkSquatCommand, healthCommand, capabilityDiffCommand, workerCommand
         };
 
-        return root.Parse(args).Invoke();
+        // Worker mode keeps stdout protocol-only even for a command line that does not parse (FR2.3): System.CommandLine
+        // would print help to stdout and exit 1, so anything under `__worker` that does not resolve to the yara worker's
+        // own action (a parse error such as a repeated --timeout, help, a directive) is one `fatal` record and exit 3.
+        var parse = root.Parse(args);
+        return ((args is [var verb, ..] && verb == workerCommand.Name) || IsWithin(parse.CommandResult, workerCommand))
+            && !ReferenceEquals(parse.Action, workerYaraCommand.Action)
+            ? RunYaraWorkerArgumentError(parse.Errors.Count)
+            : parse.Invoke();
     }
 
     private static int RunAnalyze(string assemblyPath, bool json, bool rich, string? output, bool strict, bool debug, bool noResolve, bool allowIncomplete, string? snapshot)
@@ -344,18 +381,23 @@ internal static class Program
         // YARA was requested (not --no-yara) but the scan did not actually complete: note it on stderr (like
         // --health) so stdout/JSON stay unaffected. Keyed on the REPORT's own YaraScanStatus — the ground truth of
         // what just happened — rather than YaraScannerFactory.BackendAvailable, which only proves a backend was
-        // SELECTED, not that it worked: on the net10.0-windows build LibYaraScanner is always selected but can still
-        // fail to initialize (its native libyara.NET dependency missing), which previously produced zero findings
+        // SELECTED, not that it worked: on the net10.0-windows build a backend (the YARA-X worker by default, LibYaraScanner
+        // when explicitly selected) is always selected but can still fail to initialize (the worker or its DLL missing, or
+        // libyara.NET's native dependency missing). The latter previously produced zero findings
         // with NO advisory at all — exactly the silent-zero defect this check exists to close. Printed at most once
         // per run (report.YaraScanStatus is a single value for the whole scan, not per-file). Unavailable WITH findings
         // is a scan that started and could not finish (ADR 0032): saying it "did NOT run" would contradict the
-        // matches in the report, so that case says what actually happened — hits found, the rest unverified.
+        // matches in the report, so that case says what actually happened — hits found, the rest unverified. Either way
+        // the line ends with the report's YaraUnavailableReason, so a CI log says WHY even when it shows only stderr (the
+        // reason is also in the JSON report whenever it is set). It is printed as is: the report's init accessor already
+        // escaped it and cut it to 512 chars (PackageCapabilityReport.MaxYaraUnavailableReasonChars).
         if (!noYara && report.YaraScanStatus == YaraScanStatus.Unavailable)
-            Console.Error.WriteLine(report.YaraFindings.Count > 0
+            Console.Error.WriteLine((report.YaraFindings.Count > 0
                 ? $"scan-package: YARA malware-signature scanning did NOT complete; {report.YaraFindings.Count} match(es) were found " +
                   "in the files that were scanned, and the remaining files are NOT verified against the malware-signature ruleset."
                 : "scan-package: YARA malware-signature scanning did NOT run (backend unavailable or failed to initialize); " +
-                  "findings for this package are NOT verified against the malware-signature ruleset.");
+                  "findings for this package are NOT verified against the malware-signature ruleset.")
+                + (report.YaraUnavailableReason is { Length: > 0 } reason ? $" Reason: {reason}" : string.Empty));
 
         // --health is the ONLY thing that adds a network call to scan-package (the offline scan above stays offline).
         // Repo resolution is offline (local nuspec); only the GitHub lookup is network. Advisory — never touches the
@@ -889,6 +931,46 @@ internal static class Program
                 ? "--allow-incomplete given; exit code NOT gated on this."
                 : "Exit code 3; pass --allow-incomplete to downgrade it to 0."));
     }
+
+    // The hidden `__worker yara` verb (ADR 0033). Worker-mode logging only (stderr, capped, no file sink — so nothing
+    // reaches the normal Silvergun log), raw stdin/stdout streams (UTF-8, no BOM, no Console encoding), and nothing
+    // from the analysis paths: no CCI, NuGet, OSV or libyara.NET code runs here. The engine is the platform's real one
+    // (YARA-X on Windows; elsewhere a `fatal` "engine unavailable on this platform"), never the T1 stub.
+    private static int RunYaraWorker(string? protocol, string? timeout)
+    {
+        Runtime.WithStderrLogging("Silvergun", "worker-yara");
+        using var stdin = Console.OpenStandardInput();
+        using var stdout = Console.OpenStandardOutput();
+        // W2: from here on only the protocol writer, over the raw stream above, can reach stdout.
+        Console.SetOut(TextWriter.Null);
+        return YaraWorker.Run(protocol, timeout, stdin, stdout, YaraWorkerEngines.ForPlatform);
+    }
+
+    // A `__worker` command line that did not parse to the yara worker (FR2.3): the same posture as RunYaraWorker — stderr-only
+    // logging, stdout protocol-only — and the same answer YaraWorker.Run gives any other bad argument: one `fatal` record,
+    // exit 3. The parser's messages can quote argument tokens, so they are not echoed; the reason is fixed text.
+    private static int RunYaraWorkerArgumentError(int errors)
+    {
+        Runtime.WithStderrLogging("Silvergun", "worker-yara");
+        var reason = (errors > 0 ? $"the worker's arguments did not parse ({errors} error(s))" : "the worker's arguments asked for something other than a worker session")
+            + $"; expected __worker yara --protocol {WorkerProtocol.Version} [{WorkerProtocol.TimeoutOption} <seconds>]";
+        Runtime.Error("yara worker: fatal: {0}", reason);
+        using var stdout = Console.OpenStandardOutput();
+        Console.SetOut(TextWriter.Null);
+        try
+        {
+            new WorkerProtocolWriter(stdout).Write(new WorkerFatal(reason));
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException or NotSupportedException)
+        {
+            Runtime.Error("yara worker: cannot write to stdout ({0}).", ex.GetType().Name);
+        }
+        return WorkerProtocol.ExitFatal;
+    }
+
+    // Whether `result` is `command`'s, or lies under it in the parse tree.
+    private static bool IsWithin(SymbolResult? result, Command command) =>
+        result is not null && ((result is CommandResult { Command: var c } && ReferenceEquals(c, command)) || IsWithin(result.Parent, command));
 
     // Keep stdout machine-parseable: when JSON goes to stdout, log to file only.
     private static void ConfigureLogging(bool json, string? output, bool debug)

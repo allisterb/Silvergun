@@ -22,7 +22,7 @@ public enum YaraScanStatus
     ///
     /// Three ways in. (1) A backend whose <see cref="IYaraScanner.Available"/> reports <c>false</c> — no engine ever
     /// initialized, e.g. <see cref="NullYaraScanner"/> (no backend configured at all) or a
-    /// <c>LibYaraScanner</c>/<c>YaraCliScanner</c> whose native/CLI dependency did not come up. Derived by asking the
+    /// <c>YaraXWorkerScanner</c>/<c>LibYaraScanner</c>/<c>YaraCliScanner</c> whose worker/native/CLI dependency did not come up. Derived by asking the
     /// backend directly, never inferred from the absence of an exception (ADR 0027 decision 4); findings are empty.
     /// (2) A <b>partial</b> failure: a <see cref="YaraScanIncompleteException"/> means specific files are known not
     /// to have been scanned (ADR 0029 decision 13; ADR 0032), and the hits already found in the files that were

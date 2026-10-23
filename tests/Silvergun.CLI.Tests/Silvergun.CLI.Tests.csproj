@@ -38,6 +38,10 @@
          still found hits (ADR 0032) — the only way to observe the stderr advisory and the end-to-end exit codes,
          both of which live inline in Program.RunScanPackage. Nothing compiles against its types. -->
     <ProjectReference Include="..\Silvergun.PackageAnalysis.NuGet.Tests.FakeYaraProbe\Silvergun.PackageAnalysis.NuGet.Tests.FakeYaraProbe.csproj" />
+    <!-- A startup hook (DOTNET_STARTUP_HOOKS) that records which assemblies and native modules a CLI child process
+         loaded. YaraWorkerVerbCliTests use it to pin that `__worker yara` loads no analysis code (ADR 0033 FINAL FORM
+         decision 5). Referenced only so its dll lands in this output directory; nothing compiles against it. -->
+    <ProjectReference Include="..\Silvergun.CLI.Tests.LoadedAssembliesHook\Silvergun.CLI.Tests.LoadedAssembliesHook.csproj" />
   </ItemGroup>
 
 </Project>

@@ -7,8 +7,9 @@ using System.Text;
 
 /// <summary>
 /// The cross-platform <see cref="IYaraScanner"/> backend that drives the classic <c>yara</c>/<c>yarac</c> CLI
-/// (ADR 0016). It is the non-Windows counterpart to the in-process <c>LibYaraScanner</c>; both compile the same
-/// embedded ReversingLabs + custom ruleset, so verdicts match across platforms.
+/// (ADR 0016). It is the non-Windows counterpart to the Windows backends (the out-of-process <c>YaraXWorkerScanner</c>
+/// by default, the in-process <c>LibYaraScanner</c> as an explicit fallback); all compile the same embedded
+/// ReversingLabs + custom ruleset, so verdicts match across platforms.
 ///
 /// The <c>yara</c> binary is located from the <c>SILVERGUN_YARA_PATH</c> environment variable; the <c>yarac</c>
 /// compiler is <c>SILVERGUN_YARAC_PATH</c> or, failing that, derived beside <c>yara</c>. When <c>yara</c> is

@@ -143,6 +143,22 @@ public sealed record PackageCapabilityReport(
     /// </summary>
     public IReadOnlyList<PackagingAnomaly> PackagingAnomalies { get; init; } = PackagingAnomalies ?? Array.Empty<PackagingAnomaly>();
 
+    /// <summary>
+    /// Additive: why YARA did not complete, for a CI log to show (e.g. the YARA-X DLL is missing). Set by
+    /// <see cref="PackageScanner.Scan"/> exactly when <see cref="YaraScanStatus"/> is <see cref="Yara.YaraScanStatus.Unavailable"/>;
+    /// <c>null</c> when it is Completed or NotRun, and in old JSON that predates it. Written to JSON only when set, so a
+    /// Completed or NotRun report's JSON is exactly what it was before this field. The text can quote package paths and
+    /// engine output, so EVERY assignment (including deserialization) goes through <c>WorkerProtocol.Safe</c>, which
+    /// escapes it and then cuts it to <see cref="MaxYaraUnavailableReasonChars"/> chars. Both steps are idempotent, so a
+    /// round trip is unchanged.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? YaraUnavailableReason
+    {
+        get => _yaraUnavailableReason;
+        init => _yaraUnavailableReason = value is null ? null : Yara.Worker.WorkerProtocol.Safe(value, MaxYaraUnavailableReasonChars);
+    }
+
     /// <summary>Every finding across all analyzed assemblies, flattened in stored order.</summary>
     [JsonIgnore]
     public IEnumerable<ApiCallFinding> AllFindings =>
@@ -162,10 +178,15 @@ public sealed record PackageCapabilityReport(
     #endregion
 
     #region Fields
+    /// <summary>The most chars <see cref="YaraUnavailableReason"/> holds.</summary>
+    public const int MaxYaraUnavailableReasonChars = 512;
+
     private static readonly JsonSerializerOptions jsonOptions = new()
     {
         WriteIndented = true,
         Converters = { new JsonStringEnumConverter() }
     };
+
+    private readonly string? _yaraUnavailableReason;
     #endregion
 }

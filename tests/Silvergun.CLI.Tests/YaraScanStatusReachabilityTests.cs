@@ -24,7 +24,8 @@ using Xunit;
 /// <see cref="PackageScanner.Scan"/> path never actually PRODUCES that status in the first place, which is exactly
 /// the defect this ADR section describes shipping. This test drives a genuine <see cref="PackageScanner.Scan"/>
 /// call with an injected unhealthy <see cref="IYaraScanner"/> (<c>Available == false</c> — the shape a
-/// never-configured <c>NullYaraScanner</c> or a broken <c>LibYaraScanner</c> produces in production) and follows
+/// never-configured <c>NullYaraScanner</c>, a <c>YaraXWorkerScanner</c> (the Windows default since ADR 0033 T6b) whose
+/// worker or YARA-X DLL is missing, or a broken <c>LibYaraScanner</c> (the explicit fallback) produces in production) and follows
 /// the REAL resulting report through <see cref="CompletenessAssessment.ForPackage"/>, the rendered footer, and
 /// <see cref="Program.ScanPackageExitCode"/>.
 /// <para>

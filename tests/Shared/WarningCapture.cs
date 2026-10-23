@@ -19,7 +19,9 @@ using Microsoft.Extensions.Logging;
 /// both need a capture that sees exactly this test's warnings. So a forwarding logger is installed once and left in
 /// place — it passes everything on to whatever logger was there — and records a warning only into the capture
 /// registered on the current async flow (an <see cref="AsyncLocal{T}"/>, which also flows into <c>Task.Run</c>,
-/// <c>new Thread</c> and <c>Parallel</c> work started from that flow). The code under test logs on the calling flow.</para>
+/// <c>new Thread</c> and <c>Parallel</c> work started from that flow). The code under test logs on the calling flow.
+/// <c>Runtime.Debug</c> lines are recorded the same way, separately (<see cref="Debugs"/>), for tests that must show a
+/// path is taken silently.</para>
 ///
 /// <para><b>Nothing else may write <c>Runtime.logger</c> while a capture is alive.</b> A displaced forwarder makes the
 /// capture silently stop collecting: a flaky red for an <c>Assert.Single</c>, and a VACUOUS PASS for an
@@ -63,16 +65,22 @@ internal sealed class WarningCapture : IDisposable
     #region Properties
     /// <summary>Every warning captured so far, formatted, in order. Throws if the forwarder was displaced (see
     /// writer 3 in the class remarks), because then an empty list would mean "not listening", not "not logged".</summary>
-    public IReadOnlyList<string> Warnings =>
-        Silvergun.Runtime.logger is Forwarder
-            ? _messages.ToArray()
-            : throw new InvalidOperationException(
-                "Runtime.logger was replaced while a WarningCapture was alive, so this capture stopped collecting: "
-                + "something other than WarningCapture wrote that field. Route the test through WarningCapture.");
+    public IReadOnlyList<string> Warnings => Read(_messages);
+
+    /// <summary>Every <c>Runtime.Debug</c> line captured so far on this flow, formatted, in order (for a test that must
+    /// show a path is taken SILENTLY: a Debug line, no warning). Throws as <see cref="Warnings"/> does.</summary>
+    public IReadOnlyList<string> Debugs => Read(_debugs);
     #endregion
 
     #region Methods
     public void Dispose() => current.Value = _previous;
+
+    private static string[] Read(ConcurrentQueue<string> messages) =>
+        Silvergun.Runtime.logger is Forwarder
+            ? messages.ToArray()
+            : throw new InvalidOperationException(
+                "Runtime.logger was replaced while a WarningCapture was alive, so this capture stopped collecting: "
+                + "something other than WarningCapture wrote that field. Route the test through WarningCapture.");
     #endregion
 
     #region Fields
@@ -80,6 +88,7 @@ internal sealed class WarningCapture : IDisposable
     private static readonly AsyncLocal<WarningCapture?> current = new();
 
     private readonly ConcurrentQueue<string> _messages = new();
+    private readonly ConcurrentQueue<string> _debugs = new();
     private readonly WarningCapture? _previous;
     #endregion
 
@@ -88,6 +97,8 @@ internal sealed class WarningCapture : IDisposable
     {
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => inner.BeginScope(state);
 
+        // Debug is deliberately NOT reported enabled: code that guards costly Debug output on IsEnabled behaves as it does
+        // without a capture. Runtime.Debug (LoggerExtensions.LogDebug) calls Log without asking, so it is captured anyway.
         public bool IsEnabled(LogLevel logLevel) => logLevel == LogLevel.Warning || inner.IsEnabled(logLevel);
 
         public void Log<TState>(
@@ -95,6 +106,8 @@ internal sealed class WarningCapture : IDisposable
         {
             if (logLevel == LogLevel.Warning)
                 current.Value?._messages.Enqueue(formatter(state, exception));
+            else if (logLevel == LogLevel.Debug)
+                current.Value?._debugs.Enqueue(formatter(state, exception));
             inner.Log(logLevel, eventId, state, exception, formatter);
         }
     }

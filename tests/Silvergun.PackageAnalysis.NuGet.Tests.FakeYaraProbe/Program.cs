@@ -5,7 +5,7 @@ using System.Globalization;
 using Silvergun.PackageAnalysis.NuGet.Yara;
 
 /// <summary>
-/// A two-role child-process fixture for the ADR 0029 tests. Neither role can be played from inside the xunit
+/// A multi-role child-process fixture for the ADR 0029 and ADR 0033 tests. Neither role can be played from inside the xunit
 /// process, which is why this is its own executable.
 ///
 /// <para><b>Role 1 — a fake <c>yara</c> binary (default).</b> <see cref="YaraCliScanner"/> launches whatever
@@ -26,6 +26,13 @@ using Silvergun.PackageAnalysis.NuGet.Yara;
 /// inside the test host would break whatever unrelated test happens to be running in parallel. Here the poisoning
 /// is scoped to this process, set after the runtime has started, and the outcome is reported on stdout.</para>
 ///
+/// <para><b>Role 3 — a worker-mode logging host (<c>--stderr-logging</c>).</b> A fresh process for
+/// <c>Runtime.WithStderrLogging</c> (ADR 0033), whose logger is process-wide and set once; see <see cref="StderrLogging"/>.</para>
+///
+/// <para><b>Role 4 — a scripted fake YARA worker (<c>--fake-worker &lt;script&gt;</c>).</b> Stands in for
+/// <c>silvergun __worker yara</c> so the parent backend's handling of every worker behaviour can be driven exactly; see
+/// <see cref="FakeWorker"/>.</para>
+///
 /// <para>This fixture never scans anything for real and contains no rule logic; it is deliberately inert.</para>
 /// </summary>
 internal static class Program
@@ -35,6 +42,8 @@ internal static class Program
     {
         ["--scan-directory", var root, ..] => Harness(root, args),
         ["--scan-file", var file, ..] => FileHarness(file, args),
+        ["--stderr-logging", var logName, var mode] => StderrLogging(logName, mode),
+        ["--fake-worker", var script] => FakeWorker.Run(script),
         [var source, var compiled] when IsYaracCall(source, compiled) => FakeYarac(source, compiled),
         _ => FakeYara(args),
     };
@@ -492,6 +501,37 @@ internal static class Program
     {
         var i = Array.IndexOf(args, name);
         return i >= 0 && i + 1 < args.Length ? args[i + 1] : null;
+    }
+
+    // --- Role 3: a worker-mode logging host (--stderr-logging <logName> <levels|flood>) -------------------------------
+    //
+    // Runtime.WithStderrLogging (ADR 0033 worker-mode logging) installs the process-wide logger, and Runtime.Initialize
+    // is once per process, so it cannot be observed inside the xunit host (already initialised, shared by parallel
+    // tests). This role is a fresh process that configures worker-mode logging (debug on, so every level is enabled) and
+    // then logs: "levels" once at every level, "flood" far past the 64 KiB cap, followed by a direct Console.Error write
+    // that must also be capped. stdout gets only `stdout-only` and the writer's own counters, so a test can tell the two
+    // streams apart.
+    private static int StderrLogging(string logName, string mode)
+    {
+        var stderr = Silvergun.Runtime.WithStderrLogging("Silvergun", logName, debug: true);
+        if (mode == "levels")
+        {
+            Silvergun.Runtime.Debug("probe-debug {0}", 1);
+            Silvergun.Runtime.Info("probe-info {0}", 2);
+            Silvergun.Runtime.Warn("probe-warn {0}", 3);
+            Silvergun.Runtime.Error("probe-error {0}", 4);
+            Silvergun.Runtime.Fatal("probe-fatal {0}", 5);
+        }
+        else
+        {
+            for (var i = 0; i < 5_000; i++)
+                Silvergun.Runtime.Warn("probe-flood {0} {1}", i, new string('w', 100));
+            Console.Error.WriteLine("probe-direct-after-flood");
+        }
+
+        Console.Out.Write($"stdout-only\ncapped-bytes={stderr.BytesWritten}\ntruncated={stderr.Truncated}\n");
+        Console.Out.Flush();
+        return 0;
     }
     #endregion
 }

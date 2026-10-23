@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- A child-process fixture for the YARA-X C API binding tests (ADR 0033, task T2; Windows only, like the binding).
+         YaraXNative.TryLoad is decided by its FIRST call in a process (an import resolver can be registered once per
+         assembly), so "the DLL is missing" and "the resolver never falls back to the default search order" can only be
+         observed in a fresh process; the xunit host has long since loaded the engine for the other tests. Referenced by
+         Silvergun.PackageAnalysis.NuGet.Tests (net10.0-windows only) so its apphost lands next to the test assembly.
+         The binding is internal and its InternalsVisibleTo names only the test assembly, so this reaches it by
+         reflection. ProjectReference only: no packages. -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Silvergun.PackageAnalysis.NuGet\Silvergun.PackageAnalysis.NuGet.csproj" />
+  </ItemGroup>
+
+</Project>

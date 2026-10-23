@@ -37,7 +37,8 @@ public sealed class YaraIncompleteScanReachesTheReportTests : IClassFixture<Pack
     #endregion
 
     #region Methods
-    // --- The default ScanDirectory loop (the Windows production path), platform-neutral -----------------------
+    // --- The default ScanDirectory loop (LibYaraScanner's, the explicit Windows fallback), platform-neutral ------
+    // (Since ADR 0033 T6b the Windows default is YaraXWorkerScanner, which overrides ScanDirectory with one worker run.)
 
     // One file the backend could not scan (it throws the per-file "not scanned" exception, ADR 0032 decision 5) must
     // not take the payload's hit with it. The loop keeps going past the failing file, the hit travels out in the
@@ -188,8 +189,9 @@ public sealed class YaraIncompleteScanReachesTheReportTests : IClassFixture<Pack
     #endregion
 
     #region Nested types
-    // A healthy backend that implements ONLY ScanFile, so ScanDirectory is the interface's default loop — the
-    // in-process backend's production path. It hits on one file name, reports another as not scanned (the ADR 0032
+    // A healthy backend that implements ONLY ScanFile, so ScanDirectory is the interface's default loop — the path of
+    // the in-process LibYaraScanner, the explicit Windows fallback (SILVERGUN_YARA_ENGINE=libyara; the default since ADR
+    // 0033 T6b is YaraXWorkerScanner, which overrides the loop). It hits on one file name, reports another as not scanned (the ADR 0032
     // decision 5 exception, through its original one-argument constructor), and finds nothing elsewhere.
     private sealed class PerFileBackend(string hitOn, string rule, string notScanned) : IYaraScanner
     {

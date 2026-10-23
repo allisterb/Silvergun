@@ -146,10 +146,51 @@ public sealed class YaraIncompleteScanCliTests
     }
     #endregion
 
+    #region Methods — the advisory says why (ADR 0033 polish round)
+    // Both variants of the stderr advisory end with " Reason: " and the report's YaraUnavailableReason (escaped and
+    // bounded to 512 by the report), on the one advisory line, with no raw control character. --json puts the report on
+    // stdout, so the advisory's reason can be compared with the report's own.
+    [Theory]
+    [InlineData(true, "scan-package: YARA malware-signature scanning did NOT complete; 2 match(es) were found")]
+    [InlineData(false, "scan-package: YARA malware-signature scanning did NOT run (backend unavailable or failed to initialize)")]
+    public void ScanPackage_TheYaraAdvisory_EndsWithTheReportsReason(bool withHits, string advisoryStart)
+    {
+        var run = Run(withHits, "--json", "--allow-incomplete");
+
+        Assert.True(run.Exited, "CLI did not exit within the timeout.");
+        using var json = JsonDocument.Parse(run.Output);
+        var reason = json.RootElement.GetProperty("YaraUnavailableReason").GetString();
+        Assert.False(string.IsNullOrEmpty(reason), "an Unavailable report carries no reason");
+        Assert.True(reason!.Length <= 512, $"the reason is {reason.Length} chars");
+        var advisory = Assert.Single(run.Error.Split('\n'), l => l.StartsWith("scan-package: YARA malware-signature scanning did NOT", StringComparison.Ordinal)).TrimEnd('\r');
+        Assert.StartsWith(advisoryStart, advisory, StringComparison.Ordinal);
+        Assert.EndsWith(" Reason: " + reason, advisory, StringComparison.Ordinal);
+        AssertNoRawControlCharacters(advisory);
+        AssertNoRawControlCharacters(reason);
+    }
+
+    // The reason quotes what the engine reported, which the package controls: here the unattributable hit's file name
+    // carries ESC and a bidi override. They reach the advisory and the report escaped, never raw.
+    [Fact]
+    public void ScanPackage_TheYaraAdvisorysReason_IsEscaped_WhenTheEngineOutputIsHostile()
+    {
+        var run = RunCore(withHits: true, ghost: "gh" + (char)0x1B + "[31m" + (char)0x202E + "ost.bin", ["--json", "--allow-incomplete"]);
+
+        Assert.True(run.Exited, "CLI did not exit within the timeout.");
+        var advisory = Assert.Single(run.Error.Split('\n'), l => l.StartsWith("scan-package: YARA malware-signature scanning did NOT", StringComparison.Ordinal)).TrimEnd('\r');
+        Assert.Contains(" Reason: ", advisory, StringComparison.Ordinal);
+        Assert.Contains(@"gh\x1b[31m", advisory[advisory.IndexOf(" Reason: ", StringComparison.Ordinal)..], StringComparison.Ordinal);   // it IS quoted, escaped
+        AssertNoRawControlCharacters(advisory);   // U+202E as UTF-8 read through Latin-1 includes U+0080, which this rejects
+        AssertNoRawControlCharacters(run.Output);
+    }
+    #endregion
+
     #region Methods — helpers
     // One scan-package run of a fresh package (nuspec + content/payload.bin) against the probe. withHits stages the
     // payload hit plus the unattributable ghost hit; otherwise the probe exits 3 and prints nothing.
-    private static CliRun Run(bool withHits, params string[] flags)
+    private static CliRun Run(bool withHits, params string[] flags) => RunCore(withHits, "ghost.bin", flags);
+
+    private static CliRun RunCore(bool withHits, string ghost, string[] flags)
     {
         var nupkg = BuildNupkg("SilvergunYaraIncomplete");
         try
@@ -177,7 +218,7 @@ public sealed class YaraIncompleteScanCliTests
             {
                 psi.Environment["SILVERGUN_FAKEYARA_BATCH_ECHO_RULE"] = "Fake_Rule";
                 psi.Environment["SILVERGUN_FAKEYARA_BATCH_ECHO_NAME"] = "payload.bin";
-                psi.Environment["SILVERGUN_FAKEYARA_BATCH_GHOST"] = "ghost.bin";
+                psi.Environment["SILVERGUN_FAKEYARA_BATCH_GHOST"] = ghost;
             }
 
             using var process = Process.Start(psi)!;

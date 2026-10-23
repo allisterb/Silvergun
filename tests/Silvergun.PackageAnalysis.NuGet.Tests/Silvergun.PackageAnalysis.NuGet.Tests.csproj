@@ -2,8 +2,9 @@
 
   <PropertyGroup>
     <!-- The cross-platform suite is net10.0 and is validated on Linux/WSL; it must stay the ONLY TFM there.
-         On Windows we ALSO build net10.0-windows so the #if WINDOWS in-process YARA backend
-         (Silvergun.PackageAnalysis.NuGet.Yara.LibYaraScanner, ADR 0028) is reachable by a test at all — the
+         On Windows we ALSO build net10.0-windows so the #if WINDOWS YARA backends are reachable by a test at all:
+         the default, the out-of-process YaraXWorkerScanner and its YARA-X binding (ADR 0033), and the in-process
+         LibYaraScanner (ADR 0028), now only an explicit fallback (SILVERGUN_YARA_ENGINE=libyara). The
          poisoned-compiler defect that ADR 0028 fixes was invisible to 70 Yara-named tests precisely because
          that type is absent from the net10.0 build. Everything net10.0-windows-only lives behind #if WINDOWS
          (see LibYaraScannerPoisoningTests.cs), so the net10.0 build is byte-for-byte the suite it always was. -->
@@ -54,6 +55,24 @@
          out-of-process host for YaraCliScanner, so the ruleset-preparation failure can be induced by
          poisoning one process's temp directory instead of the whole test run's. -->
     <ProjectReference Include="..\Silvergun.PackageAnalysis.NuGet.Tests.FakeYaraProbe\Silvergun.PackageAnalysis.NuGet.Tests.FakeYaraProbe.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
+    <!-- The YARA-X binding's child-process fixture (ADR 0033 T2, Windows only like the binding): YaraXNative.TryLoad is
+         decided by its first call per process, so the missing-DLL and resolver tests (YaraXNativeLoadTests) each start
+         a fresh one. An Exe, so this copies its apphost next to the net10.0-windows test assembly. -->
+    <ProjectReference Include="..\Silvergun.PackageAnalysis.NuGet.Tests.YaraXProbe\Silvergun.PackageAnalysis.NuGet.Tests.YaraXProbe.csproj" />
+    <!-- The net10.0-windows CLI (amendment (m) of docs/agent/tasks/yarax-worker.md): Silvergun.CLI.Tests builds net10.0
+         only, where `__worker yara` correctly answers `fatal` "engine unavailable on this platform", so the real-engine
+         verb tests (YaraWorkerVerbWindowsTests) live here. An Exe, so this copies Silvergun.CLI.exe and its dependencies
+         next to the net10.0-windows test assembly. That also makes YaraXWorkerScanner's production constructor resolve
+         its worker by amendment (o) step 2 (the apphost in AppContext.BaseDirectory) under testhost, which
+         YaraXWorkerScannerTests pins. ProjectReference only: no packages. -->
+    <ProjectReference Include="..\..\src\Silvergun.CLI\Silvergun.CLI.csproj" />
+    <!-- The startup hook that lists a CLI child's loaded assemblies and native modules (see that project): the windows
+         CLI's worker mode must load yara_x_capi.dll, and its normal scan-package must never load it (ADR 0033 FINAL FORM
+         decision 5). Referenced only so its dll lands here; nothing compiles against it. -->
+    <ProjectReference Include="..\Silvergun.CLI.Tests.LoadedAssembliesHook\Silvergun.CLI.Tests.LoadedAssembliesHook.csproj" />
   </ItemGroup>
 
 </Project>

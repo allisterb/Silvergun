@@ -135,6 +135,27 @@ public abstract class Runtime
         Initialize(toolname, logname, debug, lf, lp);
     }
 
+    /// <summary>
+    /// Worker-mode logging (ADR 0033): <b>stderr only</b>, no file sink, capped at <paramref name="maxBytes"/> UTF-8
+    /// bytes in total, after which output is truncated. Writes UTF-8 without a BOM straight to the process's standard
+    /// error stream, and installs the capped writer as <see cref="Console.Error"/>, which the console sink resolves per
+    /// event (every level is routed to stderr), so nothing in the process writing through <see cref="Console.Error"/>
+    /// can bypass the cap. Callers escape untrusted text before logging it. Returns the capped writer.
+    /// </summary>
+    public static CappedTextWriter WithStderrLogging(string toolname, string logname, bool debug = false, long maxBytes = WorkerStderrCapBytes)
+    {
+        var stderr = new CappedTextWriter(new StreamWriter(Console.OpenStandardError(), new UTF8Encoding(false)) { AutoFlush = true }, maxBytes);
+        Console.SetError(stderr);
+        var logger = new LoggerConfiguration()
+             .MinimumLevel.Is(debug ? Serilog.Events.LogEventLevel.Verbose : Serilog.Events.LogEventLevel.Information)
+             .WriteTo.Console(
+                outputTemplate: "[{Level:u3}] {Message:lj}{NewLine}{Exception}",
+                theme: Serilog.Sinks.SystemConsole.Themes.ConsoleTheme.None,
+                standardErrorFromLevel: Serilog.Events.LogEventLevel.Verbose)
+             .CreateLogger();
+        Initialize(toolname, logname, debug, new SerilogLoggerFactory(logger), new SerilogLoggerProvider(logger, false));
+        return stderr;
+    }
 
     [DebuggerStepThrough]
     public static void Info(string messageTemplate, params object[] args) => logger.LogInformation(messageTemplate, args);
@@ -414,6 +435,9 @@ public abstract class Runtime
     #endregion
 
     #region Fields
+    /// <summary>The total stderr budget of a worker process (ADR 0033 worker protocol v1): 64 KiB.</summary>
+    public const long WorkerStderrCapBytes = 64 * 1024;
+
     public static Microsoft.Extensions.Logging.ILogger logger = NullLogger.Instance;
     public static Serilog.ILogger _logger = Log.Logger;
     // Dedicated structured (CLEF/JSON) audit logger, routed per CaseId; null until WithAuditLog is called.

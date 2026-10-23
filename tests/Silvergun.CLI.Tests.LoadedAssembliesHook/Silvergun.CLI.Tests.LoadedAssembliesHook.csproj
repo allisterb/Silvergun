@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- A .NET startup hook (DOTNET_STARTUP_HOOKS), not a test project. YaraWorkerVerbCliTests start the real CLI as
+         `__worker yara` with this assembly as its startup hook; on process exit it writes every managed assembly and
+         every native module the CLI process loaded to the file named by SILVERGUN_TEST_LOADED_MODULES_OUT. That is how
+         "worker mode loads no CCI / NuGet / libyara.NET / yara_x_capi" (ADR 0033 FINAL FORM decision 5) is observed from
+         outside the process. Referenced by Silvergun.CLI.Tests (ProjectReference only, no packages) so the dll lands in
+         that project's output directory. Inert unless that variable is set. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+</Project>

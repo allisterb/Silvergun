@@ -8,6 +8,20 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(TargetFramework)'=='net10.0-windows'">
+    <!-- The YARA-X C API binding (Yara/YaraX, #if WINDOWS; ADR 0033) uses source-generated [LibraryImport] P/Invoke,
+         pointers and unmanaged callbacks, which require unsafe code. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)'=='net10.0-windows' And Exists('$(MSBuildThisFileDirectory)..\..\artifacts\tools\yara-x-capi\win-x64\yara_x_capi.dll')">
+    <!-- The pinned YARA-X C API DLL (installed and verified by build/fetch-yara.ps1 -Engine YaraXCapi; ADR 0033), copied
+         next to the assembly so YaraXNative loads it from the application directory. CopyToOutputDirectory makes it flow
+         to every referencing project's output (the CLI, the tests). Not a NuGet dependency. Absent DLL => not copied =>
+         the worker reports "engine unavailable". -->
+    <None Include="$(MSBuildThisFileDirectory)..\..\artifacts\tools\yara-x-capi\win-x64\yara_x_capi.dll" Link="yara_x_capi.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\Silvergun.CodeAnalysis.IL\Silvergun.CodeAnalysis.IL.csproj" />
     <ProjectReference Include="..\Silvergun.Intel\Silvergun.Intel.csproj" />

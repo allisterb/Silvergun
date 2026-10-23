@@ -10,6 +10,9 @@ public sealed class NullYaraScanner : IYaraScanner
     #region Properties
     /// <summary>Always <c>false</c> — there is no backend here at all, only the no-op (ADR 0027 decision 4).</summary>
     public bool Available => false;
+
+    /// <summary>The factory selects this scanner only when <c>SILVERGUN_YARA_PATH</c> names no usable classic <c>yara</c>.</summary>
+    public string? UnavailableReason => "no YARA engine is configured (SILVERGUN_YARA_PATH is unset or does not name a usable yara executable)";
     #endregion
 
     #region Methods

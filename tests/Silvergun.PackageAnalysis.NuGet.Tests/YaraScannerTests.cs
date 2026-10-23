@@ -13,8 +13,10 @@ using Xunit;
 /// <see cref="YaraCliScanner"/> honours its "never throws" contract when no real <c>yara</c> engine is present —
 /// unset or nonexistent <c>SILVERGUN_YARA_PATH</c> leaves it unavailable and its scans empty. No real engine or
 /// binary is invoked; the environment variables are saved and restored around each test (see
-/// <see cref="YaraEnvScope"/>). The Windows in-process backend and the nonzero-exit / timeout process paths are
-/// covered by a manual Windows smoke, not here (native, engine-dependent — same posture as the network sources).
+/// <see cref="YaraEnvScope"/>). The Windows backends are not covered here: the default, the out-of-process
+/// <c>YaraXWorkerScanner</c> (ADR 0033), has its own net10.0-windows suites (<c>YaraXWorkerScanner*Tests</c>,
+/// <c>YaraWorkerVerbWindowsTests</c>); the in-process <c>LibYaraScanner</c>, now only an explicit fallback
+/// (<c>SILVERGUN_YARA_ENGINE=libyara</c>), is discussed below.
 /// <para>
 /// <b>LibYaraScanner.Available cannot be pinned from this test project</b> (ADR 0027 decision 4, task constraint D):
 /// this project targets <c>net10.0</c> only, and <c>LibYaraScanner</c> lives entirely behind <c>#if WINDOWS</c>

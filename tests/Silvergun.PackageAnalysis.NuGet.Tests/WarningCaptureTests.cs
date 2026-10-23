@@ -120,6 +120,42 @@ public sealed class WarningCaptureTests
         using var capture = new WarningCapture();
 
         Assert.Empty(capture.Warnings);
+        Assert.Empty(capture.Debugs);
+    }
+
+    // Debugs: a Runtime.Debug line on this flow is captured there, and only there (not as a warning); a warning is not a
+    // Debug line. What "a silent miss: a Debug line, no warning" (YaraXRulesCacheDpapiTests) rests on.
+    [Fact]
+    public void Debugs_CaptureThisFlowsDebugLines_SeparatelyFromItsWarnings()
+    {
+        var marker = Marker();
+        using var capture = new WarningCapture();
+
+        Silvergun.Runtime.Debug("debug {0}", marker);
+        Silvergun.Runtime.Warn("warn {0}", marker);
+
+        Assert.Equal(new[] { $"debug {marker}" }, Mine(capture.Debugs, marker));
+        Assert.Equal(new[] { $"warn {marker}" }, Mine(capture.Warnings, marker));
+    }
+
+    // Debugs fails loudly, as Warnings does, when the forwarder was displaced (writer 3).
+    [Fact]
+    public void Debugs_WhenRuntimeLoggerIsReplacedWhileTheCaptureIsAlive_ThrowsInsteadOfReadingEmpty()
+    {
+        using var capture = new WarningCapture();
+        var installed = Silvergun.Runtime.logger;
+        Silvergun.Runtime.logger = NullLogger.Instance;
+        try
+        {
+            Silvergun.Runtime.Debug("lost {0}", Marker());
+
+            var ex = Assert.Throws<InvalidOperationException>(() => capture.Debugs);
+            Assert.Contains("Runtime.logger was replaced", ex.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Silvergun.Runtime.logger = installed;
+        }
     }
     #endregion
 

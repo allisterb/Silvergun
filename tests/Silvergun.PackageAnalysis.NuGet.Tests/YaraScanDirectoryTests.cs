@@ -17,8 +17,9 @@ using Xunit;
 /// file it matched. A <see cref="FakeScanner"/> (no real engine or binary) drives that default loop over a temp
 /// directory tree, proving hits are attributed to the correct absolute path — including multiple hits per file.
 ///
-/// <para><b>ADR 0032 decision 6.</b> The same default loop is the Windows production path (<c>LibYaraScanner</c>
-/// does not override it), and it now isolates per-file failures: a file that was not scanned is recorded and the
+/// <para><b>ADR 0032 decision 6.</b> The same default loop is the in-process Windows path (<c>LibYaraScanner</c>, which
+/// does not override it; since T6b selected only by <c>SILVERGUN_YARA_ENGINE=libyara</c>, the default being the YARA-X
+/// worker, which has its own <c>ScanDirectory</c>), and it now isolates per-file failures: a file that was not scanned is recorded and the
 /// loop continues; a timeout stops it; either way every hit already found travels out in
 /// <see cref="YaraScanIncompleteException.PartialFindings"/>. A <see cref="ScriptedScanner"/> drives those paths
 /// without any native engine, so this runs on every platform.</para>
@@ -86,8 +87,8 @@ public sealed class YaraScanDirectoryTests
         Assert.Empty(scanner.ScanDirectory(missing));
     }
 
-    // ...and the enumeration that actually threw, which must NOT return empty. This is the Windows production
-    // path: LibYaraScanner does not override ScanDirectory, so this default is what runs there, and a tree whose
+    // ...and the enumeration that actually threw, which must NOT return empty. This is the in-process Windows
+    // path (SILVERGUN_YARA_ENGINE=libyara since T6b): LibYaraScanner does not override ScanDirectory, so this default is what runs there, and a tree whose
     // files were never listed and then reported as a completed, empty scan is exactly the defect ADR 0030 exists
     // to stop — the same site ADR 0029 decision 14 closed in the CLI backend, which used to be the only one of
     // the two that failed closed.
