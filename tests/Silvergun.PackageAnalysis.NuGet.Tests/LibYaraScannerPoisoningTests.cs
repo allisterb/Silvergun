@@ -534,15 +534,18 @@ public sealed class LibYaraScannerPoisoningTests : IClassFixture<PackageFixture>
     #endregion
 
     #region Nested types
-    // A pass-through IYaraScanner that records which paths the ScanDirectory loop actually reached before
-    // delegating to the real backend. It overrides ONLY the ScanFile primitive, so ScanDirectory is the very same
-    // default-interface loop PackageScanner.ScanYara drives — the decorator observes that loop, it does not
-    // replace it.
+    // A pass-through IYaraScanner that records which paths the per-file loop actually reached before delegating to the
+    // real backend. Its ScanFiles is exactly LibYaraScanner's — the shared YaraScanLoop.Run over its own ScanFile — so the
+    // loop is the very one LibYaraScanner runs, with this decorator's ScanFile as the primitive: it observes that loop,
+    // it does not replace it. (Delegating ScanFiles to the inner scanner would route around the recording.)
     private sealed class RecordingScanner(IYaraScanner inner) : IYaraScanner
     {
         public bool Available => inner.Available;
 
         public List<string> Visited { get; } = [];
+
+        public IReadOnlyList<(string FullPath, YaraMatch Match)> ScanFiles(string rootDir, IReadOnlyList<string> files) =>
+            YaraScanLoop.Run(this, rootDir, files);
 
         public IReadOnlyList<YaraMatch> ScanFile(string fullPath)
         {

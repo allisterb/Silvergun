@@ -78,6 +78,57 @@ internal static class ParentHost
         return 0;
     }
 
+    // ADR 0034 with the REAL worker: the production constructor (as Production), but the files are listed FIRST, exactly as
+    // NuGetPackage.Open records a package's YARA inventory, then the tree is disturbed, then that list is scanned. Ops, in
+    // order: `del=<relative>` deletes a file, `rmdir=<relative>` a directory (recursively), `rmroot` the root itself (never
+    // with a junction under it: the test removes those), `empty` scans an empty list, `directory` calls ScanDirectory(root)
+    // instead of ScanFiles (the undisturbed parity check). Prints `listed=<n>` before the Report lines.
+    internal static int ProductionFiles(string root, IReadOnlyList<string> ops)
+    {
+        var recorder = Install();
+        using (var scanner = new YaraXWorkerScanner())
+        {
+            Console.WriteLine($"available={scanner.Available}");
+            IReadOnlyList<string> files = Directory.GetFiles(root, "*", SearchOption.AllDirectories);
+            Console.WriteLine($"listed={files.Count}");
+            var directory = false;
+            foreach (var op in ops)
+                switch (op.Split('=', 2))
+                {
+                    case ["del", var relative]: File.Delete(Path.Combine(root, relative)); break;
+                    case ["rmdir", var relative]: Directory.Delete(Path.Combine(root, relative), recursive: true); break;
+                    case ["rmroot"]: Directory.Delete(root, recursive: true); break;
+                    case ["empty"]: files = []; break;
+                    case ["directory"]: directory = true; break;
+                    default: throw new ArgumentException($"unknown production-files op '{Line(op)}'");
+                }
+            Report(() => directory ? scanner.ScanDirectory(root) : scanner.ScanFiles(root, files));
+        }
+        recorder.Print();
+        return 0;
+    }
+
+    // ADR 0034 end to end with the REAL worker: PackageScanner.Scan over `nupkg`, its backend the production YaraXWorkerScanner
+    // behind a double that deletes the extracted files named `delete` (`*`: every file) the moment YARA is reached, then
+    // delegates. Prints the report's YARA status, every finding (`finding=<rule>|<relative path>`) and the reason, base64.
+    internal static int ProductionPackage(string nupkg, string delete)
+    {
+        var recorder = Install();
+        using (var inner = new YaraXWorkerScanner())
+        {
+            var scan = PackageScanner.Scan(nupkg, resolveReferences: false, yaraScanner: new DeletingScanner(inner, delete));
+            Console.WriteLine($"status={(scan.IsSuccess ? scan.Value.YaraScanStatus.ToString() : "scan-failed")}");
+            if (scan.IsSuccess)
+            {
+                foreach (var finding in scan.Value.YaraFindings)
+                    Console.WriteLine($"finding={Line(finding.RuleName)}|{Line(finding.RelativePath)}");
+                Console.WriteLine($"reason={(scan.Value.YaraUnavailableReason is { } reason ? Convert.ToBase64String(Encoding.UTF8.GetBytes(reason)) : "<null>")}");
+            }
+        }
+        recorder.Print();
+        return 0;
+    }
+
     // YaraScannerFactory.Shared reads SILVERGUN_YARA_ENGINE once per process: the backend it chose, and what it warned.
     internal static int Factory()
     {
@@ -182,6 +233,38 @@ internal static class ParentHost
         }
 
         private readonly List<(LogLevel Level, string Message)> records = [];
+    }
+
+    // The ADR 0034 storage-sense double: on the way into either scan entry it deletes the files under the root named
+    // `delete` (or all of them for `*`), then hands the call on unchanged. Deleting in BOTH entries is what makes it a
+    // red-proof for PackageScanner.ScanYara: called through ScanDirectory (the pre-ADR-0034 wiring) the backend's own walk
+    // then simply never sees the file, and the package reads Completed.
+    private sealed class DeletingScanner(IYaraScanner inner, string delete) : IYaraScanner
+    {
+        public bool Available => inner.Available;
+
+        public string? UnavailableReason => inner.UnavailableReason;
+
+        public IReadOnlyList<YaraMatch> ScanFile(string fullPath) => inner.ScanFile(fullPath);
+
+        public IReadOnlyList<(string FullPath, YaraMatch Match)> ScanDirectory(string rootDir)
+        {
+            Delete(rootDir);
+            return inner.ScanDirectory(rootDir);
+        }
+
+        public IReadOnlyList<(string FullPath, YaraMatch Match)> ScanFiles(string rootDir, IReadOnlyList<string> files)
+        {
+            Delete(rootDir);
+            return inner.ScanFiles(rootDir, files);
+        }
+
+        private void Delete(string rootDir)
+        {
+            foreach (var file in Directory.GetFiles(rootDir, "*", SearchOption.AllDirectories)
+                         .Where(f => delete == "*" || string.Equals(Path.GetFileName(f), delete, StringComparison.Ordinal)))
+                File.Delete(file);
+        }
     }
     #endregion
 }

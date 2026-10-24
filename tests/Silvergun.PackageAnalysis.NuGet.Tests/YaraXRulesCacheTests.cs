@@ -35,7 +35,7 @@ using Entry = YaraXRulesCacheEntryV3;
 /// the DPAPI blob 12..12+P (P = 262 measured), then the body: sources sha256 +0..32, canary id +32..48, canary marker
 /// +48..80, rule count +80..84, the serialized rules +84..end. The blob protects the body's sha256.</para>
 /// </summary>
-public sealed class YaraXRulesCacheTests
+public sealed class YaraXRulesCacheTests(Xunit.Abstractions.ITestOutputHelper output)
 {
     #region Methods: hit and miss
     [Fact]
@@ -593,11 +593,22 @@ public sealed class YaraXRulesCacheTests
         using var held = new Mutex(initiallyOwned: true, MutexName(cache.Location!));
         using var warnings = new WarningCapture();
 
-        var clock = System.Diagnostics.Stopwatch.StartNew();
-        var loaded = Task.Run(() => cache.TryLoad(key)).GetAwaiter().GetResult();   // another thread: a mutex is re-entrant for its owner
-        var loadTime = clock.Elapsed;
-        var stored = Task.Run(() => cache.Store(rules)).GetAwaiter().GetResult();
+        // Another thread, because a mutex is re-entrant for its owner. The stopwatch runs INSIDE that thread, around
+        // TryLoad alone: it used to wrap a blocking Task.Run(...).GetAwaiter().GetResult(), so under full-suite load it also
+        // measured thread-pool queueing (10.44 s against the 8 s ceiling, I2b). A dedicated thread is not pool-queued at
+        // all, and it is not a blocking wait on a Task (xUnit1031); the test cannot simply await instead, because the
+        // continuation could resume on another thread and ReleaseMutex must run on the one that owns the mutex.
+        var loadTime = TimeSpan.Zero;
+        var loaded = OffTheOwnerThread(() =>
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            var result = cache.TryLoad(key);
+            loadTime = clock.Elapsed;
+            return result;
+        });
+        var stored = OffTheOwnerThread(() => cache.Store(rules));
         held.ReleaseMutex();
+        output.WriteLine($"TryLoad under a held cache lock took {loadTime.TotalMilliseconds:F0} ms (bound 1500..8000 ms).");
 
         Assert.Null(loaded);
         Assert.InRange(loadTime, TimeSpan.FromSeconds(1.5), TimeSpan.FromSeconds(8));
@@ -924,6 +935,24 @@ public sealed class YaraXRulesCacheTests
         var method = typeof(YaraXRulesCache).GetMethod("MutexName", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
         Assert.True(method is not null, "YaraXRulesCache.MutexName is gone; the lock tests cannot name the lock.");
         return (string)method!.Invoke(null, [directory])!;
+    }
+
+    // Runs `body` on a dedicated (never pooled) thread and returns its result, rethrowing its exception with the original
+    // stack: a thread that does not own a mutex the caller holds, with no pool-queueing delay in front of it.
+    private static T OffTheOwnerThread<T>(Func<T> body)
+    {
+        T result = default!;
+        System.Runtime.ExceptionServices.ExceptionDispatchInfo? fault = null;
+        var thread = new Thread(() =>
+        {
+            try { result = body(); }
+            catch (Exception ex) { fault = System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex); }
+        })
+        { IsBackground = true, Name = "silvergun-cache-lock-test" };
+        thread.Start();
+        thread.Join();
+        fault?.Throw();
+        return result;
     }
 
     private static void AssertOnlyTheUserHasAccess(FileSecurity security)

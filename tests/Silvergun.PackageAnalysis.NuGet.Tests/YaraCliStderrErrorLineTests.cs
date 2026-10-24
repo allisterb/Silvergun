@@ -383,7 +383,16 @@ public sealed class YaraCliStderrErrorRealEngineReportTests
 
         public IReadOnlyList<YaraMatch> ScanFile(string fullPath) => inner.ScanFile(fullPath);
 
-        public IReadOnlyList<(string FullPath, YaraMatch Match)> ScanDirectory(string rootDir)
+        public IReadOnlyList<(string FullPath, YaraMatch Match)> ScanDirectory(string rootDir) =>
+            WhileRevoked(rootDir, () => inner.ScanDirectory(rootDir));
+
+        // What PackageScanner.ScanYara calls since ADR 0034 (the package's extraction inventory): the same revocation
+        // first, then the real backend's own ScanFiles.
+        public IReadOnlyList<(string FullPath, YaraMatch Match)> ScanFiles(string rootDir, IReadOnlyList<string> files) =>
+            WhileRevoked(rootDir, () => inner.ScanFiles(rootDir, files));
+
+        private IReadOnlyList<(string FullPath, YaraMatch Match)> WhileRevoked(
+            string rootDir, Func<IReadOnlyList<(string FullPath, YaraMatch Match)>> scan)
         {
             if (!OperatingSystem.IsLinux())
                 throw new InvalidOperationException("[LinuxYaraNonRootFact] must have gated this test to Linux.");
@@ -395,7 +404,7 @@ public sealed class YaraCliStderrErrorRealEngineReportTests
 
             try
             {
-                return inner.ScanDirectory(rootDir);
+                return scan();
             }
             finally
             {

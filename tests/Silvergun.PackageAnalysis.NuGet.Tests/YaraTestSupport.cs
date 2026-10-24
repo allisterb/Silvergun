@@ -440,6 +440,17 @@ internal static class YaraHarness
         Run("--scan-directory", root, yaraPath, poisonTempWith: null, timeoutMs: null,
             ["--warmup", warmup, "--poison-temp-after-warmup", poisonTempAfterWarmupWith]);
 
+    /// <summary>
+    /// <see cref="ScanDirectoryAfterWarmup"/>'s shape over <see cref="YaraCliScanner.ScanFiles"/> (ADR 0034, I5): after the
+    /// warm-up and the late poisoning, the child lists <paramref name="root"/> as <c>NuGetPackage.Open</c> takes a YARA
+    /// inventory, deletes every listed file named in <paramref name="deleteAfterListing"/> (<c>'|'</c>-separated), and scans
+    /// the list — a gone listed file meeting an individual pass whose plain ruleset cannot be prepared.
+    /// </summary>
+    public static HarnessResult ScanFilesAfterWarmup(
+        string root, string warmup, string yaraPath, string poisonTempAfterWarmupWith, string deleteAfterListing) =>
+        Run("--scan-directory", root, yaraPath, poisonTempWith: null, timeoutMs: null,
+            ["--warmup", warmup, "--poison-temp-after-warmup", poisonTempAfterWarmupWith, "--list-then-delete", deleteAfterListing]);
+
     /// <summary>The same harness over <see cref="YaraCliScanner.ScanFile"/> (ADR 0032 decision 5).</summary>
     public static HarnessResult ScanFile(string file, string yaraPath, string? poisonTempWith = null) =>
         Run("--scan-file", file, yaraPath, poisonTempWith, timeoutMs: null);

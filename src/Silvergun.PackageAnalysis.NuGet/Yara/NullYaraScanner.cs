@@ -20,6 +20,13 @@ public sealed class NullYaraScanner : IYaraScanner
 
     public IReadOnlyList<(string FullPath, YaraMatch Match)> ScanDirectory(string rootDir) =>
         Array.Empty<(string, YaraMatch)>();
+
+    /// <summary>Always empty, like <see cref="ScanDirectory"/>: there is no engine, which <see cref="Available"/> says.</summary>
+    public IReadOnlyList<(string FullPath, YaraMatch Match)> ScanFiles(string rootDir, IReadOnlyList<string> files)
+    {
+        ArgumentNullException.ThrowIfNull(files);
+        return Array.Empty<(string, YaraMatch)>();
+    }
     #endregion
 
     #region Fields

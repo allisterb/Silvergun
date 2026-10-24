@@ -134,40 +134,37 @@ public sealed class YaraXWorkerScanner : Runtime, IYaraScanner, IDisposable
 
     /// <summary>
     /// Scans every file under <paramref name="rootDir"/> (recursively) in ONE worker run, and returns each hit paired
-    /// with the enumerated path of the file it matched. Returns empty when nothing matched, the directory is missing or
-    /// empty, or the backend never had an engine (its probe failed, so <see cref="Available"/> was never <c>true</c>).
-    /// Throws <see cref="YaraScanIncompleteException"/> when the scanner is or became disposed, the tree cannot be
-    /// enumerated, or any file has no genuine <c>scanned</c> result (see the class summary), carrying every hit that was
-    /// reported.
+    /// with the enumerated path of the file it matched. Returns empty when nothing matched, the root verifiably does not
+    /// exist or holds no files, or the backend never had an engine (its probe failed, so <see cref="Available"/> was never
+    /// <c>true</c>). Throws <see cref="YaraScanIncompleteException"/> when the scanner is or became disposed, the root
+    /// exists but cannot be read as a directory, the tree cannot be enumerated (<see cref="YaraTree.Files"/>), or any file
+    /// has no genuine <c>scanned</c> result (see <see cref="ScanFiles"/>), carrying every hit that was reported.
     /// </summary>
-    public IReadOnlyList<(string FullPath, YaraMatch Match)> ScanDirectory(string rootDir)
+    public IReadOnlyList<(string FullPath, YaraMatch Match)> ScanDirectory(string rootDir) =>
+        HasEngine(rootDir) ? ScanFiles(rootDir, YaraTree.Files(rootDir, "YARA-X") ?? []) : [];
+
+    /// <summary>
+    /// Scans exactly <paramref name="files"/> in ONE worker run (the <see cref="IYaraScanner.ScanFiles"/> contract, ADR
+    /// 0034), and returns each hit paired with the listed path of the file it matched. Returns empty when the list is
+    /// empty or nothing matched, or when the backend never had an engine. Every listed file needs a genuine <c>scanned</c>
+    /// result: one that is missing at scan time is refused before sending (its link check cannot read it) or, if it
+    /// vanishes after that, answered <c>error</c> by the worker, which cannot open it — unscanned either way, as is every
+    /// other file without a genuine result (see the class summary). Any unscanned file throws
+    /// <see cref="YaraScanIncompleteException"/> carrying every hit that was reported. <paramref name="rootDir"/> bounds
+    /// the link check: a listed file not lexically under it is refused, never sent.
+    /// </summary>
+    public IReadOnlyList<(string FullPath, YaraMatch Match)> ScanFiles(string rootDir, IReadOnlyList<string> files)
     {
-        if (!HasEngine(rootDir))
+        ArgumentNullException.ThrowIfNull(files);
+        if (!HasEngine(rootDir) || files.Count == 0)
             return [];
 
-        string[] files;
-        try
-        {
-            // As the interface's default loop: a missing root is not reachable in production (rootDir is the package's
-            // own, validated extraction dir), so "nothing to scan" is the honest reading; an enumeration that THROWS is not.
-            files = !string.IsNullOrEmpty(rootDir) && Directory.Exists(rootDir)
-                ? Directory.GetFiles(rootDir, "*", SearchOption.AllDirectories)
-                : [];
-        }
-        catch (Exception ex)
-        {
-            throw new YaraScanIncompleteException(
-                $"YARA-X could not enumerate '{YaraPathSafety.Escape(rootDir)}', so an unknown number of files went unscanned: {YaraPathSafety.Escape(ex.Message)}. This package was NOT scanned and must not be reported as clean.",
-                ex);
-        }
-
-        if (files.Length == 0)
-            return [];
-
-        var outcome = Scan(files, rootDir);
+        // Never a null root here: Scan reads a null one as "no root to bound the link walk" (ScanFile's one-file case) and
+        // checks only the leaf, whereas an empty one refuses every file it cannot place under it.
+        var outcome = Scan(files, rootDir ?? string.Empty);
         return outcome.IsComplete
             ? outcome.Hits
-            : throw new YaraScanIncompleteException(IncompleteMessage(rootDir, files.Length, outcome), null, outcome.Hits);
+            : throw new YaraScanIncompleteException(IncompleteMessage(rootDir, files.Count, outcome), null, outcome.Hits);
     }
 
     /// <summary>
@@ -240,13 +237,18 @@ public sealed class YaraXWorkerScanner : Runtime, IYaraScanner, IDisposable
 
     // Why `file` (on the wire as `wire`) must not be sent, or null. The path form is the worker's own (amendment (j'):
     // WorkerPathForm.Verbatim, so both sides agree by construction; this class has no path rules of its own), and the link
-    // check walks that verbatim form (W-A).
+    // check walks that verbatim form (W-A). A file the link check finds missing (it, or a directory on the way to it, is
+    // gone: deleted since it was listed, e.g. by Storage Sense) is named as such — still refused, still unscanned, never
+    // reported as clean; only its reason differs from a link's.
     private static string? Refusal(string? rootDir, string file, string wire) =>
         WorkerPathForm.Verbatim(wire) is null
             ? "its path is not in the worker protocol's form (absolute, backslash-separated, well-formed UTF-16, no NUL, no '.', '..' or empty segment, no ':' past the drive, not a device path)"
-        : IsLink(rootDir, file, wire)
-            ? "it is a link, lies under a linked directory, or could not be checked for either; following a link would scan content outside the package"
-        : null;
+        : IsLink(rootDir, file, wire) switch
+        {
+            true => "it is a link, lies under a linked directory, or could not be checked for either; following a link would scan content outside the package",
+            false => null,
+            null => YaraPathSafety.NoLongerExists,
+        };
 
     // A worker's hits on one file as YaraMatch (the protocol carries no matched strings). Results must never carry the
     // canary: a hit whose rule uses the reserved canary prefix (case-insensitively) is dropped with a warning — the
@@ -604,12 +606,13 @@ public sealed class YaraXWorkerScanner : Runtime, IYaraScanner, IDisposable
     // Whether opening `file` (on the wire as `wire`, the same length) could follow a link out of the package: the file
     // itself is a reparse point, or (when the root is known) any directory between rootDir (exclusive) and it is one. A
     // path not lexically under rootDir, an ancestor not in the protocol's form, or any exception reads as a link: we
-    // cannot vouch for it, so it is not sent.
+    // cannot vouch for it, so it is not sent. Null when a path it checks does not exist (FileNotFound or
+    // DirectoryNotFound), so Refusal can name it as missing rather than as a link — refused all the same.
     // W-A: every path checked is the VERBATIM form the worker opens (WorkerPathForm.Verbatim). The plain form is
     // normalised first — a directory named `con` becomes \\.\con, and `bar.` loses its dot — so a junction with such a
     // name had no link target there and was walked straight through (measured: `con`, `bar.`, `lpt1.d`). Attributes are
     // read without following the link, and ANY reparse point counts, not only those .NET reports a target for.
-    private static bool IsLink(string? rootDir, string file, string wire)
+    private static bool? IsLink(string? rootDir, string file, string wire)
     {
         try
         {
@@ -622,6 +625,10 @@ public sealed class YaraXWorkerScanner : Runtime, IYaraScanner, IDisposable
                     .Where(i => wire[i] == '\\')
                     .Append(wire.Length)
                     .Any(end => IsReparsePoint(wire[..end]));
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return null;   // gone: refused all the same, under its own reason
         }
         catch
         {
@@ -638,11 +645,25 @@ public sealed class YaraXWorkerScanner : Runtime, IYaraScanner, IDisposable
         var under = rootDir is null ? string.Empty : $" under '{YaraPathSafety.Escape(rootDir)}'";
         var what = outcome.Unscanned.Count == 0
             ? $"YARA-X's worker run over {total} file(s){under} cannot be vouched for"
-            : $"YARA-X did not scan {outcome.Unscanned.Count} of {total} file(s){under}: "
-              + YaraPathSafety.Bounded(outcome.Unscanned.Select(u => $"{YaraPathSafety.Relative(rootDir, u.File)} ({u.Why})").ToArray());
+            : $"YARA-X did not scan {outcome.Unscanned.Count} of {total} file(s){under}: {DescribeUnscanned(rootDir, outcome.Unscanned)}";
         return what
             + (outcome.Failure is null ? string.Empty : $". The worker run was incomplete: {outcome.Failure}")
             + $". {outcome.Hits.Count} hit(s) found in the files that were scanned are reported; the rest is NOT verified and must not be reported as clean.";
+    }
+
+    // The unscanned files, each with its reason — except the ones that no longer exist, which lead under their own clause
+    // (YaraPathSafety.NoLongerExist), named once and without the reason it already states, as the per-file loop and the
+    // CLI backend do: the report's reason is bounded, and a trailing clause is the first thing the bound cuts. With none
+    // gone, the list is the one it always was.
+    private static string DescribeUnscanned(string? rootDir, IReadOnlyList<(string File, string Why)> unscanned)
+    {
+        var parts = unscanned.ToLookup(u => u.Why == YaraPathSafety.NoLongerExists);
+        var (gone, others) = (parts[true].ToArray(), parts[false].ToArray());
+        var reasoned = YaraPathSafety.Bounded(others.Select(u => $"{YaraPathSafety.Relative(rootDir, u.File)} ({u.Why})").ToArray());
+        return gone.Length == 0
+            ? reasoned
+            : $"{YaraPathSafety.NoLongerExist(gone.Length)}: {YaraPathSafety.Bounded(gone.Select(u => YaraPathSafety.Relative(rootDir, u.File)).ToArray())}"
+              + (others.Length == 0 ? string.Empty : $"; the others: {reasoned}");
     }
 
     // W-D: null is the one default (i); anything else is clamped into the worker's range, with one warning when it moves.

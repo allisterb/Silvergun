@@ -45,7 +45,7 @@ public sealed class PackageScanner : Runtime
             // whatever hits an incomplete scan did find (ADR 0032), otherwise empty — so a caller can never mistake
             // "could not scan" for "scanned and clean" (the defect this status field exists to close).
             var (yaraFindings, yaraStatus, yaraUnavailableReason) = runYara
-                ? ScanYara(package, nupkgPath, yaraScanner)
+                ? ScanYara(package, yaraScanner)
                 : (Array.Empty<YaraFinding>(), YaraScanStatus.NotRun, null);
 
             // Packaging anomalies (ADR 0031): a pure, offline pass over the DECLARED entry names — what the package
@@ -156,44 +156,53 @@ public sealed class PackageScanner : Runtime
         }
     }
 
-    // Best-effort YARA malware-signature scan over the open package's extraction directory (ADR 0016). The shared
+    // Best-effort YARA malware-signature scan over the open package's extracted files (ADR 0016). The shared
     // scanner is selected once by YaraScannerFactory (the YARA-X worker on Windows, or in-process libyara when explicitly
     // selected; classic yara CLI elsewhere, or a no-op
     // when no engine is available); each raw hit is enriched with rule metadata (family/detection-name/category)
     // from YaraRuleIndex and a package-relative path.
     //
+    // What is scanned is the package's YARA inventory (ADR 0034): the files NuGetPackage.Open listed straight after
+    // extraction, handed to IYaraScanner.ScanFiles — NOT a walk of the extraction directory taken now. This scan runs
+    // only after the CIL analysis of every assembly, minutes later, and a file deleted in between (Windows Storage Sense
+    // sweeps old-dated files under %TEMP%, and an extracted file keeps the timestamp its package chose) used to be simply
+    // absent from the walk: never reported unscanned, so the package read Completed, and clean if every file was gone.
+    // Judged against the inventory, a listed file that is missing at scan time is unscanned, through the same
+    // YaraScanIncompleteException channel as any other unscanned file (first catch below).
+    //
     // Status is derived from IYaraScanner.Available FIRST (ADR 0027 decision 4 code-review fix), not from whether
-    // ScanDirectory throws: a NullYaraScanner (no backend configured at all, the common configuration) returns empty
+    // ScanFiles throws: a NullYaraScanner (no backend configured at all, the common configuration) returns empty
     // and throws nothing, which read as Completed before that fix. Available == false is the "no engine" answer.
     //
-    // Past that gate, ScanDirectory either returns (Completed — every file was scanned, which the backend has to
+    // Past that gate, ScanFiles either returns (Completed — every listed file was scanned, which the backend has to
     // establish from positive per-file evidence: a clean `yara -r` exit code and an empty stderr are NOT that evidence,
     // because yara's --timeout is one deadline for the whole recursive run and the files still queued when it passes
     // are dropped silently, ADR 0032 decision 9) or throws, and the two catches below are what keep "could not tell"
     // honest in BOTH directions (ADR 0030 and its converse):
     //
     //  * YaraScanIncompleteException — specific files (for a pass that never produced a usable run, all of them) are
-    //    KNOWN not to have been scanned: a file the backend could not open or scan, a per-file timeout in the default
-    //    loop, a name the CLI batch output cannot round-trip, a file the CLI batch pass has no coverage line for and
-    //    whose individual re-scan failed, an unattributable hit (ADR 0029 decisions 13, 14, 17; ADR 0032). It
-    //    carries every hit already in hand in PartialFindings, and those are REAL detections: they are
-    //    enriched and reported ALONGSIDE Unavailable (ADR 0032 decision 2). Dropping them was the defect — a package
-    //    with a matching payload plus 65 junk control-character names reported zero findings, so `--strict` exited 3
+    //    KNOWN not to have been scanned: a listed file gone by scan time (ADR 0034), a file the backend could not open
+    //    or scan, a per-file timeout in the per-file loop (YaraScanLoop.Run), a name the CLI batch output cannot
+    //    round-trip, a file the CLI batch pass has no coverage line for and whose individual re-scan failed, an
+    //    unattributable hit (ADR 0029 decisions 13, 14, 17; ADR 0032). It carries every hit already in hand in
+    //    PartialFindings, and those are REAL detections: they are enriched and reported ALONGSIDE Unavailable (ADR
+    //    0032 decision 2). Dropping them was the defect — a package with a matching payload plus 65 junk
+    //    control-character names reported zero findings, so `--strict` exited 3
     //    instead of 2 and `--strict --allow-incomplete` exited 0. The catch must itself be total: if enriching the
     //    partial hits throws, it degrades to (empty, Unavailable) — still fail-closed — and never escapes.
     //
     //  * anything else — notably LibYaraScanner's native libyara.NET dependency failing to load, which can surface at
-    //    a call site OUTSIDE any scanner's own guards (inside the interface's default ScanDirectory loop, or from
+    //    a call site OUTSIDE any scanner's own guards (inside the per-file ScanFiles loop, YaraScanLoop.Run, or from
     //    LibYaraScanner.Available itself). No hits are known, so it is (empty, Unavailable).
     //
     // Never throws overall, and never yields a bare empty list that would read as "scanned, clean". A failure is
-    // logged ONCE per package scan here, not once per file: ScanDirectory aggregates its per-file failures into the
+    // logged ONCE per package scan here, not once per file: ScanFiles aggregates its per-file failures into the
     // one exception it throws (the backends additionally log each failing file's own cause, escaped).
     //
     // The third element is why the status is Unavailable (null otherwise), for the report's YaraUnavailableReason: the
     // backend's own UnavailableReason, or the exception's message. The report escapes and bounds it on assignment.
     private static (IReadOnlyList<YaraFinding> Findings, YaraScanStatus Status, string? UnavailableReason) ScanYara(
-        NuGetPackage package, string nupkgPath, IYaraScanner? yaraScanner = null)
+        NuGetPackage package, IYaraScanner? yaraScanner = null)
     {
         try
         {
@@ -207,9 +216,8 @@ public sealed class PackageScanner : Runtime
             }
 
             var index = YaraRuleIndex.Shared;
-            var root = package.ExtractionDir;
-            var findings = scanner.ScanDirectory(root)
-                .Select(hit => Enrich(hit.Match, PackageRelativePath(root, nupkgPath, hit.FullPath), index))
+            var findings = scanner.ScanFiles(package.ExtractionDir, package.YaraInventory)
+                .Select(hit => Enrich(hit.Match, PackageRelativePath(package, hit.FullPath), index))
                 .ToArray();
             return (findings, YaraScanStatus.Completed, null);
         }
@@ -217,7 +225,7 @@ public sealed class PackageScanner : Runtime
         {
             // The backends' messages are whole sentences ending in '.'; the format below supplies its own, so the
             // message's is trimmed rather than doubled.
-            var partial = EnrichPartialFindings(ex, package, nupkgPath);
+            var partial = EnrichPartialFindings(ex, package);
             if (partial.Count > 0)
                 Warn("YARA scan INCOMPLETE for {0}: {1}. {2} match(es) found in the files that were scanned are reported; every other file's malware-signature findings are NOT verified.",
                     package.Identity.Id, YaraPathSafety.Escape(ex.Message).TrimEnd('.'), partial.Count);
@@ -243,13 +251,13 @@ public sealed class PackageScanner : Runtime
     // the package degrades to no findings (still Unavailable, so still fail-closed) rather than failing the whole
     // package scan. The message is escaped like every other one here.
     private static IReadOnlyList<YaraFinding> EnrichPartialFindings(
-        YaraScanIncompleteException ex, NuGetPackage package, string nupkgPath)
+        YaraScanIncompleteException ex, NuGetPackage package)
     {
         try
         {
-            var (index, root) = (YaraRuleIndex.Shared, package.ExtractionDir);
+            var index = YaraRuleIndex.Shared;
             return ex.PartialFindings
-                .Select(hit => Enrich(hit.Match, PackageRelativePath(root, nupkgPath, hit.FullPath), index))
+                .Select(hit => Enrich(hit.Match, PackageRelativePath(package, hit.FullPath), index))
                 .ToArray();
         }
         catch (Exception enrichFailure)
@@ -282,18 +290,17 @@ public sealed class PackageScanner : Runtime
 
     // The package-relative path of an extracted file, matching the inventory convention (RecursiveExtractor nests
     // entries under a directory named after the .nupkg): relative to that content root, forward-slash normalized.
+    // The root is the package's own NuGetPackage.ContentRoot, the one its inventories were taken against, never
+    // re-derived here: a second derivation from the .nupkg path disagreed with the on-disk spelling for "x.nupkg."
+    // and rendered every hit path absolute (ADR 0034, I5 W-b).
     //
     // Derived by NuGetPackage.RelativeUnderRoot — the same string-prefix computation the inventory itself uses —
     // rather than by Path.GetRelativePath, which resolves both operands through the platform normalizer and answers
     // "\\.\COM1" for a file named COM1.dll under the root (ADR 0030, sixth instance). It is also total, so the
     // try/catch it replaces is gone: a throw here would have been caught by ScanYara and turned a real, attributable
     // hit into a package-wide Unavailable — ADR 0030's converse, a detection downgraded to "we don't know".
-    private static string PackageRelativePath(string extractionDir, string nupkgPath, string fullPath)
-    {
-        var contentRoot = Path.Combine(extractionDir, Path.GetFileName(nupkgPath));
-        var root = Directory.Exists(contentRoot) ? contentRoot : extractionDir;
-        return NuGetPackage.RelativeUnderRoot(root, fullPath);
-    }
+    private static string PackageRelativePath(NuGetPackage package, string fullPath) =>
+        NuGetPackage.RelativeUnderRoot(package.ContentRoot, fullPath);
 
     // Best-effort CCI metadata read; a failure logs a warning and yields null — never fatal.
     private static AssemblyMetadataInfo? ReadMetadata(string path, bool resolveReferences)

@@ -21,7 +21,8 @@ using Silvergun.PackageAnalysis.NuGet.Yara.Worker;
 /// <c>TryLoad</c> names the other copy, then a compile and a canary scan run, and every loaded <c>yara_x_capi.dll</c> module
 /// is listed. If the import resolver ever let the runtime fall back to its default search order, the application
 /// directory's copy would be loaded as a second module.</item>
-/// <item><c>parent</c>, <c>failfast</c>, <c>production</c>, <c>factory</c>, <c>factory-scan</c>, <c>resolve</c> — a fresh
+/// <item><c>parent</c>, <c>failfast</c>, <c>production</c>, <c>production-files</c> and <c>production-package</c> (ADR 0034:
+/// a listed or extracted file deleted before the real worker scans it), <c>factory</c>, <c>factory-scan</c>, <c>resolve</c> — a fresh
 /// process hosting the PARENT backend, <c>YaraXWorkerScanner</c> (task T4), for what the xunit host cannot observe or must
 /// not do: its Debug-level relay of the worker's stderr, a parent that dies by <c>Environment.FailFast</c> with a worker
 /// running, the production constructor with a private rules cache, the process-wide factory's one-time choice (and a
@@ -44,6 +45,8 @@ internal static class Program
                     ParentHost.Parent(worker, script, root, int.Parse(timeout), Ms(readyMs), Ms(graceMs), Ms(exitMs)),
                 ["failfast", var worker, var script, var root, var pidFile] => ParentHost.FailFast(worker, script, root, pidFile),
                 ["production", var root] => ParentHost.Production(root),
+                ["production-files", var root, .. var ops] => ParentHost.ProductionFiles(root, ops),
+                ["production-package", var nupkg, var delete] => ParentHost.ProductionPackage(nupkg, delete),
                 ["factory"] => ParentHost.Factory(),
                 ["factory-scan", var nupkg] => ParentHost.FactoryScan(nupkg),
                 ["resolve", var processPath, var baseDirectory] => ParentHost.Resolve(processPath, baseDirectory),
@@ -115,7 +118,7 @@ internal static class Program
 
     private static int Usage()
     {
-        Console.Error.WriteLine("usage: missing <dirWithDll> | relative | resolver <dirWithACopyOfTheDll> | parent ... | failfast ... | production <root> | factory | factory-scan <nupkg> | resolve <processPath> <baseDirectory>");
+        Console.Error.WriteLine("usage: missing <dirWithDll> | relative | resolver <dirWithACopyOfTheDll> | parent ... | failfast ... | production <root> | production-files <root> <op>... | production-package <nupkg> <name|*> | factory | factory-scan <nupkg> | resolve <processPath> <baseDirectory>");
         return 64;
     }
 

@@ -98,11 +98,21 @@ internal static class YaraPathSafety
     /// Attacker-influenced text items (paths, yara's own output lines) rendered for a log line or an exception
     /// message: each quoted and <see cref="Escape"/>d, at most <see cref="MaxListedItems"/> of them, the rest summarized
     /// as <c>", and N more"</c> so a package full of them cannot flood either. The one rendering both the CLI backend
-    /// and the default <see cref="IYaraScanner.ScanDirectory"/> loop use, so every YARA message reads the same way.
+    /// and the per-file <see cref="IYaraScanner.ScanFiles"/> loop (<see cref="YaraScanLoop.Run"/>) use, so every YARA
+    /// message reads the same way.
     /// </summary>
     internal static string Bounded(IReadOnlyList<string> items) =>
         string.Join(", ", items.Take(MaxListedItems).Select(p => "'" + Escape(p) + "'"))
         + (items.Count > MaxListedItems ? $", and {items.Count - MaxListedItems} more" : string.Empty);
+
+    /// <summary>
+    /// The clause naming how many of a message's unscanned files no longer exist (ADR 0034: listed, then gone by scan
+    /// time) — "1 of them no longer exists …" or "<paramref name="count"/> of them no longer exist …" — shared by the CLI
+    /// backend, the YARA-X worker backend and <see cref="YaraScanLoop.Run"/> so all three say it the same way. Messages lead with it: the report's
+    /// reason is bounded, and a trailing clause is the first thing the bound cuts.
+    /// </summary>
+    internal static string NoLongerExist(int count) =>
+        count == 1 ? $"1 of them no longer exists ({RemovedAfterListed})" : $"{count} of them no longer exist (each {RemovedAfterListed})";
 
     private static bool IsSeparator(char c) => c == Path.DirectorySeparatorChar || c == Path.AltDirectorySeparatorChar;
 
@@ -139,6 +149,15 @@ internal static class YaraPathSafety
     #region Fields
     /// <summary>How many items <see cref="Bounded"/> names before summarizing the rest as ", and N more".</summary>
     internal const int MaxListedItems = 10;
+
+    /// <summary>
+    /// Why one listed file was not scanned when it is gone at scan time (ADR 0034) — the wording every backend uses
+    /// for it. "Listed", not "extracted": it holds for both callers of <see cref="IYaraScanner.ScanFiles"/>, the
+    /// extraction inventory and <see cref="IYaraScanner.ScanDirectory"/>'s own enumeration.
+    /// </summary>
+    internal const string NoLongerExists = "it no longer exists (" + RemovedAfterListed + ")";
+
+    private const string RemovedAfterListed = "removed after it was listed";
 
     private const char Tab = (char)0x09;
     private const char Lf = (char)0x0A;

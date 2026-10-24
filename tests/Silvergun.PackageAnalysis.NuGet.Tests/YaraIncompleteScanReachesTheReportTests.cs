@@ -189,15 +189,20 @@ public sealed class YaraIncompleteScanReachesTheReportTests : IClassFixture<Pack
     #endregion
 
     #region Nested types
-    // A healthy backend that implements ONLY ScanFile, so ScanDirectory is the interface's default loop — the path of
-    // the in-process LibYaraScanner, the explicit Windows fallback (SILVERGUN_YARA_ENGINE=libyara; the default since ADR
-    // 0033 T6b is YaraXWorkerScanner, which overrides the loop). It hits on one file name, reports another as not scanned (the ADR 0032
-    // decision 5 exception, through its original one-argument constructor), and finds nothing elsewhere.
+    // A healthy backend whose scan primitive is ScanFile, listing through the shared per-file loop (YaraScanLoop.Run —
+    // exactly what the in-process LibYaraScanner, the explicit Windows fallback, does; SILVERGUN_YARA_ENGINE=libyara; the
+    // default since ADR 0033 T6b is YaraXWorkerScanner, which scans a list in one worker run). Since ADR 0034 review W1
+    // ScanFiles has no default, so the double states it, as LibYaraScanner does. It hits on one file name, reports another
+    // as not scanned (the ADR 0032 decision 5 exception, through its original one-argument constructor), and finds
+    // nothing elsewhere.
     private sealed class PerFileBackend(string hitOn, string rule, string notScanned) : IYaraScanner
     {
         public bool Available => true;
 
         public List<string> Visited { get; } = [];
+
+        public IReadOnlyList<(string FullPath, YaraMatch Match)> ScanFiles(string rootDir, IReadOnlyList<string> files) =>
+            YaraScanLoop.Run(this, rootDir, files);
 
         public IReadOnlyList<YaraMatch> ScanFile(string fullPath)
         {
@@ -211,14 +216,17 @@ public sealed class YaraIncompleteScanReachesTheReportTests : IClassFixture<Pack
         }
     }
 
-    // A healthy per-file backend (ScanDirectory is the interface's default loop) that matches on its first call and
-    // reaches its own wall-clock bound on the second — the LibYaraScanner TimeoutException contract (ADR 0028
-    // decision 10). It throws only BCL types, so it compiles against the pre-ADR-0032 code.
+    // A healthy per-file backend (listing through the shared YaraScanLoop.Run, as LibYaraScanner does) that matches on
+    // its first call and reaches its own wall-clock bound on the second — the LibYaraScanner TimeoutException contract
+    // (ADR 0028 decision 10). ScanFile throws only BCL types.
     private sealed class TimesOutOnSecondCallBackend(string rule) : IYaraScanner
     {
         public bool Available => true;
 
         public List<string> Visited { get; } = [];
+
+        public IReadOnlyList<(string FullPath, YaraMatch Match)> ScanFiles(string rootDir, IReadOnlyList<string> files) =>
+            YaraScanLoop.Run(this, rootDir, files);
 
         public IReadOnlyList<YaraMatch> ScanFile(string fullPath)
         {

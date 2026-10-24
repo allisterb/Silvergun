@@ -91,13 +91,16 @@ public sealed class YaraScanStatusReachabilityTests
 
     #region Nested types
     // A minimal unhealthy IYaraScanner: Available is false, mirroring NullYaraScanner/a broken LibYaraScanner.
-    // ScanFile is never reached (PackageScanner.ScanYara gates on Available before calling ScanDirectory at all),
-    // but it is implemented anyway since the interface requires it.
+    // ScanFile and ScanFiles are never reached (PackageScanner.ScanYara gates on Available before calling ScanFiles at
+    // all), but they are implemented anyway since the interface requires them — empty, as NullYaraScanner's are.
     private sealed class UnavailableScanner : IYaraScanner
     {
         public bool Available => false;
 
         public IReadOnlyList<YaraMatch> ScanFile(string fullPath) => Array.Empty<YaraMatch>();
+
+        public IReadOnlyList<(string FullPath, YaraMatch Match)> ScanFiles(string rootDir, IReadOnlyList<string> files) =>
+            Array.Empty<(string, YaraMatch)>();
     }
     #endregion
 

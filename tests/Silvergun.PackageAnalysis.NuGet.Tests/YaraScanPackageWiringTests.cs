@@ -257,7 +257,7 @@ public sealed class YaraScanPackageWiringTests : IClassFixture<PackageFixture>
         var scan = PackageScanner.Scan(fixture.PkgAPath, yaraScanner: fake);
 
         Assert.True(scan.IsSuccess, scan.Message);
-        Assert.False(fake.Invoked, "An unavailable backend's ScanDirectory must never be called.");
+        Assert.False(fake.Invoked, "An unavailable backend's ScanFiles/ScanDirectory must never be called.");
         Assert.NotNull(scan.Value.YaraFindings);
         Assert.Empty(scan.Value.YaraFindings);
         Assert.Equal(YaraScanStatus.Unavailable, scan.Value.YaraScanStatus);
@@ -323,8 +323,9 @@ public sealed class YaraScanPackageWiringTests : IClassFixture<PackageFixture>
     #endregion
 
     #region Nested types
-    // A configurable fake IYaraScanner with no real engine. It overrides ScanDirectory to (optionally) enumerate the
-    // real extraction dir and report a single hit against a chosen file, or to throw. It records whether it ran so a
+    // A configurable fake IYaraScanner with no real engine. It overrides ScanFiles (what ScanYara calls since ADR 0034;
+    // ScanDirectory enumerates and delegates to it) to (optionally) find a chosen file in the list it is handed and
+    // report a single hit against it, or to throw. It records whether it ran so a
     // test can assert the short-circuit / reached-before-fault paths. ScanFile is unused by these tests.
     //
     // Available is an explicit, constructible flag (ADR 0027 decision 4 code-review fix) so both the healthy and
@@ -350,7 +351,7 @@ public sealed class YaraScanPackageWiringTests : IClassFixture<PackageFixture>
 
         public bool Invoked { get; private set; }
 
-        // True once ScanDirectory has actually located its target file — i.e. the incomplete-scan fake really did
+        // True once ScanFiles has actually located its target file — i.e. the incomplete-scan fake really did
         // have a hit to discard, so Scan_WithFakeScannerReportingIncompleteScan is not passing vacuously.
         public bool FoundHitBeforeFailing { get; private set; }
 
@@ -395,14 +396,19 @@ public sealed class YaraScanPackageWiringTests : IClassFixture<PackageFixture>
 
         public IReadOnlyList<YaraMatch> ScanFile(string fullPath) => Array.Empty<YaraMatch>();
 
-        public IReadOnlyList<(string FullPath, YaraMatch Match)> ScanDirectory(string rootDir)
+        // A direct caller's entry: enumerate, then the same logic as ScanFiles.
+        public IReadOnlyList<(string FullPath, YaraMatch Match)> ScanDirectory(string rootDir) =>
+            ScanFiles(rootDir, Directory.GetFiles(rootDir, "*", SearchOption.AllDirectories));
+
+        // What PackageScanner.ScanYara calls since ADR 0034: the package's extraction inventory. The target is located
+        // in THAT list (not by walking rootDir again), so these tests also pin that the inventory reaches the backend.
+        public IReadOnlyList<(string FullPath, YaraMatch Match)> ScanFiles(string rootDir, IReadOnlyList<string> files)
         {
             Invoked = true;
             if (_throw)
                 throw new InvalidOperationException("simulated backend failure");
 
-            var target = Directory
-                .EnumerateFiles(rootDir, "*", SearchOption.AllDirectories)
+            var target = files
                 .FirstOrDefault(f => string.Equals(Path.GetFileName(f), _fileName, StringComparison.Ordinal));
             if (target is null)
                 return Array.Empty<(string, YaraMatch)>();

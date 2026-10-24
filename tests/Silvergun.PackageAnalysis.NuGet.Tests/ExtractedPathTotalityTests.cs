@@ -176,6 +176,11 @@ public sealed class ExtractedPathTotalityTests : IClassFixture<PackageFixture>
 
         public IReadOnlyList<YaraMatch> ScanFile(string fullPath) => Array.Empty<YaraMatch>();
 
+        // PackageScanner scans the extraction inventory through ScanFiles (ADR 0034); the hit is synthesized the same way
+        // whichever entry is used, and deliberately not from the list (its file need not exist).
+        public IReadOnlyList<(string FullPath, YaraMatch Match)> ScanFiles(string rootDir, IReadOnlyList<string> files) =>
+            ScanDirectory(rootDir);
+
         public IReadOnlyList<(string FullPath, YaraMatch Match)> ScanDirectory(string rootDir)
         {
             // The scanner is handed the extraction dir; the inventory convention nests entries one level down,

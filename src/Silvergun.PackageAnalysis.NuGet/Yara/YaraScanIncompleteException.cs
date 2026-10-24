@@ -21,9 +21,12 @@ namespace Silvergun.PackageAnalysis.NuGet.Yara;
 /// file, or the one file mid-scan when the run's <c>--timeout</c> deadline passed); a file that pass printed no
 /// coverage line for — the files still queued at that deadline are dropped with no line at all — and whose individual
 /// re-scan then failed (ADR 0032 decision 9); a hit that could not be attributed to any enumerated file (decision 17);
-/// and a per-file timeout in the default <see cref="IYaraScanner.ScanDirectory"/> loop (ADR 0032 decision 6). For a
-/// timeout, <see cref="Exception.InnerException"/> is a <see cref="TimeoutException"/>, so the cause remains
-/// machine-readable through the one seam.
+/// and a per-file timeout in the per-file <see cref="IYaraScanner.ScanFiles"/> loop (<see cref="YaraScanLoop.Run"/>, ADR
+/// 0032 decision 6). For a timeout, <see cref="Exception.InnerException"/> is a <see cref="TimeoutException"/>, so the
+/// cause remains machine-readable through the one seam; likewise, for a file that no longer exists (ADR 0034),
+/// <c>LibYaraScanner.ScanFile</c> carries the <see cref="FileNotFoundException"/> or
+/// <see cref="DirectoryNotFoundException"/> that said so, which, once the loop has confirmed the file missing on disk
+/// (<see cref="YaraTree.Missing"/>), is how it names it.
 ///
 /// Partial findings travel only through the three-argument constructor, as
 /// <c>(message, innerException, partialFindings)</c> with a <c>null</c> inner exception where there is none (ADR

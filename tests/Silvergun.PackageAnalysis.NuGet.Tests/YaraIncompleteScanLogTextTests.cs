@@ -17,7 +17,8 @@ using Xunit;
 /// periods, on all three catch sites: an incomplete scan that carried hits, one that carried none, and any other
 /// exception.
 ///
-/// <para>The backends are fakes overriding <see cref="IYaraScanner.ScanDirectory"/> to throw (no engine, no environment
+/// <para>The backends are fakes overriding <see cref="IYaraScanner.ScanFiles"/> (what <c>PackageScanner</c> calls since
+/// ADR 0034) and <see cref="IYaraScanner.ScanDirectory"/> to throw (no engine, no environment
 /// variable), injected through <c>PackageScanner.Scan</c>'s seam; the warnings come from
 /// <see cref="WarningCapture"/>.</para>
 /// </summary>
@@ -54,7 +55,13 @@ public sealed class YaraIncompleteScanLogTextTests
 
         public IReadOnlyList<YaraMatch> ScanFile(string fullPath) => [];
 
-        public IReadOnlyList<(string FullPath, YaraMatch Match)> ScanDirectory(string rootDir) => failure switch
+        public IReadOnlyList<(string FullPath, YaraMatch Match)> ScanDirectory(string rootDir) => Fail(rootDir);
+
+        // PackageScanner scans the package's extraction inventory through ScanFiles (ADR 0034), so that is the entry the
+        // failure has to come out of; ScanDirectory fails the same way for any direct caller.
+        public IReadOnlyList<(string FullPath, YaraMatch Match)> ScanFiles(string rootDir, IReadOnlyList<string> files) => Fail(rootDir);
+
+        private IReadOnlyList<(string FullPath, YaraMatch Match)> Fail(string rootDir) => failure switch
         {
             "incomplete-with-hits" => throw new YaraScanIncompleteException(
                 Sentence + ".", null,

@@ -204,6 +204,10 @@ public sealed class YaraUnavailableReasonTests : IClassFixture<PackageFixture>
         public string? UnavailableReason => reason;
 
         public IReadOnlyList<YaraMatch> ScanFile(string fullPath) => throw new InvalidOperationException("an unavailable backend was asked to scan");
+
+        // Like ScanFile: an unavailable backend must never be asked to scan a list either.
+        public IReadOnlyList<(string FullPath, YaraMatch Match)> ScanFiles(string rootDir, IReadOnlyList<string> files) =>
+            throw new InvalidOperationException("an unavailable backend was asked to scan");
     }
 
     // Uses the interface's default UnavailableReason (null).
@@ -212,6 +216,9 @@ public sealed class YaraUnavailableReasonTests : IClassFixture<PackageFixture>
         public bool Available => false;
 
         public IReadOnlyList<YaraMatch> ScanFile(string fullPath) => throw new InvalidOperationException("an unavailable backend was asked to scan");
+
+        public IReadOnlyList<(string FullPath, YaraMatch Match)> ScanFiles(string rootDir, IReadOnlyList<string> files) =>
+            throw new InvalidOperationException("an unavailable backend was asked to scan");
     }
 
     // Available, and says (wrongly, for a healthy one) that it has a reason: PackageScanner must not use it.
@@ -225,6 +232,10 @@ public sealed class YaraUnavailableReasonTests : IClassFixture<PackageFixture>
 
         public IReadOnlyList<(string FullPath, YaraMatch Match)> ScanDirectory(string rootDir) =>
             withHit ? [(System.IO.Path.Combine(rootDir, "x.bin"), new YaraMatch("Some_Rule", null, [], []))] : [];
+
+        // What PackageScanner calls since ADR 0034: the same answer as ScanDirectory, so "completed with a hit" has one.
+        public IReadOnlyList<(string FullPath, YaraMatch Match)> ScanFiles(string rootDir, IReadOnlyList<string> files) =>
+            ScanDirectory(rootDir);
     }
 
     private sealed class Throwing(Exception ex) : IYaraScanner
@@ -234,6 +245,10 @@ public sealed class YaraUnavailableReasonTests : IClassFixture<PackageFixture>
         public IReadOnlyList<YaraMatch> ScanFile(string fullPath) => throw ex;
 
         public IReadOnlyList<(string FullPath, YaraMatch Match)> ScanDirectory(string rootDir) => throw ex;
+
+        // What PackageScanner calls since ADR 0034. Thrown as is: the default ScanFiles loop would wrap a per-file
+        // YaraScanIncompleteException into its own message, which is not the reason under test.
+        public IReadOnlyList<(string FullPath, YaraMatch Match)> ScanFiles(string rootDir, IReadOnlyList<string> files) => throw ex;
     }
     #endregion
 

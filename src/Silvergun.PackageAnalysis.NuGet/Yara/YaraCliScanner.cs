@@ -16,7 +16,8 @@ using System.Text;
 /// unset or missing the scanner degrades to a no-op (like <see cref="NullYaraScanner"/>) after a single note.
 /// It prepares two rulesets, each lazily on first need, each in its own owner-only temp dir and compiled once with
 /// <c>yarac</c> (or handed to yara as source when <c>yarac</c> is absent or fails): the batch ruleset, which adds the
-/// coverage sentinel, for the one recursive <c>yara -r</c> run per <see cref="ScanDirectory"/> call; and the plain
+/// coverage sentinel, for the one recursive <c>yara -r</c> run per <see cref="ScanDirectory"/> or
+/// <see cref="ScanFiles"/> call; and the plain
 /// ruleset for single-file runs, which happen only for <see cref="ScanFile"/> and for the files that recursive run
 /// could not cover or attribute (re-scanned individually).
 ///
@@ -29,9 +30,10 @@ using System.Text;
 /// the process is launched with an argument list (never a shell string), bounded by a timeout with
 /// <c>Kill(entireProcessTree)</c>, and its output is parsed defensively.
 ///
-/// Both <see cref="ScanFile"/> and <see cref="ScanDirectory"/> throw <see cref="YaraScanIncompleteException"/>
-/// whenever what they did is <b>known</b> not to cover what they were asked to scan — the rules would not prepare,
-/// the file was missing or its process failed, the tree would not enumerate, the recursive <c>yara -r</c> process
+/// <see cref="ScanFile"/>, <see cref="ScanDirectory"/> and <see cref="ScanFiles"/> throw
+/// <see cref="YaraScanIncompleteException"/> whenever what they did is <b>known</b> not to cover what they were asked
+/// to scan — the rules would not prepare, the file was missing or its process failed, the tree would not enumerate or
+/// its root could not be read, a listed file was gone by scan time (ADR 0034), the recursive <c>yara -r</c> process
 /// failed to start, exited nonzero or timed out, it exited 0 but printed an <c>error</c> line on stderr (an unopenable
 /// file, or the one file mid-scan when its <c>--timeout</c> deadline passed — <c>yara -r</c> fails the run for
 /// neither), a file it gave no positive coverage evidence for could not be re-scanned on its own, an unsafe-named file
@@ -208,7 +210,8 @@ public sealed class YaraCliScanner : Runtime, IYaraScanner, IDisposable
     /// A returned list, empty or not, means every enumerated file has <b>positive evidence</b> of having been scanned:
     /// the batch pass printed a coverage-sentinel line for it, or it was re-scanned on its own successfully — and the
     /// pass exited 0, printed no <c>error</c> line, and every hit it printed was attributed. Or the tree held no
-    /// files, or there was nothing to scan at all (the backend is unavailable, or the directory does not exist). A
+    /// files, or there was nothing to scan at all (the backend is unavailable, or the root verifiably does not exist —
+    /// one that exists but cannot be read as a directory throws, ADR 0034 decision 4). A
     /// file <c>yara</c> skipped without saying so — every file still queued when the recursive run's single
     /// <c>--timeout</c> deadline passes (ADR 0032 decision 9) — has no sentinel line and is therefore re-scanned
     /// individually, never assumed clean. A pass known to be missing files throws instead — see below.
@@ -240,13 +243,43 @@ public sealed class YaraCliScanner : Runtime, IYaraScanner, IDisposable
             return Array.Empty<(string, YaraMatch)>();   // no engine at all: Available already says so, honestly.
 
         return Admitted(
-            () => ScanTree(rootDir),
+            () => ScanTree(rootDir, listed: null),
             () => Incomplete($"scanner has been disposed, so nothing under '{YaraPathSafety.Escape(rootDir)}' was scanned"));
     }
 
-    // ScanDirectory's body, run while admitted (see Admitted): the rulesets it prepares or uses cannot be deleted
+    /// <summary>
+    /// Scans exactly <paramref name="files"/> (the <see cref="IYaraScanner.ScanFiles"/> contract, ADR 0034) the way
+    /// <see cref="ScanDirectory"/> scans a tree: one recursive <c>yara -r</c> pass over <paramref name="rootDir"/>, then
+    /// the individual pass, under every rule <see cref="ScanDirectory"/> documents — except that the files that need
+    /// positive coverage evidence are the LISTED ones, not whatever is under the root now. A listed file the batch pass
+    /// did not see (it was deleted after it was listed) ordinarily has no coverage-sentinel line, so it is re-scanned on
+    /// its own, where it is missing, so it is unrecovered and the scan throws <see cref="YaraScanIncompleteException"/>.
+    /// A batch hit on a file that is under the root but NOT in the list cannot be attributed (ADR 0029 decision 17) and
+    /// fails the scan closed too. Returns empty for an empty list, or when <c>yara</c> is unavailable
+    /// (<see cref="Available"/>).
+    ///
+    /// "No coverage line" for a deleted listed file is <b>not guaranteed</b> (ADR 0034 residual, review W2): attribution
+    /// falls back to an OrdinalIgnoreCase comparison of normalised paths (decision 16), so a sentinel line — or a hit —
+    /// on an UNLISTED file that is a case or normalisation variant of the deleted one, created under the root after the
+    /// list was taken, is credited to the listed file, which then reads as covered by content it never held. Reaching
+    /// that needs an out-of-model writer that CREATES files: Storage Sense only deletes, and no package code runs. The
+    /// window is the time from <c>NuGetPackage.Open</c> to the scan (minutes of CIL analysis), not milliseconds.
+    /// </summary>
+    public IReadOnlyList<(string FullPath, YaraMatch Match)> ScanFiles(string rootDir, IReadOnlyList<string> files)
+    {
+        ArgumentNullException.ThrowIfNull(files);
+        if (_yaraPath is null)
+            return Array.Empty<(string, YaraMatch)>();   // no engine at all: Available already says so, honestly.
+
+        return Admitted(
+            () => files.Count == 0 ? Array.Empty<(string, YaraMatch)>() : ScanTree(rootDir, listed: files),
+            () => Incomplete($"scanner has been disposed, so nothing under '{YaraPathSafety.Escape(rootDir)}' was scanned"));
+    }
+
+    // The body of ScanDirectory (listed: null — the tree is enumerated here) and of ScanFiles (listed: the files to
+    // scan, never re-enumerated), run while admitted (see Admitted): the rulesets it prepares or uses cannot be deleted
     // under it. Every list of hits it returns or throws is de-duplicated per (file, namespace, rule) — see DistinctHits.
-    private IReadOnlyList<(string FullPath, YaraMatch Match)> ScanTree(string rootDir)
+    private IReadOnlyList<(string FullPath, YaraMatch Match)> ScanTree(string rootDir, IReadOnlyList<string>? listed)
     {
         // A ruleset that would not prepare means every file below is unscanned, which is exactly the state that
         // must not read as clean (decision 14) — the same reason ScanFile throws on it. This is the BATCH ruleset,
@@ -254,25 +287,14 @@ public sealed class YaraCliScanner : Runtime, IYaraScanner, IDisposable
         var batchRuleSet = _batchRuleSet.Value
             ?? throw Incomplete($"could not prepare its embedded ruleset, so nothing under '{YaraPathSafety.Escape(rootDir)}' was scanned");
 
-        string[] files;
-        try
+        // Empty only for a root that verifiably does not exist (ADR 0034 decision 4): one that exists but cannot be read
+        // as a directory, or will not enumerate, throws (YaraTree.Files). A list, when given, is the expected set and is
+        // never replaced by what is on disk now: coverage is judged against it (ADR 0034 decision 2).
+        var files = listed ?? YaraTree.Files(rootDir, "YARA");
+        if (files is null)
         {
-            // Empty rather than Incomplete, deliberately: in production rootDir is NuGetPackage.ExtractionDir,
-            // which the package CREATES and validates before any scan can be requested, so a missing root is not
-            // reachable there — it is a degenerate direct call or a caller that deleted the tree under itself.
-            // "There was nothing to scan" is therefore the honest reading, not "we failed to scan something"; a
-            // package with content can never take this branch, so no coverage is being written off as clean here.
-            if (string.IsNullOrEmpty(rootDir) || !Directory.Exists(rootDir))
-            {
-                Warn("Skipping YARA scan of {0}: directory not found on disk.", YaraPathSafety.Escape(rootDir));
-                return Array.Empty<(string, YaraMatch)>();
-            }
-
-            files = Directory.GetFiles(rootDir, "*", SearchOption.AllDirectories);
-        }
-        catch (Exception ex)
-        {
-            throw Incomplete($"could not enumerate '{YaraPathSafety.Escape(rootDir)}', so an unknown number of files went unscanned: {YaraPathSafety.Escape(ex.Message)}", ex);
+            Warn("Skipping YARA scan of {0}: directory not found on disk.", YaraPathSafety.Escape(rootDir));
+            return Array.Empty<(string, YaraMatch)>();
         }
 
         // One pass over the names (ADR 0029 decisions 11-16), splitting them into the files the batch pass may be
@@ -618,6 +640,7 @@ public sealed class YaraCliScanner : Runtime, IYaraScanner, IDisposable
         var staging = targets.Any(t => t.Unsafe) ? CreateStagingDir() : null;
         var hits = new List<(string, YaraMatch)>();
         var unrecovered = new List<string>();
+        var missing = new List<string>();
         var elapsed = Stopwatch.StartNew();
         var budgetMs = _scanTimeoutMs + graceMs;
         var attempted = 0;
@@ -639,6 +662,20 @@ public sealed class YaraCliScanner : Runtime, IYaraScanner, IDisposable
             // the package: other content blamed on an in-package path, or a link into /dev blocking until the budget
             // runs out. Such a file counts as unrecovered, before any launch (IsLink checks the leaf AND every
             // directory between rootDir and it; ScanViaSafeCopy repeats the check at its File.Copy).
+            //
+            // A file that no longer exists (deleted after it was listed, e.g. by Storage Sense) is checked for first,
+            // so it is named as missing. That label is ALL IsGone adds: LinkTarget on a missing path returns null rather
+            // than throwing (measured on .NET 10, Windows), so without IsGone such a file would pass IsLink and still end
+            // unrecovered — through ScanOne's !File.Exists (or, for an unsafe name, ScanViaSafeCopy's failed copy) —
+            // only unnamed. It is unrecovered either way; only the reason differs. It is checked BEFORE the bounds, and
+            // does not count against MaxIndividualScans: it launches no process, so a mass deletion must neither take
+            // the slots real re-scans need nor lose its own name once they run out.
+            if (IsGone(file))
+            {
+                RefuseMissing(file);
+                continue;
+            }
+
             var remainingMs = budgetMs - (int)Math.Min(budgetMs, elapsed.ElapsedMilliseconds);
             var matches = ruleSet is null || attempted >= MaxIndividualScans || remainingMs <= 0 ? null
                 : IsLink(rootDir, file) ? RefuseLink(file)
@@ -657,10 +694,28 @@ public sealed class YaraCliScanner : Runtime, IYaraScanner, IDisposable
 
         return unrecovered.Count == 0
             ? hits
-            : throw new YaraScanIncompleteException(
-                $"YARA could not scan {unrecovered.Count} of {targets.Count} file(s) that its recursive pass did not cover (names its batch output cannot round-trip, or files it printed no coverage line for), so this package was NOT fully scanned and must not be reported as clean. Path(s), control characters escaped: {Describe(rootDir, unrecovered)}",
-                null,
-                hits);
+            : throw new YaraScanIncompleteException(Unrecovered(), null, hits);
+
+        // The missing files lead, each named once: the report's reason is bounded (YaraUnavailableReason), and a trailing
+        // clause is the first thing the bound cuts. Without any, the message is the one it always was.
+        string Unrecovered()
+        {
+            if (missing.Count == 0)
+                return $"YARA could not scan {unrecovered.Count} of {targets.Count} file(s) that its recursive pass did not cover (names its batch output cannot round-trip, or files it printed no coverage line for), so this package was NOT fully scanned and must not be reported as clean. Path(s), control characters escaped: {Describe(rootDir, unrecovered)}";
+
+            var gone = missing.ToHashSet(StringComparer.Ordinal);
+            var others = unrecovered.Where(f => !gone.Contains(f)).ToArray();
+            return $"YARA could not scan {unrecovered.Count} of {targets.Count} file(s) that its recursive pass did not cover: {YaraPathSafety.NoLongerExist(missing.Count)}: {Describe(rootDir, missing)}"
+                + (others.Length == 0 ? string.Empty : $"; the others (names its batch output cannot round-trip, or files it printed no coverage line for): {Describe(rootDir, others)}")
+                + ". This package was NOT fully scanned and must not be reported as clean. Path(s), control characters escaped.";
+        }
+
+        void RefuseMissing(string file)
+        {
+            Warn("YARA will not re-scan {0} on its own: {1}.", YaraPathSafety.Escape(file), YaraPathSafety.NoLongerExists);
+            unrecovered.Add(file);
+            missing.Add(file);
+        }
 
         IReadOnlyList<YaraMatch>? RefuseLink(string file)
         {
@@ -731,6 +786,11 @@ public sealed class YaraCliScanner : Runtime, IYaraScanner, IDisposable
             return true;   // cannot tell ⇒ do not follow it
         }
     }
+
+    // Whether fullPath verifiably does not exist (YaraTree.Missing: reading its attributes, which does not follow a link,
+    // fails with FileNotFound or DirectoryNotFound). Any other failure — access denied, a malformed path — is NOT read as
+    // missing, so it keeps its own reason (IsLink's refusal, or a failed scan).
+    private static bool IsGone(string fullPath) => YaraTree.Missing(fullPath) is not null;
 
     // The temp directory holding the safely named copies, or null (logged) when it cannot be created — in which
     // case no unsafe-named file can be recovered and the scan fails closed. On Unix it is created owner-only: it

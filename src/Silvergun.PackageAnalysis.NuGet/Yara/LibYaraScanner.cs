@@ -19,9 +19,10 @@ using libyaraNET;
 /// <see cref="YaraContext"/>, compiled <see cref="Rules"/> and <see cref="Scanner"/> are created once and shared; a
 /// ruleset that will not compile logs a warning and leaves the engine unbuilt (<see cref="Available"/> is
 /// <c>false</c>). A file that was not scanned — missing, unopenable, a native fault, a result that would not map —
-/// is logged and throws <see cref="YaraScanIncompleteException"/> for that file; the interface's default
-/// <c>ScanDirectory</c> isolates it, keeps scanning the other files, and carries their hits out (ADR 0032 decisions
-/// 5 and 6). The remaining exits are enumerated on <see cref="ScanFile"/>.
+/// is logged and throws <see cref="YaraScanIncompleteException"/> for that file; <see cref="ScanFiles"/> (the shared
+/// per-file loop, <see cref="YaraScanLoop.Run"/>, which the interface's default <c>ScanDirectory</c> also goes through)
+/// isolates it, keeps scanning the other files, and carries their hits out (ADR 0032 decisions 5 and 6). The remaining
+/// exits are enumerated on <see cref="ScanFile"/>.
 ///
 /// Timeout: <c>libyaraNET.Scanner</c> hardcodes its own native <c>yr_rules_scan_fd</c> timeout at 10000
 /// SECONDS (~166 minutes; see <c>reference/projects/libyara.NET/Scanner.h</c>) with no way to lower it from
@@ -46,7 +47,7 @@ using libyaraNET;
 /// <see cref="ScanFile"/> now bounds each native scan with its own wall-clock <see cref="scanTimeout"/>, as
 /// defence in depth rather than as the mechanism (ADR 0028 decision 10) — reaching that bound now means a NEW
 /// defect: on timeout it deliberately lets a <see cref="TimeoutException"/>
-/// escape, which the default <c>ScanDirectory</c> turns into a <see cref="YaraScanIncompleteException"/> carrying the
+/// escape, which <see cref="ScanFiles"/>' per-file loop turns into a <see cref="YaraScanIncompleteException"/> carrying the
 /// hits so far, so the whole package scan is reported as <see cref="YaraScanStatus.Unavailable"/> rather than as a clean
 /// <see cref="YaraScanStatus.Completed"/> (ADR 0027 decision 4) — silently swallowing a timed-out scan as
 /// "no matches" would be indistinguishable from a healthy scan that found nothing. The abandoned native call
@@ -86,8 +87,14 @@ public sealed class LibYaraScanner : Runtime, IYaraScanner
     /// or <c>CreateFile</c> failing on a share-denied or ACL'd path even after <see cref="File.Exists"/> said
     /// otherwise), a hostile <see cref="ScanResult"/> failed to map, or the scan thread could not be started. Each is
     /// logged (path escaped) and thrown rather than flattened to empty, because an empty list here is read as
-    /// "scanned, clean". It costs the other files nothing: the default <c>ScanDirectory</c> records this file as
-    /// unscanned and keeps going, carrying every hit out (decision 6).
+    /// "scanned, clean". It costs the other files nothing: <see cref="ScanFiles"/>' per-file loop records this file as
+    /// unscanned and keeps going, carrying every hit out (decision 6). A file that verifiably no longer exists (ADR
+    /// 0034: listed, then removed), <b>confirmed on disk</b> by <see cref="YaraTree.Missing"/>, is named as such, and the
+    /// exception carries the <see cref="FileNotFoundException"/> or <see cref="DirectoryNotFoundException"/> that
+    /// confirmed it as its inner exception, so that loop names it too. libyara.NET's own not-found is never that
+    /// evidence: it throws <see cref="FileNotFoundException"/> for ANY failure to open the file, a share lock or an ACL
+    /// denial on a file that exists included, so such a file is reported as unopenable, with libyara's exception
+    /// wrapped in an <see cref="IOException"/> rather than carried as the inner exception itself.
     ///
     /// The second is the native scan exceeding <see cref="scanTimeout"/>, which throws
     /// <see cref="TimeoutException"/> deliberately (see the class doc): the native <c>yr_rules_scan_fd</c> call
@@ -114,9 +121,10 @@ public sealed class LibYaraScanner : Runtime, IYaraScanner
         var shown = YaraPathSafety.Escape(fullPath);
         if (string.IsNullOrEmpty(fullPath) || !File.Exists(fullPath))
         {
-            Warn("Skipping YARA scan for {0}: file not found on disk.", shown);
-            throw new YaraScanIncompleteException(
-                $"YARA did not scan '{shown}': file not found on disk. This file was NOT scanned and must not be reported as clean.");
+            // Gone (ADR 0034) is told apart from the other ways File.Exists says false — a directory, an unreadable
+            // path — only for its wording; every one of them is unscanned.
+            var gone = YaraTree.Missing(fullPath);
+            throw Skipped(gone is null ? "file not found on disk" : YaraPathSafety.NoLongerExists, gone);
         }
 
         var (_, rules, scanner) = engine.Value;   // engine is a non-null value tuple here
@@ -139,19 +147,46 @@ public sealed class LibYaraScanner : Runtime, IYaraScanner
 
         // Timeout path ONLY, deliberately outside the try so it cannot be caught above and reported as an ordinary
         // per-file failure: a reached bound says the ENGINE's health can no longer be vouched for, which is why the
-        // default ScanDirectory stops at it rather than moving on (ADR 0027 decision 4 / ADR 0028 decision 10).
+        // per-file ScanFiles loop stops at it rather than moving on (ADR 0027 decision 4 / ADR 0028 decision 10).
         Warn("YARA scan TIMED OUT for {0} after {1}: the in-process engine's health can no longer be verified.", shown, scanTimeout);
         throw new TimeoutException($"YARA scan of '{shown}' exceeded the {scanTimeout} bound.");
+
+        // This file was not scanned before any scan was attempted; `gone` is the not-found that confirmed it missing, if any.
+        YaraScanIncompleteException Skipped(string why, IOException? gone)
+        {
+            Warn("Skipping YARA scan for {0}: {1}.", shown, why);
+            return new YaraScanIncompleteException(
+                $"YARA did not scan '{shown}': {why}. This file was NOT scanned and must not be reported as clean.", gone);
+        }
 
         // This file was not scanned (ADR 0032 decision 5): logged, and thrown rather than returned as empty.
         YaraScanIncompleteException Failed(Exception ex)
         {
+            // libyara.NET throws FileNotFoundException(path) for ANY CreateFile failure (Scanner.h), so a share lock or
+            // an ACL denial on a file that exists reads as not-found. Only the disk can say the file is gone (removed
+            // between File.Exists and the open); otherwise the not-found is wrapped, so it is never mistaken for one.
+            if (ex is FileNotFoundException or DirectoryNotFoundException)
+            {
+                if (YaraTree.Missing(fullPath) is { } gone)
+                    return Skipped(YaraPathSafety.NoLongerExists, gone);
+                ex = new IOException("the file exists but could not be opened (a share lock or an access denial, which libyara.NET reports as not found)", ex);
+            }
+
             Warn("YARA scan failed for {0}: {1}", shown, YaraPathSafety.Escape(ex.Message));
             return new YaraScanIncompleteException(
                 $"YARA could not scan '{shown}': {YaraPathSafety.Escape(ex.Message)}. This file was NOT scanned and must not be reported as clean.",
                 ex);
         }
     }
+
+    /// <summary>
+    /// Scans exactly <paramref name="files"/> (the <see cref="IYaraScanner.ScanFiles"/> contract, ADR 0034) one at a time
+    /// through <see cref="ScanFile"/> — this backend's cheap primitive — via the shared per-file loop
+    /// (<see cref="YaraScanLoop.Run"/>): each unscanned file is isolated and the loop continues, a timeout stops it, and
+    /// any unscanned file throws <see cref="YaraScanIncompleteException"/> carrying every hit (ADR 0032 decision 6).
+    /// </summary>
+    public IReadOnlyList<(string FullPath, YaraMatch Match)> ScanFiles(string rootDir, IReadOnlyList<string> files) =>
+        YaraScanLoop.Run(this, rootDir, files);
 
     // Runs a native scan on a DEDICATED background thread bounded by wall-clock <paramref name="bound"/>
     // (ADR 0028; W5 of the ADR-0028 review). Returns true when it finished within the bound, handing back
@@ -191,7 +226,7 @@ public sealed class LibYaraScanner : Runtime, IYaraScanner
             // finishing just after Join gave up (ThreadStateException), and this path exists only to let
             // ScanFile throw its deliberate TimeoutException — nothing here may escape, the log of the failed
             // demotion included: an exception out of Debug would land in ScanFile's catch and be reported as an
-            // ordinary per-file failure, so the default ScanDirectory would keep scanning on an engine whose health is
+            // ordinary per-file failure, so the per-file ScanFiles loop would keep scanning on an engine whose health is
             // no longer vouched for — the timeout's whole signal (ADR 0028 decision 10) lost. Losing a diagnostic line
             // is always the cheaper failure here.
             try { thread.Priority = ThreadPriority.Lowest; }

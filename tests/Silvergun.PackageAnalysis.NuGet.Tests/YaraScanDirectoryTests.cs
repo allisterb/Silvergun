@@ -38,6 +38,25 @@ public sealed class YaraScanDirectoryTests
         Assert.Empty(NullYaraScanner.Instance.ScanDirectory(dir.Root));
     }
 
+    // Its ScanFiles is empty too, consistent with Available = false (ADR 0034), even for listed files that exist...
+    [Fact]
+    public void NullYaraScanner_ScanFiles_OverListedFiles_ReturnsEmpty()
+    {
+        using var dir = new TempDir();
+        var files = new[] { dir.WriteFile("a.dll"), dir.WriteFile("nested/b.dll") };
+
+        Assert.Empty(NullYaraScanner.Instance.ScanFiles(dir.Root, files));
+    }
+
+    // ...but a null list is a caller bug, not "nothing to scan" (I3 review N5): it throws, as every other backend does.
+    [Fact]
+    public void NullYaraScanner_ScanFiles_WithANullList_ThrowsArgumentNullException()
+    {
+        using var dir = new TempDir();
+
+        Assert.Equal("files", Assert.Throws<ArgumentNullException>(() => NullYaraScanner.Instance.ScanFiles(dir.Root, null!)).ParamName);
+    }
+
     // The default ScanDirectory loops ScanFile recursively and pairs each hit with the exact file that matched;
     // non-matching files (and their absence of hits) are dropped.
     [Fact]
@@ -374,8 +393,9 @@ public sealed class YaraScanDirectoryTests
     // A fake IYaraScanner whose ScanFile does whatever the test scripts — return hits, throw "not scanned", time out —
     // keyed on the path or on the 1-based call number (enumeration order is the filesystem's, so "the k-th file" is
     // only knowable as "the k-th call"). It records every path it was handed, in order, which is how a test tells
-    // "the loop stopped" from "the loop continued". Like FakeScanner it implements ONLY the primitive, so
-    // ScanDirectory is the interface's default loop under test.
+    // "the loop stopped" from "the loop continued". Like FakeScanner it implements only the primitive and lists through
+    // the shared per-file loop (YaraScanLoop.Run, exactly LibYaraScanner's ScanFiles; since ADR 0034 review W1 there is no
+    // interface default), so ScanDirectory is the interface's default enumeration over the loop under test.
     private sealed class ScriptedScanner : IYaraScanner
     {
         public ScriptedScanner(Func<string, IReadOnlyList<YaraMatch>> behavior) : this((path, _) => behavior(path)) { }
@@ -385,6 +405,9 @@ public sealed class YaraScanDirectoryTests
         public bool Available => true;
 
         public List<string> Visited { get; } = [];
+
+        public IReadOnlyList<(string FullPath, YaraMatch Match)> ScanFiles(string rootDir, IReadOnlyList<string> files) =>
+            YaraScanLoop.Run(this, rootDir, files);
 
         public IReadOnlyList<YaraMatch> ScanFile(string fullPath)
         {
@@ -414,6 +437,10 @@ public sealed class YaraScanDirectoryTests
         }
 
         public bool Available { get; }
+
+        // The shared per-file loop, as LibYaraScanner lists (ADR 0034 review W1: no interface default).
+        public IReadOnlyList<(string FullPath, YaraMatch Match)> ScanFiles(string rootDir, IReadOnlyList<string> files) =>
+            YaraScanLoop.Run(this, rootDir, files);
 
         public IReadOnlyList<YaraMatch> ScanFile(string fullPath) =>
             !Path.GetFileName(fullPath).Contains(_nameContains, StringComparison.Ordinal)

@@ -32,17 +32,21 @@ public sealed class NuGetPackage : Runtime, IDisposable
         IReadOnlyList<PackageScript> scripts,
         string? nuspecPath,
         string extractionDir,
+        string contentRoot,
         IReadOnlyList<string> declaredEntryNames,
-        IReadOnlyList<(string Declared, string Reported)> uninventoried)
+        IReadOnlyList<(string Declared, string Reported)> uninventoried,
+        IReadOnlyList<string> yaraInventory)
     {
         Identity = identity;
         Assemblies = assemblies;
         Scripts = scripts;
         NuspecPath = nuspecPath;
         ExtractionDir = extractionDir;
+        ContentRoot = contentRoot;
         DeclaredEntryNames = declaredEntryNames;
         UninventoriedDeclaredEntries = uninventoried;
         UninventoriedEntryNames = uninventoried.Select(x => x.Reported).ToArray();
+        YaraInventory = yaraInventory;
     }
     #endregion
 
@@ -65,6 +69,15 @@ public sealed class NuGetPackage : Runtime, IDisposable
 
     /// <summary>The unique temp directory this package's files were extracted into.</summary>
     public string ExtractionDir { get; }
+
+    /// <summary>
+    /// The directory every package-relative path is taken against — the one RecursiveExtractor nests the archive's
+    /// entries under, named after the <c>.nupkg</c> — spelled <b>as it is on disk</b>, which is how
+    /// <see cref="YaraInventory"/> and every extracted <c>FullPath</c> spell it. Computed once by <see cref="Open"/>
+    /// (<see cref="ContentRootOf"/>) and shared, so the inventories and <c>PackageScanner</c>'s YARA hit paths cannot
+    /// disagree about it; <see cref="ExtractionDir"/> itself when no such directory can be identified.
+    /// </summary>
+    internal string ContentRoot { get; }
 
     /// <summary>
     /// Every entry name declared in the <c>.nupkg</c>'s zip central directory, verbatim and UNFILTERED, in archive
@@ -106,6 +119,23 @@ public sealed class NuGetPackage : Runtime, IDisposable
     /// <see cref="PackageItemRole.Other"/> and a null TFM in the skip row <see cref="PackageScanner"/> synthesizes.</para>
     /// </summary>
     internal IReadOnlyList<(string Declared, string Reported)> UninventoriedDeclaredEntries { get; }
+
+    /// <summary>
+    /// The package's <b>YARA inventory</b> (ADR 0034): the absolute path of every file under <see cref="ExtractionDir"/>,
+    /// listed by <see cref="Open"/> straight after extraction with <c>Directory.GetFiles(extractionDir, "*",
+    /// SearchOption.AllDirectories)</c> — the same call, and so the same link and reparse-point semantics, that the YARA
+    /// backends' own directory walk uses. It is the set YARA coverage is judged against:
+    /// <see cref="PackageScanner"/> scans exactly these files (<see cref="IYaraScanner.ScanFiles"/>), so a file that is
+    /// gone by the time YARA runs, minutes of CIL analysis later, is unscanned rather than silently absent.
+    ///
+    /// <para>Deliberately <b>unfiltered</b> by containment: YARA's scope is every extracted byte, including files no
+    /// contained entry declares (which the assembly and script inventories drop).</para>
+    ///
+    /// <para>Internal, because these are <b>raw, attacker-authored</b> paths: they may contain control characters, bidi
+    /// overrides or invisible characters, and must never be logged or rendered without <see cref="YaraPathSafety.Escape"/>.
+    /// They stay raw because they are opened.</para>
+    /// </summary>
+    internal IReadOnlyList<string> YaraInventory { get; }
     #endregion
 
     #region Methods
@@ -154,9 +184,14 @@ public sealed class NuGetPackage : Runtime, IDisposable
                 return Result.FailureWithError<NuGetPackage>($"Failed to extract package {nupkgPath} (status {status}).");
             }
 
-            // RecursiveExtractor nests the archive's entries under a directory named after the .nupkg file.
-            var contentRoot = Path.Combine(extractionDir, Path.GetFileName(nupkgPath));
-            if (!Directory.Exists(contentRoot)) contentRoot = extractionDir;
+            // The YARA inventory (ADR 0034), taken FIRST, before anything else reads the tree: what YARA must later account
+            // for, file by file. Same call as the backends' own walk, no containment filter; a failure here fails Open
+            // through the catch below like any other.
+            var yaraInventory = Directory.GetFiles(extractionDir, "*", SearchOption.AllDirectories);
+
+            // RecursiveExtractor nests the archive's entries under a directory named after the .nupkg file; ONE content
+            // root, in its on-disk spelling, for everything below and for PackageScanner (see ContentRootOf).
+            var contentRoot = ContentRootOf(extractionDir, nupkgPath);
 
             // Zip-slip containment (defense in depth over RecursiveExtractor — ADR 0008): the declared entry
             // names are untrusted. RecursiveExtractor neutralizes a traversal entry (e.g. "../../evil.dll") by
@@ -169,7 +204,13 @@ public sealed class NuGetPackage : Runtime, IDisposable
             // deliberately not opened twice.
             var (declaredEntryNames, contained) = ReadEntryNames(nupkgPath);
 
-            var files = Directory.EnumerateFiles(contentRoot, "*", SearchOption.AllDirectories)
+            // Derived from the YARA inventory rather than a second walk, so the tree is listed once: its files under
+            // contentRoot by the same ordinal prefix RelativeUnderRoot strips — the sequence a walk of contentRoot yields,
+            // because a recursive enumeration's order restricted to a subtree is that subtree's own order. Files outside
+            // contentRoot (none when it IS extractionDir) were never in that walk, so they leave here, unwarned, before
+            // the containment gate. The prefix holds because contentRoot is spelled as the inventory spells it.
+            var files = yaraInventory
+                .Where(full => IsUnderRoot(contentRoot, full))
                 .Select(full => (full, rel: RelativeUnderRoot(contentRoot, full)))
                 .Where(x => IsContained(x.rel, contained))
                 .ToArray();
@@ -205,7 +246,7 @@ public sealed class NuGetPackage : Runtime, IDisposable
                 YaraPathSafety.Escape(identity.Id), assemblies.Length, scripts.Length, uninventoried.Count);
             op.Complete();
             return Result.Success(new NuGetPackage(
-                identity, assemblies, scripts, nuspecPath, extractionDir, declaredEntryNames, uninventoried));
+                identity, assemblies, scripts, nuspecPath, extractionDir, contentRoot, declaredEntryNames, uninventoried, yaraInventory));
         }
         catch (Exception ex)
         {
@@ -401,6 +442,26 @@ public sealed class NuGetPackage : Runtime, IDisposable
     private static string ContainmentKey(string entryName) =>
         string.Join('/', Segments(entryName).Where(s => s.Length > 0 && s != "." && s != ".."));
 
+    // The content root (see ContentRoot), spelled as Directory.GetFiles spells it: the top-level directories of
+    // extractionDir are listed, so each comes back joined onto extractionDir exactly as the inventory's paths are. In order:
+    //   1. the directory named Path.GetFileName(nupkgPath), matched ORDINALLY among them — the ordinary case, and the
+    //      exact string the old Path.Combine produced, so ordinary output is unchanged;
+    //   2. otherwise, the ONE top-level directory when there is exactly one — the extractor's directory under the name
+    //      the filesystem actually gave it. Win32 trims a trailing dot or space when it creates a directory, so for
+    //      "x.nupkg." it is "x.nupkg" (measured 2026-10-24). Directory.Exists could not catch that: it normalizes
+    //      "x.nupkg." the same way and says true, and the misspelled root then matched no inventory path by prefix —
+    //      every YARA hit path rendered absolute, carrying the user's temp layout into the report. Nothing in the
+    //      package can create a sibling of that directory (a zip-slip entry is clamped inside it, measured);
+    //   3. otherwise extractionDir, as before.
+    private static string ContentRootOf(string extractionDir, string nupkgPath)
+    {
+        var expected = Path.Combine(extractionDir, Path.GetFileName(nupkgPath));
+        var directories = Directory.GetDirectories(extractionDir);
+        return directories.Contains(expected, StringComparer.Ordinal) ? expected
+            : directories.Length == 1 ? directories[0]
+            : extractionDir;
+    }
+
     // Path of an extracted file relative to the content root, normalized to forward slashes. Computed by STRING
     // PREFIX, not by Path.GetRelativePath: that helper resolves both operands through the platform normalizer, so on
     // Windows it answers "\\.\COM1" for a file named COM1.dll under the root (measured) — a value that matches no
@@ -409,12 +470,15 @@ public sealed class NuGetPackage : Runtime, IDisposable
     // which matches no containment key and is skipped with a warning rather than mis-attributed. Total by
     // construction — the normalizer can throw on a pathological name, and a throw here would sink the whole package.
     // Internal so PackageScanner derives the YARA hit path exactly the same way instead of keeping a second copy.
-    internal static string RelativeUnderRoot(string contentRoot, string fullPath)
-    {
-        var root = contentRoot.EndsWith(Path.DirectorySeparatorChar) ? contentRoot : contentRoot + Path.DirectorySeparatorChar;
-        var rel = fullPath.StartsWith(root, StringComparison.Ordinal) ? fullPath[root.Length..] : fullPath;
-        return rel.Replace('\\', '/');
-    }
+    internal static string RelativeUnderRoot(string contentRoot, string fullPath) =>
+        (IsUnderRoot(contentRoot, fullPath) ? fullPath[RootPrefix(contentRoot).Length..] : fullPath).Replace('\\', '/');
+
+    // The containment half of RelativeUnderRoot, on its own: fullPath lies under contentRoot by that same ordinal prefix.
+    private static bool IsUnderRoot(string contentRoot, string fullPath) =>
+        fullPath.StartsWith(RootPrefix(contentRoot), StringComparison.Ordinal);
+
+    private static string RootPrefix(string contentRoot) =>
+        contentRoot.EndsWith(Path.DirectorySeparatorChar) ? contentRoot : contentRoot + Path.DirectorySeparatorChar;
 
     // Inventory gate: the file must correspond to a contained declared entry (zip-slip containment). The containment
     // decision is the lexical one above, taken when `contained` was built — nothing here re-derives it through the

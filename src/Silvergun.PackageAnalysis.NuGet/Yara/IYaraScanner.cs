@@ -19,18 +19,24 @@ namespace Silvergun.PackageAnalysis.NuGet.Yara;
 /// <b><see cref="YaraScanIncompleteException"/></b> — some file is <b>known</b> not to have been scanned (ADR 0029
 /// decisions 13, 14 and 17; ADR 0032). <see cref="ScanFile"/> throws it when <i>its</i> file was not scanned
 /// (missing or unopenable, a native or process fault, a result that would not map, a ruleset that would not
-/// prepare); <see cref="ScanDirectory"/> throws it when any file under the root was not, carrying every hit it did
-/// find in <see cref="YaraScanIncompleteException.PartialFindings"/>. <c>PackageScanner.ScanYara</c> reports those
-/// hits alongside <see cref="YaraScanStatus.Unavailable"/>: the hits are real, the rest is not verified.
+/// prepare); <see cref="ScanFiles"/> throws it when any listed file was not, and <see cref="ScanDirectory"/> when any
+/// file under the root was not, carrying every hit it did find in
+/// <see cref="YaraScanIncompleteException.PartialFindings"/>. <c>PackageScanner.ScanYara</c> reports those hits
+/// alongside <see cref="YaraScanStatus.Unavailable"/>: the hits are real, the rest is not verified.
+///
+/// <b>Coverage is judged against the extraction inventory</b> (ADR 0034): <c>PackageScanner.ScanYara</c> hands
+/// <see cref="ScanFiles"/> the list of files <c>NuGetPackage.Open</c> recorded straight after extraction, not a walk
+/// of the extraction directory taken later. A listed file that is gone by the time YARA runs (deleted mid-run, by
+/// Windows Storage Sense or anything else) is therefore unscanned, never silently absent from a "completed" scan.
 ///
 /// <b><see cref="TimeoutException"/> out of <see cref="ScanFile"/></b> — a scan that exceeded the backend's own
 /// wall-clock bound (ADR 0028 decision 10; <c>LibYaraScanner</c> does). Its result is unknown, and swallowing it as
 /// "no matches" would be indistinguishable from a healthy scan that found nothing (ADR 0027 decision 4).
-/// <see cref="ScanDirectory"/> converts it into a <see cref="YaraScanIncompleteException"/> carrying the hits so far,
+/// The per-file <see cref="ScanFiles"/> loop converts it into a <see cref="YaraScanIncompleteException"/> carrying the hits so far,
 /// with the timeout as <see cref="Exception.InnerException"/>.
 ///
-/// One per-file failure no longer costs the other files their findings: the default <see cref="ScanDirectory"/>
-/// isolates each file's <see cref="YaraScanIncompleteException"/> and keeps going (ADR 0032 decision 6), so there is
+/// One per-file failure no longer costs the other files their findings: every <see cref="ScanFiles"/> (the per-file
+/// loop included) isolates each file's <see cref="YaraScanIncompleteException"/> and keeps going (ADR 0032 decision 6), so there is
 /// no longer any reason for a backend to swallow one. Any other exception type is outside the contract, not a third
 /// channel: if one does escape (e.g. the in-process engine's native dependency failing to load), it is caught by
 /// <c>PackageScanner.ScanYara</c>'s outer catch as defence in depth and reported as
@@ -73,90 +79,45 @@ public interface IYaraScanner
 
     /// <summary>
     /// Scans every file under <paramref name="rootDir"/> (recursively) and returns each hit paired with the
-    /// absolute path of the file it matched. Returns empty when nothing matched, the directory is missing, or the
-    /// backend is unavailable. Throws <see cref="YaraScanIncompleteException"/> when any file under the root is known
-    /// not to have been scanned, carrying <b>every</b> hit found in
+    /// absolute path of the file it matched. Returns empty when nothing matched, the root <b>verifiably does not
+    /// exist</b>, or the backend is unavailable. Throws <see cref="YaraScanIncompleteException"/> when any file under the
+    /// root is known not to have been scanned, carrying <b>every</b> hit found in
     /// <see cref="YaraScanIncompleteException.PartialFindings"/> — a detection is never discarded because some other
     /// file could not be examined (ADR 0032).
     ///
-    /// The default implementation loops <see cref="ScanFile"/> over the files — the cheap primitive for the
-    /// in-memory backend (<c>LibYaraScanner</c>, the explicit Windows fallback, does not override it); the
-    /// classic-CLI backend overrides this to run a single recursive <c>yara -r</c> process, and the default Windows
-    /// backend, <c>YaraXWorkerScanner</c>, to scan the whole tree in one worker run. Per file (ADR 0032
-    /// decision 6): a <see cref="YaraScanIncompleteException"/> records that file as unscanned (its own partial hits,
-    /// if any, are kept) and the loop <b>continues</b>; a <see cref="TimeoutException"/> <b>stops</b> the loop,
-    /// because a bound that was reached means the engine's health can no longer be vouched for and the remaining
-    /// files' "no matches" would not be trustworthy either (ADR 0028 decision 10), and is rethrown as
-    /// <see cref="YaraScanIncompleteException"/> with the hits so far and the timeout as
-    /// <see cref="Exception.InnerException"/>. After the loop, any unscanned file means the same exception, carrying
-    /// all the hits. A tree that cannot be <b>enumerated</b> also throws it rather than returning empty: reporting a
-    /// package whose files were never listed as a completed, empty scan is the defect ADR 0030 exists to stop — the
-    /// same site ADR 0029 decision 14 closed in the CLI backend. Messages name the unscanned files escaped and
-    /// bounded. Any other exception from <see cref="ScanFile"/> propagates unchanged.
+    /// Every implementation is "enumerate, then <see cref="ScanFiles"/>" (ADR 0034 decision 2), through the one shared
+    /// enumeration (<see cref="YaraTree.Files"/>): only a root that verifiably does not exist is "nothing to scan"; one
+    /// that exists but is not a directory or cannot be read, or a tree that cannot be <b>enumerated</b>, throws rather
+    /// than returning empty — reporting a package whose files were never listed as a completed, empty scan is the defect
+    /// ADR 0030 exists to stop (ADR 0034 decision 4; the same site ADR 0029 decision 14 closed in the CLI backend).
+    /// <c>PackageScanner.ScanYara</c> does not call this: it scans the package's extraction inventory through
+    /// <see cref="ScanFiles"/>, so a file deleted after extraction is unscanned rather than absent (ADR 0034).
     /// </summary>
-    IReadOnlyList<(string FullPath, YaraMatch Match)> ScanDirectory(string rootDir)
-    {
-        string[] files;
-        try
-        {
-            // A missing or degenerate root is not a failed scan and is not reachable in production: rootDir is
-            // NuGetPackage.ExtractionDir, which the package CREATES and validates before any scan is requested. So
-            // "there was nothing to scan" is the honest reading here, and no package content is being written off
-            // as clean — unlike an enumeration that actually threw, below.
-            files = !string.IsNullOrEmpty(rootDir) && Directory.Exists(rootDir)
-                ? Directory.GetFiles(rootDir, "*", SearchOption.AllDirectories)
-                : Array.Empty<string>();
-        }
-        catch (Exception ex)
-        {
-            throw new YaraScanIncompleteException(
-                $"YARA could not enumerate '{YaraPathSafety.Escape(rootDir)}', so an unknown number of files went unscanned: {YaraPathSafety.Escape(ex.Message)}. This package was NOT scanned and must not be reported as clean.",
-                ex);
-        }
+    IReadOnlyList<(string FullPath, YaraMatch Match)> ScanDirectory(string rootDir) =>
+        ScanFiles(rootDir, YaraTree.Files(rootDir, "YARA") ?? []);
 
-        var hits = new List<(string FullPath, YaraMatch Match)>();
-        var unscanned = new List<string>();
-        for (var i = 0; i < files.Length; i++)
-        {
-            var file = files[i];
-            try
-            {
-                hits.AddRange(ScanFile(file).Select(match => (file, match)));
-            }
-            catch (YaraScanIncompleteException ex)
-            {
-                hits.AddRange(ex.PartialFindings);
-                unscanned.Add(file);
-            }
-            catch (TimeoutException ex)
-            {
-                var remaining = files.Length - i - 1;
-                throw new YaraScanIncompleteException(
-                    $"YARA timed out scanning '{YaraPathSafety.Escape(Relative(rootDir, file))}' under '{YaraPathSafety.Escape(rootDir)}', so that file was not scanned and the engine's health can no longer be vouched for"
-                    + (remaining > 0 ? $"; the remaining {remaining} file(s) were not scanned" : string.Empty)
-                    + (unscanned.Count > 0 ? $"; {unscanned.Count} earlier file(s) were not scanned either: {DescribeUnscanned(rootDir, unscanned)}" : string.Empty)
-                    + $". {hits.Count} hit(s) found before that are reported; this package was NOT fully scanned and must not be reported as clean.",
-                    ex,
-                    hits);
-            }
-        }
-
-        return unscanned.Count == 0
-            ? hits
-            : throw new YaraScanIncompleteException(
-                $"YARA could not scan {unscanned.Count} of {files.Length} file(s) under '{YaraPathSafety.Escape(rootDir)}': {DescribeUnscanned(rootDir, unscanned)}. {hits.Count} hit(s) found in the other files are reported; this package was NOT fully scanned and must not be reported as clean.",
-                null,
-                hits);
-    }
-
-    // The unscanned files for an exception message: root-relative where possible, control-escaped (the names are
-    // attacker-authored and the message is logged verbatim), and bounded so a package of thousands cannot flood it —
-    // through the one rendering every YARA message shares (YaraPathSafety.Bounded).
-    private static string DescribeUnscanned(string rootDir, IReadOnlyList<string> files) =>
-        YaraPathSafety.Bounded(files.Select(f => Relative(rootDir, f)).ToArray());
-
-    // A lexical prefix strip, deliberately not Path.GetRelativePath (ADR 0030, sixth instance) — see
-    // YaraPathSafety.Relative, which the CLI backend's messages share.
-    private static string Relative(string rootDir, string file) => YaraPathSafety.Relative(rootDir, file);
+    /// <summary>
+    /// Scans <b>exactly</b> <paramref name="files"/> (absolute paths) and returns each hit paired with the listed path of
+    /// the file it matched (ADR 0034 decision 2). Coverage is judged against the list, not against what is on disk now:
+    /// a listed file that is missing or cannot be opened at scan time is <b>unscanned</b>, and any unscanned file throws
+    /// <see cref="YaraScanIncompleteException"/> carrying every hit found in the other files (ADR 0032). An empty list
+    /// is nothing to scan and returns empty; so does a backend with no engine at all (<see cref="Available"/> is
+    /// <c>false</c>). <paramref name="rootDir"/> is the tree the files were listed from: it renders them relative in
+    /// messages, bounds the link checks of the backends that make them, and is the CLI backend's <c>yara -r</c> batch
+    /// target; it is never re-enumerated to decide what to scan.
+    ///
+    /// Deliberately has <b>no default implementation</b> (ADR 0034, review W1), on the same principle as
+    /// <see cref="Available"/>: a default that changes coverage semantics silently is worthless. It had one — a per-file
+    /// <see cref="ScanFile"/> loop — and an implementer that overrode only <see cref="ScanDirectory"/> then had its
+    /// list scans routed around its own scan path, lost its hits and read <see cref="YaraScanStatus.Completed"/>
+    /// (measured). The compile-time break for such an implementer is intended: loud, not silent. Each backend says how
+    /// it scans a list: the in-memory backend (<c>LibYaraScanner</c>, the explicit Windows fallback) loops
+    /// <see cref="ScanFile"/> through the shared helper (<c>YaraScanLoop.Run</c>, which isolates each file's
+    /// <see cref="YaraScanIncompleteException"/> and stops at a <see cref="TimeoutException"/>, ADR 0032 decision 6); the
+    /// classic-CLI backend runs a single recursive <c>yara -r</c> process; and the default Windows backend,
+    /// <c>YaraXWorkerScanner</c>, scans the whole list in one worker run. A backend with no engine returns empty,
+    /// consistent with <see cref="Available"/> being <c>false</c> (<see cref="NullYaraScanner"/>).
+    /// </summary>
+    IReadOnlyList<(string FullPath, YaraMatch Match)> ScanFiles(string rootDir, IReadOnlyList<string> files);
     #endregion
 }

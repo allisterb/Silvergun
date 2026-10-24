@@ -94,12 +94,31 @@ internal static class Program
     private static bool IsYaracCall(string source, string compiled) =>
         source.EndsWith(".yara", StringComparison.OrdinalIgnoreCase) && File.Exists(source) && !Directory.Exists(compiled);
 
+    //
+    // SILVERGUN_FAKEYARA_YARAC_DELETE (ADR 0034) plays Storage Sense for a whole scan-package run, whose extraction
+    // directory the test never sees: every file of that exact name ('*': every file) under each
+    // <temp>/silvergun/pkg-* directory is deleted. The scanner compiles its batch ruleset at the top of a scan, AFTER the
+    // package's YARA inventory was taken and BEFORE any enumeration of its own, so the deletion lands exactly in the gap
+    // the inventory exists to cover. The test gives the CLI a private temp directory, so only its own package is there.
     private static int FakeYarac(string source, string compiled)
     {
+        DeleteExtractedFiles(Environment.GetEnvironmentVariable("SILVERGUN_FAKEYARA_YARAC_DELETE"));
         var exit = Int("SILVERGUN_FAKEYARA_YARAC_EXIT_CODE");
         if (exit == 0)
             File.Copy(source, compiled, overwrite: true);
         return exit;
+    }
+
+    private static void DeleteExtractedFiles(string? name)
+    {
+        var extractions = Path.Combine(Path.GetTempPath(), "silvergun");
+        if (string.IsNullOrEmpty(name) || !Directory.Exists(extractions))
+            return;
+
+        foreach (var dir in Directory.EnumerateDirectories(extractions, "pkg-*"))
+            foreach (var file in Directory.GetFiles(dir, "*", SearchOption.AllDirectories))
+                if (name == "*" || string.Equals(Path.GetFileName(file), name, StringComparison.Ordinal))
+                    File.Delete(file);
     }
 
     // Stands in for yara's own stdout, which is the ONLY thing the scanner attributes hits from. Two knobs, split
@@ -387,7 +406,7 @@ internal static class Program
 
             try
             {
-                var hits = scanner.ScanDirectory(root);
+                var hits = Value(args, "--list-then-delete") is { } delete ? ListThenDelete(scanner, root, delete) : scanner.ScanDirectory(root);
                 Console.WriteLine("outcome=completed");
                 Console.WriteLine($"hits={hits.Count}");
                 return 0;
@@ -415,6 +434,26 @@ internal static class Program
         {
             Release(scanner, args);
         }
+    }
+
+    // --list-then-delete <name> (ADR 0034, I5): instead of ScanDirectory, list `root` exactly as NuGetPackage.Open takes a
+    // package's YARA inventory, delete every listed file of that name ('|'-separated names), then ScanFiles over the list —
+    // so a listed file is gone by scan time. Combined with --warmup and --poison-temp-after-warmup it reaches the individual
+    // pass with a plain ruleset that cannot be prepared. Prints `listed=N` and `deleted=N`.
+    private static IReadOnlyList<(string FullPath, YaraMatch Match)> ListThenDelete(YaraCliScanner scanner, string root, string delete)
+    {
+        var names = delete.Split('|', StringSplitOptions.RemoveEmptyEntries);
+        var listed = Directory.GetFiles(root, "*", SearchOption.AllDirectories);
+        var deleted = 0;
+        foreach (var file in listed.Where(f => names.Contains(Path.GetFileName(f), StringComparer.Ordinal)))
+        {
+            File.Delete(file);
+            deleted++;
+        }
+
+        Console.WriteLine($"listed={listed.Length}");
+        Console.WriteLine($"deleted={deleted}");
+        return scanner.ScanFiles(root, listed);
     }
 
     // The ScanFile twin of Harness (ADR 0032 decision 5): the per-file primitive must THROW when the ruleset would not
