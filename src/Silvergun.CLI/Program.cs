@@ -399,6 +399,22 @@ internal static class Program
                   "findings for this package are NOT verified against the malware-signature ruleset.")
                 + (report.YaraUnavailableReason is { Length: > 0 } reason ? $" Reason: {reason}" : string.Empty));
 
+        // The same advisory for the script content pass (ADR 0030; docs/agent/tasks/script-scan-coverage.md S1), keyed on
+        // the report's own ScriptScanStatus and printed at most once per run (one status for the whole scan). Unavailable
+        // means some or all script/manifest files were NOT scanned; the report does not say whether any were, so both
+        // variants say "did NOT complete" — "did NOT run" would be false whenever some files did scan. With findings,
+        // they are real hits from the files that were scanned (ADR 0032). The reason is printed as is: the report's init
+        // accessor already escaped it and cut it to PackageCapabilityReport.MaxScriptScanUnavailableReasonChars. This note
+        // names the reason; the gating is CompletenessAssessment.ForPackage's "script content scanning did not complete"
+        // caveat (ADR 0035 decision 2), which makes the run incomplete (exit 3 unless --allow-incomplete), as for YARA.
+        if (report.ScriptScanStatus == ScriptScanStatus.Unavailable)
+            Console.Error.WriteLine((report.ScriptFindings.Count > 0
+                ? $"scan-package: script content scanning did NOT complete; {report.ScriptFindings.Count} script finding(s) were found " +
+                  "in the files that were scanned, and the remaining script/manifest files are NOT verified against the script ruleset."
+                : "scan-package: script content scanning did NOT complete (some or all script/manifest files were not scanned); " +
+                  "script findings for this package are NOT verified against the script ruleset.")
+                + (report.ScriptScanUnavailableReason is { Length: > 0 } scriptReason ? $" Reason: {scriptReason}" : string.Empty));
+
         // --health is the ONLY thing that adds a network call to scan-package (the offline scan above stays offline).
         // Repo resolution is offline (local nuspec); only the GitHub lookup is network. Advisory — never touches the
         // exit code below. Best-effort/never-throws: an unresolvable repo or a failed lookup just leaves ProjectHealth null.

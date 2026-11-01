@@ -124,7 +124,8 @@ public sealed class TransitiveReportRendererTests
     // check is treated as Completed-and-clean and the YARA scan as Completed (ADR-0027 decision 4 wires
     // YaraScanStatus.Unavailable — the record's own default — into a completeness caveat too, so it must be set
     // explicitly here) so the footer's "Clean" claim is gated ONLY by the transitive status — the subject under test
-    // here (a Partial vuln/YARA check would independently downgrade the footer and confound the assertion).
+    // here (a Partial vuln/YARA check would independently downgrade the footer and confound the assertion). The script
+    // content scan is Completed for the same reason: its record default is Unavailable since ADR 0035 S5/N5.
     private static PackageCapabilityReport ReportWithTransitive(
         DependencyResolutionStatus status, params ResolvedDependency[] resolved)
     {
@@ -139,7 +140,8 @@ public sealed class TransitiveReportRendererTests
             VulnerabilitiesStatus: VulnerabilityScanStatus.Completed,
             ResolvedDependencies: resolved,
             DependencyResolution: status,
-            YaraScanStatus: YaraScanStatus.Completed);
+            YaraScanStatus: YaraScanStatus.Completed,
+            ScriptScanStatus: ScriptScanStatus.Completed);
     }
     #endregion
 

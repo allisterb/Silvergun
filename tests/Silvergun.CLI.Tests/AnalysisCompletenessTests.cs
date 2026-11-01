@@ -372,7 +372,9 @@ public sealed class AnalysisCompletenessTests
     // regression — it now carries TWO caveats instead of one: the YARA default is Unavailable rather than NotRun
     // specifically so old data (including every report the libyara.NET native-dependency defect silently produced,
     // per PackageModel.cs) reads as "not verified", never a false "Completed". This is the fail-closed direction the
-    // ADR calls out as correct and NOT to be changed.
+    // ADR calls out as correct and NOT to be changed. ADR 0035 review N5 extends the same reasoning to the script content
+    // scan: that JSON predates ScriptScanStatus too, whose default is Unavailable for the same reason (the scanner then
+    // turned every failure into a silent zero), so a legacy report now carries THREE caveats, the script one last.
     [Fact]
     public void ForPackage_LegacyJsonWithoutStatus_YieldsFlagFreeCaveats()
     {
@@ -397,11 +399,13 @@ public sealed class AnalysisCompletenessTests
 
         Assert.Equal(VulnerabilityScanStatus.NotChecked, restored!.VulnerabilitiesStatus);
         Assert.Equal(YaraScanStatus.Unavailable, restored!.YaraScanStatus);
+        Assert.Equal(ScriptScanStatus.Unavailable, restored!.ScriptScanStatus);
         Assert.Equal(
             new[]
             {
                 "the known-vulnerability check did not run",
                 "the YARA malware-signature scan did not complete",
+                "script content scanning did not complete",
             },
             assessment.Caveats);
         Assert.DoesNotContain("--no-vulns", string.Join("; ", assessment.Caveats));
@@ -635,12 +639,16 @@ public sealed class AnalysisCompletenessTests
     // CompletenessExitCodeTests.ScanPackage_WhenYaraScanUnavailable_ExitsThree). Leaving every fixture at the
     // record's own default made every package fixture in this suite silently incomplete/"Not verified" the moment
     // ADR-0027 wired Unavailable into CompletenessAssessment.ForPackage — this default is the fix.
+    // scriptStatus (ADR 0035 decision 2) defaults to Completed for the same reason as yaraStatus: since S5/N5 the
+    // record's own default is Unavailable (a caveat), and NotRun is produced by nothing any more. Completed raises no
+    // caveat, so every existing fixture is unchanged; the script-scan coverage tests pass Unavailable or NotRun explicitly.
     internal static PackageCapabilityReport PackageWith(
         IEnumerable<AssemblyScanResult>? assemblies = null,
         VulnerabilityScanStatus vulnStatus = VulnerabilityScanStatus.Completed,
         DependencyResolutionStatus resolution = DependencyResolutionStatus.NotRun,
         IEnumerable<ScriptFinding>? scriptFindings = null,
-        YaraScanStatus yaraStatus = YaraScanStatus.Completed) =>
+        YaraScanStatus yaraStatus = YaraScanStatus.Completed,
+        ScriptScanStatus scriptStatus = ScriptScanStatus.Completed) =>
         new(
             new PackageIdentityInfo("Some.Package", "1.0.0", "Author", "A package.", []),
             Epoch,
@@ -649,7 +657,8 @@ public sealed class AnalysisCompletenessTests
             scriptFindings?.ToArray() ?? [],
             VulnerabilitiesStatus: vulnStatus,
             DependencyResolution: resolution,
-            YaraScanStatus: yaraStatus);
+            YaraScanStatus: yaraStatus,
+            ScriptScanStatus: scriptStatus);
     #endregion
 
     #region Fields

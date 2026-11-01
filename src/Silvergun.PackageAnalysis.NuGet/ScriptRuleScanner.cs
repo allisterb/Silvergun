@@ -13,7 +13,16 @@ using Microsoft.CST.RecursiveExtractor;
 ///
 /// Contract: <b>never throws</b>. All package content is hostile (threat model). The ruleset is compiled once and
 /// shared across files and scans; a bad ruleset, an unreadable/oversized script, or an engine failure logs a warning
-/// and yields no findings for that unit — the scan always continues and returns a (possibly empty) list.
+/// and yields no findings for that unit — the scan always continues and returns a (possibly empty) list. That unit is
+/// also reported as <b>unscanned</b>, with its reason, through the internal <see cref="ScriptScanOutcome"/> path
+/// <see cref="PackageScanner"/> uses, so a file that could not be scanned never reads as one scanned and clean
+/// (ADR 0030); the findings of the units that did scan are kept alongside (ADR 0032). The public entry points keep
+/// their findings-only shape.
+/// <para>Regex matching is linear-time (ADR 0035 decision 3): the ruleset is compiled with RulesEngine's NonBacktracking
+/// switch, and the few quantifier-free literal lookarounds that fall back to backtracking are bounded by construction
+/// (see <see cref="BuildProcessor"/>). That bounds the <i>matching</i>, not the whole scan: the engine's post-match work
+/// (locating each match's line) grows with matches × lines, so a match-dense script can still be slow. Making that a
+/// per-file budget that reads as unscanned is the <c>script-scan-liveness</c> follow-up.</para>
 /// </summary>
 public sealed class ScriptRuleScanner : Runtime
 {
@@ -23,14 +32,7 @@ public sealed class ScriptRuleScanner : Runtime
     /// aggregated to one finding per (rule, file) carrying an <see cref="ScriptFinding.Occurrences"/> count.
     /// Returns an empty list when the ruleset failed to compile or no script matched. Never throws.
     /// </summary>
-    public IReadOnlyList<ScriptFinding> Scan(IEnumerable<PackageScript> scripts)
-    {
-        var processor = sharedProcessor.Value;
-        if (processor is null)
-            return Array.Empty<ScriptFinding>();
-
-        return Aggregate(scripts.SelectMany(s => AnalyzeFile(processor, s.FullPath, s.RelativePath)));
-    }
+    public IReadOnlyList<ScriptFinding> Scan(IEnumerable<PackageScript> scripts) => ScanWithCoverage(scripts).Findings;
 
     /// <summary>
     /// Analyzes a single arbitrary file on disk with the shared, already-compiled ruleset, aggregated to one finding
@@ -42,14 +44,8 @@ public sealed class ScriptRuleScanner : Runtime
     /// <para>Not called from <c>src/</c> today: it is the unredacted control in the redaction tests and is reserved for
     /// future non-package inputs (a loose script or manifest handed straight to the scanner) — not dead code.</para>
     /// </summary>
-    public IReadOnlyList<ScriptFinding> ScanFile(string fullPath, string relativePath)
-    {
-        var processor = sharedProcessor.Value;
-        if (processor is null)
-            return Array.Empty<ScriptFinding>();
-
-        return Aggregate(AnalyzeFile(processor, fullPath, relativePath));
-    }
+    public IReadOnlyList<ScriptFinding> ScanFile(string fullPath, string relativePath) =>
+        Run([(fullPath, relativePath)], transform: null, ScriptFindingSource.Script).Findings;
 
     /// <summary>
     /// Analyzes declarative package metadata (the manifest <c>.nuspec</c>, intentionally not part of the script
@@ -61,13 +57,81 @@ public sealed class ScriptRuleScanner : Runtime
     /// Findings are aggregated per (rule, file) and tagged <see cref="ScriptFindingSource.PackageMetadata"/>, which
     /// the CLI reports but excludes from the <c>--strict</c> gate. Never throws; a redaction failure yields no findings.
     /// </summary>
-    public IReadOnlyList<ScriptFinding> ScanPackageMetadata(string fullPath, string relativePath)
+    public IReadOnlyList<ScriptFinding> ScanPackageMetadata(string fullPath, string relativePath) =>
+        ScanPackageMetadataWithCoverage(fullPath, relativePath).Findings;
+
+    /// <summary>
+    /// <see cref="Scan"/>, plus which scripts were NOT scanned and why (ADR 0030): the same findings, aggregated the same
+    /// way, in <see cref="ScriptScanOutcome.Findings"/>, and every script that yielded none because it could not be
+    /// scanned in <see cref="ScriptScanOutcome.Unscanned"/>. The findings of the scripts that did scan are kept whatever
+    /// happened to the others (ADR 0032). Never throws.
+    /// </summary>
+    internal ScriptScanOutcome ScanWithCoverage(IEnumerable<PackageScript> scripts) =>
+        Run(scripts.Select(s => (s.FullPath, s.RelativePath)), transform: null, ScriptFindingSource.Script);
+
+    /// <summary>
+    /// <see cref="ScanPackageMetadata"/>, plus whether the manifest was scanned at all (ADR 0030): when it was not, it is
+    /// the one entry in <see cref="ScriptScanOutcome.Unscanned"/>. Never throws.
+    /// </summary>
+    internal ScriptScanOutcome ScanPackageMetadataWithCoverage(string fullPath, string relativePath) =>
+        Run([(fullPath, relativePath)], RedactProse, ScriptFindingSource.PackageMetadata);
+
+    /// <summary>
+    /// The unscanned entries of an outcome rendered for a report reason or a log line, the most actionable clause first —
+    /// the report's reason is bounded, and a trailing clause is the first thing the bound cuts: files over the size cap
+    /// (a package controls its scripts' size, so that is steerable), then "no script rules loaded", then the files that
+    /// no longer exist (<see cref="Yara.YaraPathSafety.NoLongerExist"/>, ADR 0034), then every other file with its reason.
+    /// Each list is quoted, escaped and bounded through <see cref="Yara.YaraPathSafety.Bounded"/>.
+    /// </summary>
+    internal static string DescribeUnscanned(IReadOnlyList<(string RelativePath, string Reason)> unscanned)
+    {
+        var clauses = unscanned.ToLookup(u => ClauseOf(u.Reason));
+        return string.Join("; ", new[]
+            {
+                Clause(clauses[UnscannedClause.OverCap], Reasoned),
+                Clause(clauses[UnscannedClause.NoRules], items => $"{NoRulesLoaded}: {Paths(items)}"),
+                Clause(clauses[UnscannedClause.Gone], items => $"{Yara.YaraPathSafety.NoLongerExist(items.Length)}: {Paths(items)}"),
+                Clause(clauses[UnscannedClause.Other], Reasoned),
+            }.OfType<string>());
+
+        static string? Clause(IEnumerable<(string RelativePath, string Reason)> items, Func<(string RelativePath, string Reason)[], string> render) =>
+            items.ToArray() is { Length: > 0 } array ? render(array) : null;
+
+        static string Reasoned((string RelativePath, string Reason)[] items) =>
+            Yara.YaraPathSafety.Bounded(items.Select(u => $"{u.RelativePath} ({u.Reason})").ToArray());
+
+        static string Paths((string RelativePath, string Reason)[] items) =>
+            Yara.YaraPathSafety.Bounded(items.Select(u => u.RelativePath).ToArray());
+    }
+
+    // Which clause of DescribeUnscanned an unscanned file's reason belongs to; the order of UnscannedClause is the order
+    // the clauses are written in.
+    private static UnscannedClause ClauseOf(string reason) =>
+        reason.EndsWith(OverCapSuffix, StringComparison.Ordinal) ? UnscannedClause.OverCap
+        : reason == NoRulesLoaded ? UnscannedClause.NoRules
+        : reason == Yara.YaraPathSafety.NoLongerExists ? UnscannedClause.Gone
+        : UnscannedClause.Other;
+
+    // Runs one entry point over its files: each is analyzed with the shared ruleset and its findings aggregated per
+    // (rule, file); every file that could not be analyzed is recorded with its reason and its escaped relative path
+    // (ADR 0031 decision 4). With no ruleset loaded (F6), nothing is analyzed and every file is unscanned. Never throws:
+    // AnalyzeFile is total, and Escape cannot fail.
+    private static ScriptScanOutcome Run(
+        IEnumerable<(string FullPath, string RelativePath)> files,
+        Func<string, string>? transform,
+        ScriptFindingSource source)
     {
         var processor = sharedProcessor.Value;
-        if (processor is null)
-            return Array.Empty<ScriptFinding>();
-
-        return Aggregate(AnalyzeFile(processor, fullPath, relativePath, RedactProse, ScriptFindingSource.PackageMetadata));
+        var results = files
+            .Select(f => (f.RelativePath, Outcome: processor is null
+                ? new FileOutcome(Array.Empty<ScriptFinding>(), NoRulesLoaded)
+                : AnalyzeFile(processor, f.FullPath, f.RelativePath, transform, source)))
+            .ToArray();
+        return new ScriptScanOutcome(
+            Aggregate(results.SelectMany(r => r.Outcome.Findings)),
+            results.Where(r => r.Outcome.UnscannedReason is not null)
+                .Select(r => (Yara.YaraPathSafety.Escape(r.RelativePath), r.Outcome.UnscannedReason!))
+                .ToArray());
     }
 
     /// <summary>
@@ -333,11 +397,13 @@ public sealed class ScriptRuleScanner : Runtime
         .ToArray();
 
     // Reads and analyzes one file; any failure (missing/oversized/unreadable file, engine error) warns and
-    // yields no findings for that file. The content is passed both as text and wrapped in a FileEntry, as the API
-    // requires. Unknown file languages (e.g. XML/.nuspec) fall back to a default LanguageInfo so the file is still
-    // analyzed by the language-agnostic backdoor patterns. An optional transform (prose redaction for package
-    // metadata) rewrites the content before analysis; a transform failure skips the file entirely.
-    private static IReadOnlyList<ScriptFinding> AnalyzeFile(
+    // yields no findings for that file, and names the file unscanned with its reason (ADR 0030): F1 missing — ADR 0034's
+    // "no longer exists" when YaraTree.Missing confirms it, else "not found"; F2 over the size cap; F3/F5 a read or
+    // engine exception, by its type name; F4 a redaction failure. The content is passed both as text and wrapped in a
+    // FileEntry, as the API requires. Unknown file languages (e.g. XML/.nuspec) fall back to a default LanguageInfo so
+    // the file is still analyzed by the language-agnostic backdoor patterns. An optional transform (prose redaction for
+    // package metadata) rewrites the content before analysis; a transform failure skips the file entirely.
+    private static FileOutcome AnalyzeFile(
         RuleProcessor processor,
         string fullPath,
         string relativePath,
@@ -348,21 +414,22 @@ public sealed class ScriptRuleScanner : Runtime
         {
             if (string.IsNullOrEmpty(fullPath) || !File.Exists(fullPath))
             {
-                Warn("Skipping rule scan for {0}: file not found on disk.", relativePath);
-                return Array.Empty<ScriptFinding>();
+                var reason = Yara.YaraTree.Missing(fullPath) is null ? NotFound : Yara.YaraPathSafety.NoLongerExists;
+                Warn("Skipping rule scan for {0}: {1}.", Yara.YaraPathSafety.Escape(relativePath), reason);
+                return Unscanned(reason);
             }
 
             var length = new FileInfo(fullPath).Length;
             if (length > MaxScriptBytes)
             {
                 Warn("Skipping rule scan for {0}: {1} bytes exceeds the {2}-byte cap.",
-                    relativePath, length, MaxScriptBytes);
-                return Array.Empty<ScriptFinding>();
+                    Yara.YaraPathSafety.Escape(relativePath), length, MaxScriptBytes);
+                return Unscanned($"is {length} bytes{OverCapSuffix}");
             }
 
             var raw = File.ReadAllText(fullPath);
             if (!TryTransform(transform, raw, relativePath, out var content))
-                return Array.Empty<ScriptFinding>();
+                return Unscanned(RedactionFailed);
 
             var name = Path.GetFileName(fullPath);
             if (!languages.FromFileNameOut(name, out var language))
@@ -371,14 +438,17 @@ public sealed class ScriptRuleScanner : Runtime
             using var stream = new MemoryStream(Encoding.UTF8.GetBytes(content));
             var entry = new FileEntry(name, stream);
             var matches = processor.AnalyzeFile(content, entry, language);
-            return matches.Select(m => MapFinding(m, relativePath, source)).ToArray();
+            return new FileOutcome(matches.Select(m => MapFinding(m, relativePath, source)).ToArray(), UnscannedReason: null);
         }
         catch (Exception ex)
         {
-            Warn("Rule scan failed for {0}: {1}", relativePath, ex.Message);
-            return Array.Empty<ScriptFinding>();
+            // Both are package-derived (the name, and a message that can quote it): escaped, ADR 0031 decision 4.
+            Warn("Rule scan failed for {0}: {1}", Yara.YaraPathSafety.Escape(relativePath), Yara.YaraPathSafety.Escape(ex.Message));
+            return Unscanned(Yara.Worker.WorkerProtocol.Safe(ex.GetType().Name, MaxExceptionTypeChars));
         }
     }
+
+    private static FileOutcome Unscanned(string reason) => new(Array.Empty<ScriptFinding>(), reason);
 
     // Applies the optional content transform. A failure skips the file: we deliberately do NOT fall back to scanning
     // the unredacted text, which is the false-positive source. Belt and braces only — RedactProse is a bounded linear
@@ -392,7 +462,8 @@ public sealed class ScriptRuleScanner : Runtime
         }
         catch (Exception ex)
         {
-            Warn("Skipping rule scan for {0}: content redaction failed ({1}).", relativePath, ex.Message);
+            Warn("Skipping rule scan for {0}: content redaction failed ({1}).",
+                Yara.YaraPathSafety.Escape(relativePath), Yara.YaraPathSafety.Escape(ex.Message));
             content = string.Empty;
             return false;
         }
@@ -421,7 +492,15 @@ public sealed class ScriptRuleScanner : Runtime
     {
         try
         {
-            var rules = new RuleSet();
+            // Linear-time regex matching (ADR 0035 decision 3). The engine compiles every regex with no match timeout, so
+            // this switch is what bounds the matching (not the engine's post-match work; see the class doc): it must be set
+            // before any AddString, which then adds the "nb" modifier to every pattern and compiles it with
+            // RegexOptions.NonBacktracking — linear in the input. The 4
+            // Silvergun-owned lookaround patterns in Resources/SilvergunRules/callback_domains.json (SG0001 p0, SG0002
+            // p0-p2) cannot run NonBacktracking; the engine's fallback silently rebuilds them backtracking. That is safe:
+            // each is a quantifier-free alternation of fixed literals, O(n·k). A test guards both facts — every embedded
+            // pattern constructs in its effective mode, and every one that falls back is quantifier-free.
+            var rules = new RuleSet { EnableNonBacktrackingRegex = true };
             var assembly = typeof(ScriptRuleScanner).Assembly;
             var resourceNames = assembly.GetManifestResourceNames()
                 .Where(n => RuleResourceMarkers.Any(n.Contains) && n.EndsWith(".json", StringComparison.OrdinalIgnoreCase));
@@ -480,6 +559,24 @@ public sealed class ScriptRuleScanner : Runtime
     // Guard against absurdly large hostile scripts; real install/build scripts are tiny.
     private const long MaxScriptBytes = 5L * 1024 * 1024;   // 5 MiB
 
+    // The unscanned reasons (docs/agent/tasks/script-scan-coverage.md, F1-F6). F2 reads "is {n} bytes" + OverCapSuffix;
+    // ClauseOf recognizes it by that suffix. F1's confirmed-missing case is YaraPathSafety.NoLongerExists (ADR 0034); when
+    // the file is absent to File.Exists but not confirmed missing (an empty path, or a parent we may not list), it is
+    // NotFound, which deliberately does not claim the file is gone. F3/F5 are the exception's type name, bounded to
+    // MaxExceptionTypeChars.
+    internal const string NotFound = "not found or not accessible";
+    internal const string RedactionFailed = "content redaction failed";
+
+    // The package manifest that never reached disk (PackageScanner, ADR 0035 review W1): NuGetPackage.Open succeeds only
+    // when NuGet's reader found a root .nuspec in the zip, so a null NuspecPath means its content was never scanned, e.g.
+    // a root CON.nuspec Windows cannot create, or one whose name NuGet and the disk spell differently. Its on-disk name is
+    // unknown, so it is listed under a fixed placeholder, rendering as 'package manifest (the .nuspec was not found on disk)'.
+    internal const string ManifestPlaceholder = "package manifest";
+    internal const string ManifestNotOnDisk = "the .nuspec was not found on disk";
+    internal const string NoRulesLoaded = "no script rules loaded";
+    internal static readonly string OverCapSuffix = $", over the {MaxScriptBytes}-byte script cap";
+    private const int MaxExceptionTypeChars = 128;
+
     // The OSSGadget backdoor rules emit low-confidence matches by design, so all confidences are retained (a
     // Medium+ floor would suppress every finding). Noise is instead bounded by the severity floor: Moderate and
     // above (Critical/Important/Moderate), dropping BestPractice/ManualReview informational tags.
@@ -510,4 +607,23 @@ public sealed class ScriptRuleScanner : Runtime
     // Compiled once, reused across files and packages (ADR 0012); null when compilation produced no rules.
     private static readonly Lazy<RuleProcessor?> sharedProcessor = new(BuildProcessor);
     #endregion
+
+    #region Child types
+    // One file's result: its findings, or — when it could not be scanned — none and the reason (UnscannedReason non-null).
+    private sealed record FileOutcome(IReadOnlyList<ScriptFinding> Findings, string? UnscannedReason);
+
+    // The order DescribeUnscanned writes its clauses in, most actionable first.
+    private enum UnscannedClause { OverCap, NoRules, Gone, Other }
+    #endregion
 }
+
+/// <summary>
+/// One <see cref="ScriptRuleScanner"/> entry point's result with its coverage (ADR 0030; ADR 0032 shape):
+/// <see cref="Findings"/> are the aggregated hits of every file that WAS scanned — real detections, kept whatever
+/// happened to the other files — and <see cref="Unscanned"/> names every file that was NOT, each with its escaped
+/// package-relative path and its reason. An empty <see cref="Unscanned"/> means every file handed in was scanned. When
+/// no ruleset loaded, every file is unscanned with <see cref="ScriptRuleScanner.NoRulesLoaded"/>.
+/// </summary>
+internal sealed record ScriptScanOutcome(
+    IReadOnlyList<ScriptFinding> Findings,
+    IReadOnlyList<(string RelativePath, string Reason)> Unscanned);

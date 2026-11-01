@@ -128,7 +128,10 @@ public sealed class YaraReportRendererTests
             // These tests are about the YARA widget's escaping/encoding, not about the Unavailable state (that has its
             // own coverage) — the default status is now Unavailable (ADR: silent-zero fix), so a report built WITH
             // findings must say so explicitly or the widget would (correctly) show "did not run" over real findings.
-            YaraScanStatus: YaraScanStatus.Completed);
+            YaraScanStatus: YaraScanStatus.Completed,
+            // The script content scan's record default is Unavailable too since ADR 0035 S5/N5 (a caveat of its own),
+            // and these tests are not about it either.
+            ScriptScanStatus: ScriptScanStatus.Completed);
     }
     #endregion
 

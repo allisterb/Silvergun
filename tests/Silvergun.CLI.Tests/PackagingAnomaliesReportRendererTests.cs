@@ -203,7 +203,8 @@ public sealed class PackagingAnomaliesReportRendererTests
 
     // A minimal, otherwise-clean and fully-VERIFIED scan-package report carrying exactly the given anomalies. Both
     // the OSV and YARA statuses are Completed for the same reason YaraReportRendererTests sets them: an unverified
-    // scan reads "Not verified", and these tests are about the anomalies section, not about incompleteness.
+    // scan reads "Not verified", and these tests are about the anomalies section, not about incompleteness. So is the
+    // script content scan, whose record default is Unavailable since ADR 0035 S5/N5.
     private static PackageCapabilityReport ReportWith(params PackagingAnomaly[] anomalies) =>
         ReportWithoutTheField() with { PackagingAnomalies = anomalies };
 
@@ -215,7 +216,8 @@ public sealed class PackagingAnomaliesReportRendererTests
             Array.Empty<PackageScript>(),
             Array.Empty<ScriptFinding>(),
             VulnerabilitiesStatus: VulnerabilityScanStatus.Completed,
-            YaraScanStatus: YaraScanStatus.Completed);
+            YaraScanStatus: YaraScanStatus.Completed,
+            ScriptScanStatus: ScriptScanStatus.Completed);
     #endregion
 
     #region Methods — console helpers (mirror YaraReportRendererTests)

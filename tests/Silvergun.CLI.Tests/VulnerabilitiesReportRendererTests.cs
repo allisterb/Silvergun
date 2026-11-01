@@ -221,7 +221,8 @@ public sealed class VulnerabilitiesReportRendererTests
 
     // YaraScanStatus is fixed at Completed here (ADR-0027 decision 4 wires the record's own Unavailable DEFAULT into
     // a completeness caveat too) so this file's OSV-only assertions (including the single-caveat whole-line-equality
-    // ones for Unavailable/NotChecked) are not confounded by an unrelated YARA caveat.
+    // ones for Unavailable/NotChecked) are not confounded by an unrelated YARA caveat. ScriptScanStatus is Completed for
+    // the same reason: its record default is Unavailable since ADR 0035 S5/N5, a caveat of its own.
     private static PackageCapabilityReport ReportWith(VulnerabilityScanStatus status, params VulnerabilityFinding[] findings)
     {
         var pkg = new PackageIdentityInfo("Some.Package", "1.0.0", "Author", "A package.", Array.Empty<PackageDependencyInfo>());
@@ -233,7 +234,8 @@ public sealed class VulnerabilitiesReportRendererTests
             Array.Empty<ScriptFinding>(),
             Vulnerabilities: findings,
             VulnerabilitiesStatus: status,
-            YaraScanStatus: YaraScanStatus.Completed);
+            YaraScanStatus: YaraScanStatus.Completed,
+            ScriptScanStatus: ScriptScanStatus.Completed);
     }
     #endregion
 

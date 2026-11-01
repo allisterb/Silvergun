@@ -359,6 +359,9 @@ public sealed class CompletenessExitCodeTests
             "complete", "complete+findings", "not-checked", "not-checked+findings", "skipped-file",
             "skipped-file+script-findings", "partial-transitive", "metadata-null",
             "gating-indicator", "gating-indicator+incomplete",
+            // ADR 0035 decision 2: an incomplete script content scan is a caveat like any other, with or without the
+            // real findings of the files that did scan (which set attention but never the gate).
+            "script-unavailable", "script-unavailable+script-findings",
         }
         from strict in Flags
         from allow in Flags
@@ -467,6 +470,9 @@ public sealed class CompletenessExitCodeTests
             new[] { Skipped("runtimes/win-x64/native/n.dll", "Failed to load assembly.") },
             scriptFindings: [ScriptContentFinding]),
         "partial-transitive" => PackageWith(resolution: DependencyResolutionStatus.Partial),
+        "script-unavailable" => PackageWith(scriptStatus: ScriptScanStatus.Unavailable),
+        "script-unavailable+script-findings" => PackageWith(
+            scriptFindings: [ScriptContentFinding], scriptStatus: ScriptScanStatus.Unavailable),
         "metadata-null" => Package(Analyzed("lib/net10.0/A.dll", methodsTotal: 10, methodsSkipped: 0, metadata: false)),
         "gating-indicator" => Package(Analyzed("lib/net10.0/A.dll", methodsTotal: 10, methodsSkipped: 0) with
         {

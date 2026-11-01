@@ -238,7 +238,9 @@ public sealed class ScriptFindingsReportRendererTests
             Occurrences: 7, Source: ScriptFindingSource.PackageMetadata);
 
     // A minimal, otherwise-clean scan-package report carrying exactly the given script findings. The vuln check is
-    // treated as completed so the footer's other states stay out of the way of this section's assertions.
+    // treated as completed so the footer's other states stay out of the way of this section's assertions. So is the
+    // script content scan itself: its record default is Unavailable since ADR 0035 S5/N5, which would add an
+    // "INCOMPLETE" note to this very section (that state has its own coverage in ScriptScanCoverageCompletenessTests).
     private static PackageCapabilityReport ReportWith(params ScriptFinding[] findings) =>
         new(
             new PackageIdentityInfo("Some.Package", "1.0.0", "Author", "A package.", Array.Empty<PackageDependencyInfo>()),
@@ -246,7 +248,8 @@ public sealed class ScriptFindingsReportRendererTests
             Array.Empty<AssemblyScanResult>(),
             Array.Empty<PackageScript>(),
             findings,
-            VulnerabilitiesStatus: VulnerabilityScanStatus.Completed);
+            VulnerabilitiesStatus: VulnerabilityScanStatus.Completed,
+            ScriptScanStatus: ScriptScanStatus.Completed);
     #endregion
 
     #region Methods — console helpers (mirror YaraReportRendererTests)

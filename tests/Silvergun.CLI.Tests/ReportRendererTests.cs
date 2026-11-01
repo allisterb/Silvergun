@@ -247,10 +247,12 @@ public sealed class ReportRendererTests
         // A fully-clean scan is also a VERIFIED one: the OSV check AND the YARA scan completed and found nothing.
         // Without Completed on both the footer would (correctly) read "not verified" — ADR-0027 decision 4 wires
         // YaraScanStatus.Unavailable (the record's own default) into the same completeness caveat as an OSV outage —
-        // so the clean headline requires both checks to be explicitly marked as having completed.
+        // so the clean headline requires both checks to be explicitly marked as having completed. The script content scan
+        // likewise (ADR 0035): its record default is Unavailable too since S5/N5, a caveat of its own.
         var report = new PackageCapabilityReport(pkg, Epoch, [], [], [],
             VulnerabilitiesStatus: VulnerabilityScanStatus.Completed,
-            YaraScanStatus: YaraScanStatus.Completed);
+            YaraScanStatus: YaraScanStatus.Completed,
+            ScriptScanStatus: ScriptScanStatus.Completed);
 
         var ex = Record.Exception(() => PackageReportRenderer.Render(console, report, "Benign.nupkg"));
 

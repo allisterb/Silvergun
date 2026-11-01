@@ -37,8 +37,9 @@ public sealed class PackageScanner : Runtime
                 .ToArray();
 
             // Script content scanning runs while the package is still open (its extraction dir exists — ADR 0012).
-            // Best-effort: a scanner failure yields empty findings and never sinks the whole scan.
-            var scriptFindings = ScanScripts(package);
+            // Best-effort: a scanner failure never sinks the whole scan, and any file that could not be scanned makes
+            // the status Unavailable — with the hits of the files that were scanned kept (ADR 0030, ADR 0032).
+            var (scriptFindings, scriptStatus, scriptUnavailableReason) = ScanScripts(package);
 
             // YARA malware-signature scanning over every extracted file (ADR 0016), while the extraction dir still
             // exists. Best-effort/never-throws: an unavailable backend or a failed scan yields Unavailable — with
@@ -61,9 +62,11 @@ public sealed class PackageScanner : Runtime
                 scriptFindings,
                 YaraFindings: yaraFindings,
                 YaraScanStatus: yaraStatus,
-                PackagingAnomalies: packagingAnomalies)
+                PackagingAnomalies: packagingAnomalies,
+                ScriptScanStatus: scriptStatus)
             {
                 YaraUnavailableReason = yaraUnavailableReason,
+                ScriptScanUnavailableReason = scriptUnavailableReason,
             };
             return Result.Success(report);
         }
@@ -130,29 +133,56 @@ public sealed class PackageScanner : Runtime
     // but a defensive guard here keeps an unexpected failure from sinking the whole package scan. The manifest
     // (.nuspec) is scanned too — it is kept out of the script inventory but rule-scanned for content (ADR 0012 follow-up)
     // via ScanPackageMetadata, which redacts its prose elements first and tags the findings PackageMetadata (advisory).
-    private static IReadOnlyList<ScriptFinding> ScanScripts(NuGetPackage package)
+    //
+    // Coverage (ADR 0030; ADR 0032 shape, docs/agent/tasks/script-scan-coverage.md): Completed iff zero files — the
+    // .nuspec included — were unscanned; otherwise Unavailable, with the findings of the files that did scan kept (real
+    // detections) and a reason that leads with the count, then names the files with their reasons, the most actionable
+    // clause first (ScriptRuleScanner.DescribeUnscanned), since the report bounds it to 512 chars. The outer catch (F7)
+    // is Unavailable too, with no findings. The scanner's own per-file warnings stay; this adds ONE summary warning per
+    // incomplete package, never one per file. The third element is the report's ScriptScanUnavailableReason (null
+    // unless Unavailable); the report escapes and bounds it on assignment.
+    private static (IReadOnlyList<ScriptFinding> Findings, ScriptScanStatus Status, string? UnavailableReason) ScanScripts(
+        NuGetPackage package)
     {
         try
         {
             var scanner = new ScriptRuleScanner();
-            var findings = scanner.Scan(package.Scripts);
-            if (package.NuspecPath is null)
-                return findings;
+            var scripts = scanner.ScanWithCoverage(package.Scripts);
+            var nuspec = package.NuspecPath is null
+                ? null
+                : scanner.ScanPackageMetadataWithCoverage(package.NuspecPath, Path.GetFileName(package.NuspecPath));
 
             // Re-order the concatenation so the report-level list keeps the same deterministic path -> line -> rule id
             // order each entry point already guarantees (the planned snapshot/diff feature depends on it).
-            var nuspecFindings = scanner.ScanPackageMetadata(package.NuspecPath, Path.GetFileName(package.NuspecPath));
-            return findings.Concat(nuspecFindings)
-                .OrderBy(f => f.RelativePath, StringComparer.Ordinal)
-                .ThenBy(f => f.StartLine)
-                .ThenBy(f => f.RuleId, StringComparer.Ordinal)
-                .ToArray();
+            var findings = nuspec is null
+                ? scripts.Findings
+                : scripts.Findings.Concat(nuspec.Findings)
+                    .OrderBy(f => f.RelativePath, StringComparer.Ordinal)
+                    .ThenBy(f => f.StartLine)
+                    .ThenBy(f => f.RuleId, StringComparer.Ordinal)
+                    .ToArray();
+
+            // A package always has a manifest (Open requires one), so it always counts toward the total; one that never
+            // reached disk is unscanned, not absent (ADR 0035 review W1).
+            (string RelativePath, string Reason)[] manifest = nuspec is null
+                ? [(ScriptRuleScanner.ManifestPlaceholder, ScriptRuleScanner.ManifestNotOnDisk)]
+                : [.. nuspec.Unscanned];
+            var unscanned = scripts.Unscanned.Concat(manifest).ToArray();
+            if (unscanned.Length == 0)
+                return (findings, ScriptScanStatus.Completed, null);
+
+            var total = package.Scripts.Count + 1;
+            var reason = $"{unscanned.Length} of {total} script/manifest file(s) were not scanned: {ScriptRuleScanner.DescribeUnscanned(unscanned)}";
+            Warn("Script content scanning INCOMPLETE for {0}: {1}. {2} finding(s) from the files that were scanned are reported; the other files' script findings are NOT verified.",
+                YaraPathSafety.Escape(package.Identity.Id), Yara.Worker.WorkerProtocol.Safe(reason, PackageCapabilityReport.MaxScriptScanUnavailableReasonChars), findings.Count);
+            return (findings, ScriptScanStatus.Unavailable, reason);
         }
         catch (Exception ex)
         {
             // Same reason as ScanYara's catch: the message can quote an attacker-authored entry name.
-            Warn("Script rule scanning failed for {0}: {1}", package.Identity.Id, YaraPathSafety.Escape(ex.Message));
-            return Array.Empty<ScriptFinding>();
+            Warn("Script rule scanning failed for {0}: {1}. Script findings for this package are NOT verified.",
+                YaraPathSafety.Escape(package.Identity.Id), YaraPathSafety.Escape(ex.Message).TrimEnd('.'));
+            return (Array.Empty<ScriptFinding>(), ScriptScanStatus.Unavailable, $"{ex.GetType().Name}: {ex.Message}");
         }
     }
 

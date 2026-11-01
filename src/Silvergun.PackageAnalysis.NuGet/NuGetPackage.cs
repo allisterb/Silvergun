@@ -158,10 +158,12 @@ public sealed class NuGetPackage : Runtime, IDisposable
             // NuGet's reader is used ONLY for nuspec metadata (ADR 0008); disposed before extraction so it
             // does not hold the .nupkg while RecursiveExtractor reads it.
             PackageIdentityInfo identity;
+            string manifestName;
             using (var reader = new PackageArchiveReader(
                 nupkgPath, DefaultFrameworkNameProvider.Instance, DefaultCompatibilityProvider.Instance))
             {
                 identity = ReadIdentity(reader.NuspecReader);
+                manifestName = reader.GetNuspecFile();
             }
 
             // Content extraction is delegated to RecursiveExtractor — bomb/nesting-resistant (ADR 0008).
@@ -234,9 +236,14 @@ public sealed class NuGetPackage : Runtime, IDisposable
                 .ToArray();
 
             // Manifest for content scanning only — the top-level *.nuspec, already validated by the same
-            // containment gate as every other file. Kept out of the script inventory (ADR 0012). Null when absent.
+            // containment gate as every other file. Kept out of the script inventory (ADR 0012). It must be the very
+            // file NuGet read the identity from (ADR 0035 S5 review W-1): NuGet unescapes entry names, so a root entry
+            // "A%2Fx.nuspec" is NOT a root manifest to NuGet, yet the extractor writes it verbatim at the root, where it
+            // sorts before the real one and a first-match pick would scan the decoy instead. Matched ordinally on the
+            // extracted relative path; any spelling NuGet and the disk disagree on gives null, which PackageScanner
+            // reports as an unscanned manifest rather than scanning the wrong file.
             var nuspecPath = files
-                .Where(x => IsNuspec(x.rel))
+                .Where(x => IsNuspec(x.rel) && string.Equals(x.rel, manifestName, StringComparison.Ordinal))
                 .Select(x => x.full)
                 .FirstOrDefault();
 
@@ -519,9 +526,11 @@ public sealed class NuGetPackage : Runtime, IDisposable
         HasExtension(KindKey(entry), ".ps1", ".psm1", ".targets", ".props");
 
     // The package manifest lives at the archive root (no path segments), e.g. "Foo.nuspec". Deliberately NOT
-    // trimmed: unlike the kinds above this picks ONE file rather than filtering many, so accepting "Foo.nuspec "
-    // could only let a decoy win the FirstOrDefault against the real manifest. Nothing is lost by excluding it —
-    // the nuspec is not part of the inventory and so is not analysis coverage UninventoriedEntries can report.
+    // trimmed: unlike the kinds above this picks ONE file rather than filtering many. Being a root *.nuspec is not
+    // enough to be THE manifest — a decoy can be one too (see Open, which also requires the name NuGet itself read
+    // the identity from, ADR 0035 S5 review W-1); this only narrows the candidates. The nuspec is not part of the
+    // inventory, so UninventoriedEntries does not report it; but its content scan IS coverage: when no manifest
+    // reaches disk (NuspecPath null), PackageScanner reports it as an unscanned script/manifest file (ADR 0035).
     private static bool IsNuspec(string entry) =>
         HasExtension(entry, ".nuspec") && Segments(entry).Length == 1;
 

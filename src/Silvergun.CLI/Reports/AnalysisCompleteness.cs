@@ -27,8 +27,10 @@ using static Silvergun.CLI.Reports.ReportTheme;
 /// <see cref="AssemblyScanResult.SkipReason"/> (an inventoried file that could not be analysed at all),
 /// <see cref="DependencyResolutionStatus.Partial"/> (ADR 0018),
 /// <see cref="VulnerabilityScanStatus.Unavailable"/>/<see cref="VulnerabilityScanStatus.NotChecked"/>
-/// (ADR 0017), and <see cref="YaraScanStatus.Unavailable"/> (ADR 0027 decision 4 — a YARA scan that was
-/// requested but could not actually run, e.g. the native <c>libyara</c> backend failing to initialize).
+/// (ADR 0017), <see cref="YaraScanStatus.Unavailable"/> (ADR 0027 decision 4 — a YARA scan that was
+/// requested but could not actually run, e.g. the native <c>libyara</c> backend failing to initialize), and
+/// <see cref="ScriptScanStatus.Unavailable"/> (ADR 0035 decision 2 — a script content scan that left some or all
+/// script/manifest files unscanned).
 /// Every <see cref="Caveats"/> entry names its specific gap in prose.
 /// </para>
 /// <para>
@@ -86,8 +88,9 @@ internal readonly record struct CompletenessAssessment(
     /// <summary>
     /// Completeness of a <c>scan-package</c> report: IL coverage aggregated over the packaged assemblies, a failed
     /// obfuscation analysis or metadata read on any of them, an inventoried file that could not be analysed at all,
-    /// an incomplete resolver-lite transitive walk, vulnerability data that was not obtained, and a YARA
-    /// malware-signature scan that did not actually run (ADR 0027 decision 4).
+    /// an incomplete resolver-lite transitive walk, vulnerability data that was not obtained, a YARA
+    /// malware-signature scan that did not actually run (ADR 0027 decision 4), and a script content scan that did not
+    /// complete (ADR 0035 decision 2).
     /// <para>
     /// A file with a <see cref="AssemblyScanResult.SkipReason"/> (⇒ no <see cref="CapabilityReport"/>) is a
     /// <b>whole binary that produced no analysis</b> — a larger blind spot than a few methods that could not be
@@ -135,6 +138,14 @@ internal readonly record struct CompletenessAssessment(
 
         if (YaraCaveat(report.YaraScanStatus) is { } yaraCaveat)
             caveats.Add(yaraCaveat);
+
+        // ADR 0035 decision 2: a script content scan that did not cover every script/manifest file gates completeness
+        // exactly as an Unavailable YARA scan does — an empty or short ScriptFindings list is then not evidence, and a
+        // package controls its scripts' size (the over-cap skip is steerable). Legacy JSON that predates the field
+        // deserializes to Unavailable, as YARA's does (PackageCapabilityReport), so it carries this caveat: the scanner
+        // that wrote it turned unscannable scripts into silent zeros. NotRun (no scan run) is not a caveat.
+        if (ScriptScanCaveat(report.ScriptScanStatus) is { } scriptCaveat)
+            caveats.Add(scriptCaveat);
 
         return new CompletenessAssessment(caveats.Count == 0, caveats, total, analyzedMethods, skipped);
     }
@@ -198,6 +209,17 @@ internal readonly record struct CompletenessAssessment(
     private static string? YaraCaveat(YaraScanStatus status) => status switch
     {
         YaraScanStatus.Unavailable => "the YARA malware-signature scan did not complete",
+        _ => null,
+    };
+
+    // Mirrors YaraCaveat (ADR 0035 decision 2): Unavailable means some or all script/manifest files were NOT scanned
+    // (any of the ScriptRuleScanner failure paths, or PackageScanner.ScanScripts' outer catch). States only that the
+    // scan did not complete, never which file or why — ScriptScanUnavailableReason carries that, and is shown by the
+    // stderr advisory and the Script findings section. NotRun and Completed are not caveats; legacy JSON reads as
+    // Unavailable and so is one.
+    private static string? ScriptScanCaveat(ScriptScanStatus status) => status switch
+    {
+        ScriptScanStatus.Unavailable => "script content scanning did not complete",
         _ => null,
     };
 

@@ -41,7 +41,7 @@ internal static class PackageReportRenderer
         }
 
         console.Write(Section(rich, "Script findings"));
-        console.Write(ScriptFindingsWidget(rich, report.ScriptFindings));
+        console.Write(ScriptFindingsWidget(rich, report.ScriptFindings, report.ScriptScanStatus, report.ScriptScanUnavailableReason));
         console.WriteLine();
 
         // Packaging anomalies (ADR 0031): hostile constructions in the DECLARED zip entry names. Placed here, with the
@@ -159,11 +159,37 @@ internal static class PackageReportRenderer
     // manifest content, not executable script. Neither Source gates --strict (ADR 0027 stopped Script-sourced findings
     // gating too). All rule/path text is untrusted package content and passes through Esc; the repetition glyph comes
     // from the theme so the default mode stays ASCII-only (ADR 0014).
-    private static IRenderable ScriptFindingsWidget(bool rich, IReadOnlyList<ScriptFinding> findings)
+    //
+    // Keyed on ScriptScanStatus like YaraFindingsWidget (ADR 0030): Unavailable means some or all script/manifest files
+    // were NOT scanned, so it is a visible "not verified" note — never the clean "(none)" — above the findings the
+    // scanned files did produce, which are real hits and are still shown (ADR 0032). The note is followed by the
+    // report's ScriptScanUnavailableReason — which files were not scanned and why — so a saved text report says it too,
+    // not only stderr and the JSON (ADR 0035 review W3); the report already escaped and bounded it, and Esc keeps it
+    // literal inside the markup. Completed renders as it always has; NotRun reads "not run" (below).
+    private static IRenderable ScriptFindingsWidget(
+        bool rich, IReadOnlyList<ScriptFinding> findings, ScriptScanStatus status, string? unavailableReason)
     {
+        if (status == ScriptScanStatus.Unavailable)
+        {
+            IRenderable[] note =
+            [
+                new Markup(findings.Count == 0
+                    ? $"[yellow]{Esc(AlertGlyph(rich))} Script content scan did NOT complete {Dash(rich)} some or all script/manifest files NOT verified[/]"
+                    : $"[yellow]{Esc(AlertGlyph(rich))} Script content scan INCOMPLETE {Dash(rich)} {findings.Count} finding(s) from the files that were scanned; other files NOT verified[/]"),
+                .. unavailableReason is { Length: > 0 } reason ? [new Markup($"[grey]Reason: {Esc(reason)}[/]")] : Array.Empty<IRenderable>(),
+            ];
+            return findings.Count == 0 ? new Rows(note) : new Rows([.. note, ScriptFindingsTable(rich, findings)]);
+        }
+        // NotRun (no scan ran; nothing produces it today, but a report's JSON can say so) is grey "not run", like YARA's,
+        // never the green "(none)" of a scan that ran clean (ADR 0035 S5 review N-1). Any findings it carries are shown.
         if (findings.Count == 0)
-            return new Markup("[green](none)[/]");
+            return new Markup(status == ScriptScanStatus.NotRun ? "[grey](not run)[/]" : "[green](none)[/]");
 
+        return ScriptFindingsTable(rich, findings);
+    }
+
+    private static Table ScriptFindingsTable(bool rich, IReadOnlyList<ScriptFinding> findings)
+    {
         var table = new Table().Border(TableBorderFor(rich)).Expand();
         table.AddColumn("[bold]Rule[/]");
         table.AddColumn("[bold]Severity[/]");
@@ -489,10 +515,18 @@ internal static class PackageReportRenderer
         {
             var bySeverity = report.ScriptFindings.GroupBy(f => f.Severity).OrderBy(g => g.Key)
                 .Select(g => ColoredSeverity(g.Key, Esc($"{g.Count()} {g.Key}")));
-            console.MarkupLine($"[grey]Script findings:[/] {string.Join($"  [grey]{Bullet(rich)}[/]  ", bySeverity)}");
+            console.MarkupLine($"[grey]Script findings:[/] {string.Join($"  [grey]{Bullet(rich)}[/]  ", bySeverity)}"
+                + (report.ScriptScanStatus == ScriptScanStatus.Unavailable
+                    ? $" [yellow](scan INCOMPLETE {Dash(rich)} other files not verified)[/]"
+                    : string.Empty));
         }
         else
-            console.MarkupLine("[grey]Script findings:[/] [green]none[/]");
+            console.MarkupLine(report.ScriptScanStatus switch
+            {
+                ScriptScanStatus.Unavailable => "[grey]Script findings:[/] [yellow]not verified (scan did not complete)[/]",
+                ScriptScanStatus.NotRun => "[grey]Script findings:[/] [grey]not run[/]",
+                _ => "[grey]Script findings:[/] [green]none[/]",
+            });
 
         var hasObfuscation = report.Assemblies.Any(a => (a.Obfuscation?.Findings.Count ?? 0) > 0);
         console.MarkupLine(hasObfuscation

@@ -112,7 +112,13 @@ public sealed record PackageCapabilityReport(
     // additive (ADR 0031); hostile constructions in the package's DECLARED zip entry names — control characters,
     // bidi overrides, zip slip, case-only collisions and friends. Already escaped (see PackagingAnomaly). Purely
     // reported: no anomaly gates --strict or changes any exit code (ADR 0031 decision 3). Old JSON ⇒ empty.
-    IReadOnlyList<PackagingAnomaly>? PackagingAnomalies = null)
+    IReadOnlyList<PackagingAnomaly>? PackagingAnomalies = null,
+    // additive (ADR 0030; ADR 0032 shape); whether the script content pass scanned every script/manifest file (see
+    // ScriptScanStatus.cs). Under Unavailable, ScriptFindings may hold the real hits of the files that were scanned.
+    // Old JSON predates it and deserializes to Unavailable ("not verified"), exactly like YaraScanStatus above: every
+    // report written before this field came from a scanner that turned an unscannable script into a silent zero
+    // (ADR 0035), so Completed would be a false clean. PackageScanner.Scan sets Completed or Unavailable going forward.
+    ScriptScanStatus ScriptScanStatus = ScriptScanStatus.Unavailable)
 {
     #region Properties
     /// <summary>
@@ -159,6 +165,23 @@ public sealed record PackageCapabilityReport(
         init => _yaraUnavailableReason = value is null ? null : Yara.Worker.WorkerProtocol.Safe(value, MaxYaraUnavailableReasonChars);
     }
 
+    /// <summary>
+    /// Additive (ADR 0030; ADR 0032): why the script content scan did not complete — how many script/manifest files were
+    /// not scanned, then which, each with its reason (e.g. over the size cap, gone since extraction, no ruleset loaded).
+    /// Set by <see cref="PackageScanner.Scan"/> exactly when <see cref="ScriptScanStatus"/> is
+    /// <see cref="Silvergun.PackageAnalysis.NuGet.ScriptScanStatus.Unavailable"/>; <c>null</c> when it is Completed or NotRun, and in old JSON that
+    /// predates it. Written to JSON only when set, so a Completed report's JSON gains only the status property. The text
+    /// quotes package paths, so EVERY assignment (including deserialization) goes through <c>WorkerProtocol.Safe</c>,
+    /// exactly like <see cref="YaraUnavailableReason"/>: escaped, then cut to <see cref="MaxScriptScanUnavailableReasonChars"/>
+    /// chars. Both steps are idempotent, so a round trip is unchanged.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ScriptScanUnavailableReason
+    {
+        get => _scriptScanUnavailableReason;
+        init => _scriptScanUnavailableReason = value is null ? null : Yara.Worker.WorkerProtocol.Safe(value, MaxScriptScanUnavailableReasonChars);
+    }
+
     /// <summary>Every finding across all analyzed assemblies, flattened in stored order.</summary>
     [JsonIgnore]
     public IEnumerable<ApiCallFinding> AllFindings =>
@@ -181,6 +204,9 @@ public sealed record PackageCapabilityReport(
     /// <summary>The most chars <see cref="YaraUnavailableReason"/> holds.</summary>
     public const int MaxYaraUnavailableReasonChars = 512;
 
+    /// <summary>The most chars <see cref="ScriptScanUnavailableReason"/> holds — the same bound as YARA's.</summary>
+    public const int MaxScriptScanUnavailableReasonChars = MaxYaraUnavailableReasonChars;
+
     private static readonly JsonSerializerOptions jsonOptions = new()
     {
         WriteIndented = true,
@@ -188,5 +214,6 @@ public sealed record PackageCapabilityReport(
     };
 
     private readonly string? _yaraUnavailableReason;
+    private readonly string? _scriptScanUnavailableReason;
     #endregion
 }

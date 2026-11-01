@@ -414,7 +414,7 @@ public sealed class CapabilityManifestTests
         Assert.NotEmpty(rows);
         Assert.All(rows, row => Assert.True(
             row.All(ch => ch < 128), $"non-ASCII character in manifest row (ADR 0014 violation): '{row}'"));
-        Assert.All(rows, row => Assert.DoesNotContain('', row));
+        Assert.All(rows, row => Assert.DoesNotContain((char)0x1B, row));   // ESC (no ANSI colour), built from its code point
     }
 
     [Fact]
@@ -620,6 +620,9 @@ public sealed class CapabilityManifestTests
         // array is the oracle for "the report record's top-level shape did not change by accident" — a new member
         // has to be acknowledged deliberately, which is exactly what adding this line is.
         "PackagingAnomalies",
+        // Additive per ADR 0030/0035: the script content pass's coverage status, always written (its companion
+        // ScriptScanUnavailableReason is omitted when null, so a Completed or NotRun report never carries it).
+        "ScriptScanStatus",
     ];
 
     private static readonly string CliExe = ApphostPath.Resolve(AppContext.BaseDirectory, "Silvergun.CLI");

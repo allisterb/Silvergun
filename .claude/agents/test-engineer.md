@@ -32,7 +32,7 @@ You owns `tests/` *by directory*, which includes non-test fixture assemblies
    path, edge cases, cancellation, and failure modes. Not implementation details.
 4. Run `dotnet test <csproj_file>` for the affected project; make it green.
 5. If a test exposes a real bug, do **not** weaken the test — report the failure
-   clearly so the architect can route a fix to `dotnet-implementer` or `debugger`.
+   clearly to the architect, who fixes `src/`.
 6 Some failure modes cannot be observed in-process. A `FailFast` (see ADR-0021) is not catchable, so `Assert.Throws`/`Record.Exception` will never see it. When covering one, spawn a child process and assert on its exit code and stderr.
  
 
