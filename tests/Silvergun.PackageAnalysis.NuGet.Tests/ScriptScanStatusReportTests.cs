@@ -250,9 +250,11 @@ public sealed class ScriptScanStatusReportTests : IClassFixture<PackageFixture>
 
         Assert.Equal(ScriptScanStatus.Unavailable, report.ScriptScanStatus);
         Assert.Equal(ManifestNotOnDiskReason(total: 3), report.ScriptScanUnavailableReason);
-        // N-3 (ADR 0035 S5 review): the rendered wording itself, pinned literally once so a constant edit is visible —
-        // no stacked brackets around the placeholder.
-        Assert.Contains("'package manifest (the .nuspec was not found on disk)'", report.ScriptScanUnavailableReason, StringComparison.Ordinal);
+        // N-3 (ADR 0035 S5 review): the rendered shape, with no stacked brackets around the placeholder. The wording is
+        // the constant's (tasks/entry-aliasing-coverage.md: "not matched on disk", since it also covers name mismatches),
+        // and the constant itself is pinned literally once here so an edit to it stays visible.
+        Assert.Equal("not matched on disk", ScriptRuleScanner.ManifestNotOnDisk);
+        Assert.Contains($"'package manifest ({ScriptRuleScanner.ManifestNotOnDisk})'", report.ScriptScanUnavailableReason, StringComparison.Ordinal);
         Assert.DoesNotContain("(package manifest)", report.ScriptScanUnavailableReason, StringComparison.Ordinal);
         Assert.Contains(report.ScriptFindings, f => f.RelativePath == "tools/match.ps1");   // the scanned script's hit is kept
         Assert.Single(warnings.Warnings, w => w.StartsWith($"Script content scanning INCOMPLETE for {ConNuspecId}: 1 of 3 ", StringComparison.Ordinal));
@@ -311,7 +313,7 @@ public sealed class ScriptScanStatusReportTests : IClassFixture<PackageFixture>
 
         var (_, _, reason) = ScanScripts(tree, "Null.Nuspec", []);
 
-        Assert.Equal("1 of 1 script/manifest file(s) were not scanned: 'package manifest (the .nuspec was not found on disk)'", reason);
+        Assert.Equal($"1 of 1 script/manifest file(s) were not scanned: 'package manifest ({ScriptRuleScanner.ManifestNotOnDisk})'", reason);
         Assert.DoesNotContain("(package manifest)", reason, StringComparison.Ordinal);
     }
 

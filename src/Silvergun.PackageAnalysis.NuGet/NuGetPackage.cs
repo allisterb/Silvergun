@@ -92,20 +92,25 @@ public sealed class NuGetPackage : Runtime, IDisposable
     public IReadOnlyList<string> DeclaredEntryNames { get; }
 
     /// <summary>
-    /// Declared entries that this package DECLARES, that are CONTAINED (so not zip-slip exclusions), that are of a
-    /// kind we inventory (<c>.dll</c>/<c>.exe</c>/<c>.ps1</c>/<c>.psm1</c>/<c>.targets</c>/<c>.props</c>) — and for
-    /// which no extracted file exists, so they were never inventoried and can never be analysed. In archive order,
-    /// deduplicated, already escaped with <see cref="YaraPathSafety.Escape"/> (safe to log and render).
+    /// Declared FILE entries of ANY kind whose bytes as NuGet installs them were never analysed: never written as an
+    /// extracted file of their own (dropped, renamed, clamped back inside the content root, or written over another
+    /// entry's file), or written as a file whose bytes differ from what NuGet installs for that entry (ADR 0036). In
+    /// archive order, deduplicated, already escaped with <see cref="YaraPathSafety.Escape"/> (safe to log and render).
     ///
-    /// This is <b>coverage we did not deliver</b>, and it is deliberately NOT the same thing as an entry dropped for
-    /// escaping the content root: a zip-slip drop is containment working, this is analysis that did not happen
-    /// (ADR 0030). The known causes are all extractor/OS-side: Windows cannot create a file whose name is a reserved
-    /// DOS device (measured 2026-08-22 — RecursiveExtractor silently skips <c>lib/net8.0/COM1.dll</c> and still
-    /// returns <c>Ok</c>), a case-only collision overwrites one of two entries, a name the filesystem refuses,
-    /// a trailing space or dot that Windows silently drops when it creates the file (so the bytes land under a name
-    /// no entry declares), or two DIFFERENT declared names that fold to the SAME extracted path, where one entry's
-    /// bytes overwrite the other's. <see cref="PackageScanner"/> turns each of these into a skipped
-    /// <see cref="AssemblyScanResult"/> so the package cannot report as complete.
+    /// This is <b>coverage we did not deliver</b> (ADR 0030). It INCLUDES every entry that escapes the content root:
+    /// containment still keeps such an entry out of the inventory (ADR 0008), but the extractor clamps its bytes onto
+    /// a path inside the root — over a real file of that name, while NuGet installs the first copy — so its presence
+    /// is lost coverage too (entry-aliasing review 5). The other known causes are extractor/OS-side: Windows cannot
+    /// create a file whose name is a reserved DOS device (measured 2026-08-22 — RecursiveExtractor silently skips
+    /// <c>lib/net8.0/COM1.dll</c> and still returns <c>Ok</c>), a case-only collision overwrites one of two entries, a
+    /// name the filesystem refuses, a trailing space or dot that Windows silently drops when it creates the file (so the
+    /// bytes land under a name no entry declares), two DIFFERENT declared names that fold to the SAME extracted path,
+    /// where one entry's bytes overwrite the other's, a duplicate name whose copies differ, a Windows 8.3 short-name
+    /// alias written over the long-named file, a name the extractor rewrites onto another entry's path (a leading drive
+    /// segment dropped, on every platform; <c>&lt;</c>, <c>?</c>, <c>|</c>, <c>:</c> mapped to <c>_</c>, on Windows),
+    /// and a record whose local header disagrees with the central directory (name, method or size).
+    /// <see cref="PackageScanner"/> turns each of these into a skipped <see cref="AssemblyScanResult"/> so the package
+    /// cannot report as complete.
     /// </summary>
     public IReadOnlyList<string> UninventoriedEntryNames { get; }
 
@@ -171,7 +176,7 @@ public sealed class NuGetPackage : Runtime, IDisposable
             // failure Result; a non-Ok status is likewise a failure. Never throws out of the factory.
             var opts = new ExtractorOptions
             {
-                MaxExtractedBytes = 2L * 1024 * 1024 * 1024, // absolute cap (2 GiB)
+                MaxExtractedBytes = MaxExtractedBytes,        // absolute cap (2 GiB)
                 MaxExtractedBytesRatio = 200.0,               // zip-bomb ratio cap (its default; set explicitly)
                 Timeout = TimeSpan.FromMinutes(2),
                 // Recurse=false inventories the nupkg's own entries only. Unwinding *nested* archives inside a
@@ -202,8 +207,8 @@ public sealed class NuGetPackage : Runtime, IDisposable
             // correspond to a contained (non-escaping) entry — preserving the pre-RE "escaping entries are
             // never inventoried" semantics.
             // One pass over the central directory yields both: the contained set (the inventory gate below) and the
-            // full, unfiltered declared-name list that PackageEntryNameAnalyzer reports on (ADR 0031). The archive is
-            // deliberately not opened twice.
+            // full, unfiltered declared-name list that PackageEntryNameAnalyzer reports on (ADR 0031). (The content check
+            // below re-opens the archive to decompress entries; this pass reads names only.)
             var (declaredEntryNames, contained) = ReadEntryNames(nupkgPath);
 
             // Derived from the YARA inventory rather than a second walk, so the tree is listed once: its files under
@@ -220,8 +225,14 @@ public sealed class NuGetPackage : Runtime, IDisposable
             // The other half of containment (ADR 0030): an entry we DECLARED, judged contained, and then never
             // inventoried is not a file that analysed clean — it is a file nothing looked at. Computed here, warned
             // distinctly from the zip-slip drops above, and carried on the package so PackageScanner can make the
-            // report say so.
-            var uninventoried = UninventoriedEntries(declaredEntryNames, files.Select(x => x.rel));
+            // report say so. Every entry that DOES claim a file is also checked to hold NuGet's bytes (ADR 0036), which
+            // re-reads the archive: a second open, after extraction, deliberately separate from the names-only pass above.
+            IReadOnlyList<(string Declared, string Reported)> uninventoried;
+            using (var nugetView = ZipFile.OpenRead(nupkgPath))
+                uninventoried = UninventoriedEntries(
+                    declaredEntryNames,
+                    files.Select(x => x.rel),
+                    ContentMatchesNuGet(nugetView, files.ToDictionary(x => x.rel, x => x.full, StringComparer.Ordinal)));
 
             var assemblies = files
                 .Where(x => IsAssembly(x.rel))
@@ -236,14 +247,17 @@ public sealed class NuGetPackage : Runtime, IDisposable
                 .ToArray();
 
             // Manifest for content scanning only — the top-level *.nuspec, already validated by the same
-            // containment gate as every other file. Kept out of the script inventory (ADR 0012). It must be the very
-            // file NuGet read the identity from (ADR 0035 S5 review W-1): NuGet unescapes entry names, so a root entry
+            // containment gate as every other file. Kept out of the script inventory (ADR 0012). It must be the entry
+            // NuGet read the identity from, by NAME (ADR 0035 S5 review W-1): NuGet unescapes entry names, so a root entry
             // "A%2Fx.nuspec" is NOT a root manifest to NuGet, yet the extractor writes it verbatim at the root, where it
             // sorts before the real one and a first-match pick would scan the decoy instead. Matched ordinally on the
-            // extracted relative path; any spelling NuGet and the disk disagree on gives null, which PackageScanner
-            // reports as an unscanned manifest rather than scanning the wrong file.
+            // extracted relative path, or on its unescaped form when it carries a '%' (an old OPC-packed name such as
+            // "My%20Pkg.nuspec", which NuGet reads as "My Pkg.nuspec"); that stays unambiguous, because NuGet throws when
+            // two root entries unescape to manifests. Any other disagreement gives null, which PackageScanner reports as an
+            // unscanned manifest rather than scanning the wrong file. That the BYTES on disk are that entry's — not an
+            // aliasing entry's written over them — is UninventoriedEntries' job (tasks/entry-aliasing-coverage.md).
             var nuspecPath = files
-                .Where(x => IsNuspec(x.rel) && string.Equals(x.rel, manifestName, StringComparison.Ordinal))
+                .Where(x => IsNuspec(x.rel) && IsManifestName(x.rel, manifestName))
                 .Select(x => x.full)
                 .FirstOrDefault();
 
@@ -310,19 +324,100 @@ public sealed class NuGetPackage : Runtime, IDisposable
         return (declared, contained);
     }
 
+    // ADR 0036: whether the extracted file an entry claimed holds NuGet's bytes for that entry. RecursiveExtractor reads
+    // through SharpCompress, which takes a record's name, compression method and sizes from its LOCAL header (and honours
+    // the Info-ZIP Unicode Path field), while NuGet and ZipArchive read the CENTRAL directory — so a crafted package can
+    // make the file we analyse differ from the one NuGet installs: a second "X.targets" record whose local name is
+    // "W.targets" is written over W; a local header saying "stored" or a shorter size writes other bytes (review 7, C1/C2).
+    //   * NuGet's bytes are the decompressed stream of ZipArchive's FIRST central-directory entry of that name (NuGet is
+    //     first-wins); compared by SHA-256 with the file on disk. Never the CRC32 or sizes: the author writes those.
+    //   * Bounded: zip-side and disk-side reads each share a budget of MaxExtractedBytes, the cap extraction just
+    //     succeeded under (ZipArchive stops inflating at the central directory's size). An overrun, a read error or a
+    //     missing entry is a mismatch — the entry is lost: fail-closed.
+    // The returned check reads `zip`, so it must be called while `zip` is open.
+    private static Func<string, string, bool> ContentMatchesNuGet(
+        ZipArchive zip, IReadOnlyDictionary<string, string> filesByRel)
+    {
+        var firstByName = new Dictionary<string, ZipArchiveEntry>(StringComparer.Ordinal);
+        foreach (var entry in zip.Entries)
+            firstByName.TryAdd(entry.FullName, entry);
+
+        var zipBudget = MaxExtractedBytes;
+        var diskBudget = MaxExtractedBytes;
+        var buffer = new byte[81920];
+        return (name, key) =>
+        {
+            try
+            {
+                if (!firstByName.TryGetValue(name, out var entry) || !filesByRel.TryGetValue(key, out var full))
+                    return false;
+
+                using var nuget = entry.Open();
+                using var disk = File.OpenRead(full);
+                return HashBounded(nuget, buffer, ref zipBudget) is { } expected
+                    && HashBounded(disk, buffer, ref diskBudget) is { } actual
+                    && expected.AsSpan().SequenceEqual(actual);
+            }
+            catch (Exception ex)
+            {
+                // Unreadable on either side: not provably NuGet's bytes. The entry is reported lost either way; the
+                // cause is kept for triage (escaped: the name and the message are package-derived).
+                Debug("Content check for package entry {0} failed: {1}", YaraPathSafety.Escape(name),
+                    YaraPathSafety.Escape($"{ex.GetType().Name}: {ex.Message}"));
+                return false;
+            }
+        };
+    }
+
+    // SHA-256 of `stream`, or null once more than `remaining` bytes have been read across every call sharing it.
+    private static byte[]? HashBounded(Stream stream, byte[] buffer, ref long remaining)
+    {
+        using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        for (int read; (read = stream.Read(buffer)) > 0;)
+        {
+            if ((remaining -= read) < 0)
+                return null;
+            sha.AppendData(buffer, 0, read);
+        }
+        return sha.GetHashAndReset();
+    }
+
     // The declared FILE entries that stay inside the content root, in archive order, each paired with the path an
-    // extracted file must have for that entry to claim it. Directory entries and escaping entries (ADR 0008) drop
-    // out here.
+    // extracted file must have for that entry to claim it. Directory entries ending in '/' (the extractor drops their
+    // bytes, and NuGet installs nothing for them) and escaping entries (ADR 0008) drop out. A name ending in '\' does
+    // NOT: some old Windows zip tools write directories that way, but the extractor writes a NON-empty one as a FILE
+    // under the name minus the '\' — over a real file of that name, while Linux NuGet installs the real one (measured,
+    // entry-aliasing review 3) — and combined with any rename (case, 8.3, trailing dot, ':', a dropped drive) it lands
+    // on a path its own key does not name (review 4), so no name- or inventory-based test can tell it from a directory.
+    // It is therefore an ordinary entry: one that claims no file is lost. An empty "content\" from an old zip tool is
+    // then a false "lost" — fail-closed, and none occurs in the benign corpus. Escaping entries are never inventoried
+    // (ADR 0008), but they still WRITE: see UninventoriedEntries, which reports every one of them lost.
     private static IEnumerable<(string Name, string Key)> ContainedEntries(IReadOnlyList<string> declared) =>
-        declared
-            .Where(name => !string.IsNullOrEmpty(name) && !name.EndsWith('/') && !EscapesContentRoot(name))
+        FileEntries(declared)
+            .Where(name => !EscapesContentRoot(name))
             .Select(name => (name, ContainmentKey(name)));
 
-    // Declared, contained, inventoriable entries with no extracted file behind them — see UninventoriedEntryNames.
-    // Matched on the same key the inventory gate uses, so "not inventoried" means exactly "IsContained never let a
-    // file through for this entry". Only assemblies and scripts count: they are the file kinds the inventory
-    // carries, and a missing readme is not lost analysis. What is REPORTED is the name the package author wrote,
-    // not the folded key — escaped, because these are attacker-authored strings (ADR 0031 decision 4).
+    // Every declared entry that can carry bytes: non-empty, and not a '/'-terminated directory entry (measured with
+    // every rename class: the extractor writes no bytes for those, and NuGet installs nothing for them or throws).
+    private static IEnumerable<string> FileEntries(IReadOnlyList<string> declared) => declared.Where(IsFileEntryName);
+
+    private static bool IsFileEntryName(string name) => !string.IsNullOrEmpty(name) && !name.EndsWith('/');
+
+    // Declared FILE entries of ANY kind that were never written as an extracted file of their own, or whose extracted
+    // file does not hold NuGet's bytes for them (ADR 0036) — see UninventoriedEntryNames. What is REPORTED is the name
+    // the package author wrote, not the folded key — escaped,
+    // because these are attacker-authored strings (ADR 0031 decision 4).
+    //
+    // An ESCAPING entry ("/x", "C:/x", "\x", "..") is lost unconditionally (entry-aliasing review 5, C1-r5). It is
+    // never inventoried (ADR 0008), but the extractor clamps it onto a path INSIDE the root — over a real file of that
+    // name, last-wins — while NuGet installs the FIRST copy (its CopyToFile skips an existing file), or refuses the
+    // package. Measured on both platforms: "build/Some.Package.targets" (hook) followed by
+    // "/build/Some.Package.targets" (decoy) scanned [OK] Clean, exit 0 under --strict, with NuGet installing the hook;
+    // on Linux "C:/…" and "\…" decoys did the same. Its bytes land somewhere inside the root either way, so it never
+    // counts as claiming a file.
+    //
+    // A CONTAINED entry is matched on the same key the inventory gate uses, so for it "not inventoried" means exactly
+    // "IsContained never let a file through for this entry".
     //
     // Each extracted file is CLAIMED BY AT MOST ONE ENTRY, walking the entries in archive order. Asking each entry
     // independently "does my key exist on disk?" is unsound, because DIFFERENT declared names fold to the SAME key:
@@ -332,48 +427,69 @@ public sealed class NuGetPackage : Runtime, IDisposable
     // is not the file shipped — with the collision hidden from every check we have, so the attacker chooses the
     // archive order that leaves the benign bytes on disk and the package reads complete (ADR 0030).
     //
-    // Duplicate declared NAMES are out of scope here — they claim once, and the second occurrence is not counted as
-    // coverage lost — but NOT because they are "one entry declared twice": zip permits two entries with the same name
-    // and DIFFERENT bytes, and they resolve differently: measured on .NET 10 on both platforms 2026-08-22,
-    // ZipArchive.GetEntry returns the FIRST while a sequential extract-all (RecursiveExtractor included) leaves the
-    // LAST on disk — so a consumer reading by name and Silvergun reading the extraction see different bytes. That is a
-    // real instance of "the file scanned is not the file shipped", and it belongs to the PAIR rather than to either
-    // name on its own, so neither entry is the right thing to call lost. Both follow-ups are recorded, not built: a
-    // DuplicateEntryName anomaly category owns this pair, as the sibling of the PathFoldingCollision category that
-    // will own the folding case above. PackageEntryNameAnalyzer likewise rules exact ordinal duplicates out of
-    // CaseOnlyCollision's scope, and the two must agree until those categories exist.
+    // An entry that DOES claim a file must also hold NuGet's bytes for it (contentMatches, ADR 0036); otherwise it is
+    // lost. That one check covers every case where the two readers disagree — a record's local-header name, method or
+    // size differing from the central directory (review 7, C1/C2) — and DUPLICATE names: zip permits two entries with
+    // the same name and different bytes; the extractor leaves the LAST on disk while NuGet installs the FIRST (measured,
+    // both platforms), so the first occurrence's check fails when a later copy overwrote it, and passes when the copies
+    // are byte-identical (39 Microsoft 3.1.0-era packages ship packageIcon.png twice). A later occurrence of a name is
+    // therefore not weighed on its own. Naming the PAIR (a DuplicateEntryName anomaly, sibling of the
+    // PathFoldingCollision category for the folding case above) stays a recorded follow-up.
+    //
+    // Every contained entry that claimed no file is lost, WHATEVER its kind (tasks/entry-aliasing-coverage.md). An entry
+    // that claimed nothing was never written as its own file: it was dropped, renamed, or — the case that hid analysis —
+    // written OVER another entry's file, whose bytes then never reached any scanner while that entry still claimed the
+    // file and the package read complete. Measured 2026-10-25 / 2026-11-01, each with no report before this rule:
+    //   * Windows name aliases: an 8.3 short name ("build/SOMEPA~1.TAR" over "build/Some.Package.targets": two script
+    //     findings went to none) or a trailing dot/space ("Real.nuspec." over "Real.nuspec");
+    //   * the extractor's own renames: on every platform it drops a leading drive segment ("./C:/Real.nuspec" is written
+    //     to "Real.nuspec"); on Windows it also maps '<' '?' '|' ':' to '_' ("content/a:b.bin" over "content/a_b.bin";
+    //     that mapping does NOT cover a ':' NuGet unescapes from "%3A", which NamesAStream makes lost outright);
+    //   * a device name on Windows ("content/CON.txt"), whose bytes never reach disk at all.
+    // A kind filter (assemblies and scripts only) missed every non-binary of these — the manifest and YARA's whole
+    // scope — and 8.3 truncates the extension anyway (".TAR", ".NUS"). The rule needs NO filesystem access: an earlier
+    // "does the name still resolve on disk?" test let an entry like "./C:/Windows/win.ini" probe the scanning host
+    // (Path.Combine discards the root for a drive-qualified key) and still missed the extractor's renames (review C1/C2).
+    // The cost is that an entry renamed onto a NEW file (Windows trimming "readme.txt " to "readme.txt") reads lost though
+    // its bytes were scanned under the new name: fail-closed, and such names are already TrailingSpaceOrDot anomalies.
     private static IReadOnlyList<(string Declared, string Reported)> UninventoriedEntries(
-        IReadOnlyList<string> declared, IEnumerable<string> inventoried)
+        IReadOnlyList<string> declared, IEnumerable<string> inventoried, Func<string, string, bool> contentMatches)
     {
         var unclaimed = inventoried.ToHashSet(StringComparer.Ordinal);
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        var lost = new List<string>();
+        var losses = new List<string>();
 
-        foreach (var (name, key) in ContainedEntries(declared))
+        foreach (var name in FileEntries(declared))
         {
-            if (!seen.Add(name)) continue;              // the same name declared twice: one entry, one claim
-            if (unclaimed.Remove(key)) continue;        // claimed the extracted file; no other entry may claim it
+            if (!seen.Add(name))
+                continue;   // a later copy of a name: its first occurrence's content check decides (see above)
 
-            // Exactly the kind test the inventory gate applies, trailing-space/dot trim included (see KindKey) —
-            // the same predicate, not a second copy that agrees today. The two DID diverge once, and a file fell
-            // between them: this side trimmed and the gate did not, so on Linux "lib/net8.0/evil.dll " claimed its
-            // own extracted file (nothing reported lost) and then failed the gate's untrimmed IsAssembly (never
-            // inventoried, never analysed) — contained, on disk, and absent from the report, exit 0 (ADR 0030).
-            // What is REPORTED stays the declared name; only the kind decision sees the trimmed form.
-            if (IsAssembly(key) || IsScript(key)) lost.Add(name);
+            // Lost when: an escaping name (clamped onto a path in the root, never allowed to claim one); a name NuGet
+            // reads with a ':' (an NTFS stream, see NamesAStream); a contained name that claimed nothing (dropped,
+            // renamed, or written over another entry's file); or one that claimed a file not holding NuGet's bytes. No
+            // exemption by any name shape. The first two are tested before they could remove a key from `unclaimed` —
+            // otherwise they would take a real entry's claim and that entry would be the one reported (still a loss,
+            // but the wrong name).
+            var key = ContainmentKey(name);
+            if (EscapesContentRoot(name) || NamesAStream(name) || !unclaimed.Remove(key) || !contentMatches(name, key))
+                losses.Add(name);
         }
 
-        // Deduplicated on the RAW name (by `seen`) and escaped only afterwards: Escape is not injective — a name
-        // containing a literal backslash-n and one containing a real LF both render "\n" — so collapsing on the
-        // escaped text would undercount the very list whose job is counting lost coverage. Both forms are kept: the
-        // escaped one is what may be published, the raw one is what role/TFM must be derived from (see
-        // UninventoriedDeclaredEntries).
-        var pairs = lost.Select(name => (Declared: name, Reported: YaraPathSafety.Escape(name))).ToArray();
+        // Each lost name once, in archive order (`seen` weighs each raw name once). Deduplicated on the RAW name and
+        // escaped only afterwards: Escape is not injective — a name containing a literal backslash-n and one containing
+        // a real LF both render "\n" — so collapsing on the escaped text would undercount the very list whose job is
+        // counting lost coverage. Both forms are kept: the escaped one is what may be published, the raw one is what
+        // role/TFM must be derived from (see UninventoriedDeclaredEntries).
+        var pairs = losses
+            .Select(name => (Declared: name, Reported: YaraPathSafety.Escape(name)))
+            .ToArray();
 
         foreach (var (_, reported) in pairs)
-            Warn("Declared package entry {0} was NOT inventoried: it stays inside the content root, but no extracted " +
-                 "file corresponds to it, so it was never analysed. This is analysis coverage NOT delivered — not a " +
-                 "zip-slip exclusion, and not a clean result.", reported);
+            Warn("Declared package entry {0} was NOT inventoried: it was never written as an extracted file of its own — " +
+                 "dropped, renamed, clamped back inside the content root, written over another entry's file, or written " +
+                 "with bytes other than those NuGet installs, or under a name NuGet installs as a different file (an " +
+                 "NTFS stream) — so its content, or the content it replaced, was never " +
+                 "analysed. This is analysis coverage NOT delivered — not a clean result.", reported);
 
         return pairs;
     }
@@ -516,9 +632,9 @@ public sealed class NuGetPackage : Runtime, IDisposable
             YaraPathSafety.Escape(relativePath), fullPath, TargetFrameworkOf(relativePath, role), role, sha);
     }
 
-    // THE kind test, and there is deliberately only one: it decides both what the inventory gate picks up off disk
-    // and what UninventoriedEntries counts as coverage lost. Those two used to trim differently and a file fell
-    // between them — see KindKey.
+    // THE kind test, and there is deliberately only one: it decides what the inventory gate picks up off disk (and so
+    // what the CIL and script analyses see). It no longer decides what is lost — UninventoriedEntries counts every kind —
+    // but a second copy of it once trimmed differently and a file fell between the two; see KindKey.
     private static bool IsAssembly(string entry) =>
         HasExtension(KindKey(entry), ".dll", ".exe");
 
@@ -528,20 +644,56 @@ public sealed class NuGetPackage : Runtime, IDisposable
     // The package manifest lives at the archive root (no path segments), e.g. "Foo.nuspec". Deliberately NOT
     // trimmed: unlike the kinds above this picks ONE file rather than filtering many. Being a root *.nuspec is not
     // enough to be THE manifest — a decoy can be one too (see Open, which also requires the name NuGet itself read
-    // the identity from, ADR 0035 S5 review W-1); this only narrows the candidates. The nuspec is not part of the
-    // inventory, so UninventoriedEntries does not report it; but its content scan IS coverage: when no manifest
-    // reaches disk (NuspecPath null), PackageScanner reports it as an unscanned script/manifest file (ADR 0035).
+    // the identity from, ADR 0035 S5 review W-1); this only narrows the candidates. Like every entry, a manifest entry
+    // that was never written as its own file is reported by UninventoriedEntries; and when no manifest reaches disk
+    // (NuspecPath null), PackageScanner also reports it as an unscanned script/manifest file (ADR 0035).
     private static bool IsNuspec(string entry) =>
-        HasExtension(entry, ".nuspec") && Segments(entry).Length == 1;
+        NuGetName(entry) is var name && HasExtension(name, ".nuspec") && Segments(name).Length == 1;
+
+    // Whether the extracted root file `rel` is the manifest NuGet read, named `manifestName` (see Open). The ordinal arm
+    // is subsumed by the second wherever it could matter (two root nuspecs make NuGet refuse the package, measured in
+    // entry-aliasing review 9); it is kept as the plain reading of "the file NuGet named".
+    private static bool IsManifestName(string rel, string manifestName) =>
+        string.Equals(rel, manifestName, StringComparison.Ordinal)
+        || string.Equals(NuGetName(rel), manifestName, StringComparison.Ordinal);
+
+    // An entry's name as NuGet reads it: NuGet unescapes '%xx' (NuGet.Packaging.ZipArchiveExtensions.UnescapePath, which
+    // is exactly Uri.UnescapeDataString behind the same '%' test — read from its IL; CopyFiles unescapes the raw name
+    // once, so "%252E" installs as "%2E"), and installs and acts on THAT name, while the extractor writes the raw one to
+    // disk (entry-aliasing review 8). So every decision about what an entry IS — its kind, role, TFM, whether it is the
+    // manifest — is made on this name: a "build/Some.Package%2Etargets" is installed by NuGet as
+    // "build/Some.Package.targets", and must be script-scanned as one, though it sits on disk under its raw name
+    // (measured: a %2E-named .targets, .ps1, .props or .dll was installed by NuGet and never analysed). The paths we
+    // read and report stay raw: they are the files on disk. Where several raw names unescape to one STRING, every one
+    // of them is analysed, a superset of the one NuGet installs. Names the FILESYSTEM aliases: when the extractor makes
+    // the alias (case, 8.3, a trimmed dot), the claim walk and content check catch it; when NuGet's own write makes it
+    // from an escaped name ("BUILDT%7E1/", "build%2E/", "%5C%5C.%5C"), the raw name is written verbatim and is covered
+    // because every raw name is analysed under its NuGet kind and NuGet keeps the first copy of a path (measured,
+    // entry-aliasing review 10); NTFS streams are lost outright (NamesAStream).
+    internal static string NuGetName(string entry) => entry.Contains('%') ? Uri.UnescapeDataString(entry) : entry;
+
+    // Whether NuGet's name for an entry holds a ':' — any ':', so a "C%3A/…" NuGet would unescape to a drive is lost
+    // too (Windows NuGet refuses such a package anyway; a RAW drive-qualified name already escapes, ADR 0008). On Windows ':'
+    // is the NTFS stream separator, so NuGet's "build/X.targets::$DATA" — unescaped from "…targets%3A%3A%24DATA" — IS
+    // build\X.targets (entry-aliasing review 9, C1: a real restore installed it and imported it into the build), while
+    // the extractor writes the raw "%3A" name, a file of no kind, and the package read clean. A RAW ':' is renamed to
+    // '_' by the extractor on Windows (so it claims nothing and is lost) but written verbatim on Linux, where the same
+    // package read clean for a Windows consumer. So any ':' is lost, on every platform, whatever follows it: no package
+    // in the 6,563-package local cache has one, raw or escaped.
+    internal static bool NamesAStream(string entry) => NuGetName(entry).Contains(':');
+
+    // The file name a script's LANGUAGE is decided on (ScriptRuleScanner): the last segment of its kind name, so
+    // "tools/install%2Eps1" — and on Linux "install.ps1 " — is PowerShell, as NuGet installs it, and gets the
+    // PowerShell-only rules (entry-aliasing review 9, C2: chosen from the raw name, such a script lost two of them).
+    internal static string KindFileName(string entry) => Segments(KindKey(entry))[^1];
 
     // What a path's KIND is decided on: the path with trailing spaces and dots trimmed, because Windows drops them
     // when it creates the file (measured 2026-08-22: File.Create("X.dll ") and File.Create("Y.dll.") silently
     // produce "X.dll" and "Y.dll", no exception), while Linux writes such a name to disk verbatim. So a declared
     // "lib/net8.0/evil.dll " reaches this test from BOTH sides and must get the same answer from each:
-    //   Windows — no file is extracted under the declared name, so the entry claims nothing and reaches
-    //     UninventoriedEntries, where the raw key does not end in ".dll"; untrimmed it would be judged
-    //     uninteresting and the package would read complete, exit 0 even under --strict, with a payload on disk
-    //     under the folded name and never analysed.
+    //   Windows — no file is extracted under the declared name, so the entry claims nothing and UninventoriedEntries
+    //     reports it lost (it now counts every kind; when it counted only assemblies and scripts, this trim was what
+    //     kept "evil.dll " from being judged uninteresting and the package from reading complete).
     //   Linux — the file IS extracted verbatim, so the entry claims it and nothing is reported lost; untrimmed the
     //     inventory gate then declines to inventory it, and the payload is contained, extracted, never
     //     IL-analysed, and never mentioned. Same silent hole, opposite platform (both ADR 0030).
@@ -549,8 +701,9 @@ public sealed class NuGetPackage : Runtime, IDisposable
     // it cannot turn a non-assembly into one: "content/readme.txt " and "content/evil.dll.txt " trim to
     // "…readme.txt" and "…evil.dll.txt" and are still excluded. Only the kind DECISION uses this form — the
     // inventoried RelativePath and the reported lost-entry name both stay the real, escaped name, since that is
-    // the name the package declares and (on Linux) the name on disk.
-    private static string KindKey(string entry) => entry.TrimEnd(' ', '.');
+    // the name the package declares and (on Linux) the name on disk. The kind is decided on the name NuGet installs
+    // (NuGetName, '%xx' unescaped), so a "%2Etargets" is a script exactly as NuGet treats it.
+    private static string KindKey(string entry) => NuGetName(entry).TrimEnd(' ', '.');
 
     private static bool HasExtension(string entry, params ReadOnlySpan<string> extensions)
     {
@@ -561,8 +714,9 @@ public sealed class NuGetPackage : Runtime, IDisposable
     }
 
     // Internal (not private) so PackageScanner can label a declared entry that never reached the inventory with the
-    // same role/TFM every inventoried file gets — both are pure functions of the entry name and need no file.
-    internal static PackageItemRole RoleOf(string entry) => Segments(entry)[0].ToLowerInvariant() switch
+    // same role/TFM every inventoried file gets — both are pure functions of the entry name and need no file. Both read
+    // the name NuGet installs (NuGetPackage.NuGetName): "lib%2Fnet8.0%2FA.dll" is NuGet's lib/net8.0/A.dll.
+    internal static PackageItemRole RoleOf(string entry) => Segments(NuGetName(entry))[0].ToLowerInvariant() switch
     {
         "lib" => PackageItemRole.Lib,
         "runtimes" => PackageItemRole.Runtimes,
@@ -578,7 +732,7 @@ public sealed class NuGetPackage : Runtime, IDisposable
     // (runtimes/<rid>/lib/<tfm>/Foo.dll). Present only when a file follows the TFM segment; else null.
     internal static string? TargetFrameworkOf(string entry, PackageItemRole role)
     {
-        var segments = Segments(entry);
+        var segments = Segments(NuGetName(entry));
         return role switch
         {
             PackageItemRole.Lib or PackageItemRole.Build or PackageItemRole.BuildTransitive =>
@@ -612,5 +766,9 @@ public sealed class NuGetPackage : Runtime, IDisposable
 
     #region Fields
     private bool disposed;
+
+    // The absolute cap on extracted bytes (ADR 0008), shared by the extractor's options and each side of the content
+    // check in ContentMatchesNuGet (ADR 0036), which reads no more than the extraction already accepted.
+    private const long MaxExtractedBytes = 2L * 1024 * 1024 * 1024;   // 2 GiB
     #endregion
 }

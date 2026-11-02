@@ -98,7 +98,7 @@ public sealed class PackageScanner : Runtime
             : new AssemblyScanResult(assembly, null, analysis.Message ?? "Capability analysis failed.", metadata, obfuscation, indicators);
     }
 
-    // A declared package entry that was contained but never inventoried (see NuGetPackage.UninventoriedEntryNames),
+    // A declared package entry that was never written as an extracted file of its own (see NuGetPackage.UninventoriedEntryNames),
     // reported as a scan result with NO CapabilityReport and a SkipReason.
     //
     // It travels through that channel deliberately: an AssemblyScanResult with a SkipReason is what
@@ -123,8 +123,11 @@ public sealed class PackageScanner : Runtime
         return new AssemblyScanResult(
             assembly,
             null,
-            "declared package entry was NOT inventoried: no extracted file corresponds to it, so it was never " +
-            "analysed (coverage not delivered — not a clean result)",
+            "declared package entry was NOT inventoried: it was never written as an extracted file of its own (dropped, " +
+            "renamed, clamped back inside the content root, written over another entry's file, or written with bytes " +
+            "other than those NuGet installs, or under a name NuGet installs as a different file), so its content, or " +
+            "the content it replaced, was never analysed " +
+            "(coverage not delivered — not a clean result)",
             null,
             null);
     }

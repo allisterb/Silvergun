@@ -48,7 +48,9 @@ public sealed class UninventoriedEntryCompletenessTests : IClassFixture<Uninvent
 
     #region Methods — the assessment (cross-platform: a name neither filesystem will write)
     // The headline statement of the fix. One entry lost, so the package is NOT complete, and the caveat names the
-    // file — a count with no name would leave a reviewer unable to tell WHICH binary went unlooked-at.
+    // entry — a count with no name would leave a reviewer unable to tell WHICH binary went unlooked-at. Since entry-
+    // aliasing review 2 (W2) that caveat is the NEVER-EXTRACTED one: a lost entry is not a file, so it is no longer
+    // counted under "N of M file(s) could not be analysed" (the only file here, the ordinary dll, was analysed).
     [Fact]
     public void ForPackage_WhenADeclaredEntryWasNeverInventoried_IsIncompleteAndNamesIt()
     {
@@ -58,9 +60,9 @@ public sealed class UninventoriedEntryCompletenessTests : IClassFixture<Uninvent
 
         Assert.False(assessment.IsComplete, "a package with an un-analysed declared entry must not read as complete.");
         Assert.Contains(
-            assessment.Caveats,
-            c => c.Contains("could not be analysed", StringComparison.Ordinal)
-              && c.Contains(UninventoriedCliPackageFixture.HostileEntryEscaped, StringComparison.Ordinal));
+            $"1 declared package entry was never extracted as its own file: {UninventoriedCliPackageFixture.HostileEntryEscaped}",
+            assessment.Caveats);
+        Assert.DoesNotContain(assessment.Caveats, c => c.Contains("could not be analysed", StringComparison.Ordinal));
     }
 
     // The exit-code projection, and the before/after of the defect in one test. The control package is the same
@@ -93,7 +95,9 @@ public sealed class UninventoriedEntryCompletenessTests : IClassFixture<Uninvent
 
     #region Methods — the report boundary (ADR 0031 decision 4: the name is attacker-authored)
     // The lost entry is visible in the rendered report, under the name the package author wrote — ESCAPED. The raw
-    // name carries an LF and a NUL; either one reaching the terminal raw is a forged report line.
+    // name carries an LF and a NUL; either one reaching the terminal raw is a forged report line. Since entry-aliasing
+    // review 2 (W2) it is listed in its own "Package entries never extracted" section, with its verbatim skip reason,
+    // and NOT as a "skipped:" assembly node: it is an entry, not a file.
     [Fact]
     public void PackageRenderer_ForALostEntry_ShowsTheEscapedNameAndTheSkipReason()
     {
@@ -102,9 +106,12 @@ public sealed class UninventoriedEntryCompletenessTests : IClassFixture<Uninvent
         PackageReportRenderer.Render(console, Verified(Scan(fixture.HostileNamePath)), "Hostile.nupkg");
 
         var output = writer.ToString();
-        Assert.Contains(UninventoriedCliPackageFixture.HostileEntryEscaped, output, StringComparison.Ordinal);
-        Assert.Contains("skipped:", output, StringComparison.Ordinal);
-        Assert.Contains("NOT inventoried", output, StringComparison.Ordinal);
+        Assert.Contains("Package entries never extracted", output, StringComparison.Ordinal);
+        Assert.Contains(
+            output.Split('\n'),
+            l => l.Contains(UninventoriedCliPackageFixture.HostileEntryEscaped, StringComparison.Ordinal)
+              && l.Contains("NOT inventoried", StringComparison.Ordinal));
+        Assert.DoesNotContain("skipped:", output, StringComparison.Ordinal);
     }
 
     // ...and nothing anywhere in that report is a raw control character. Line breaks excepted, obviously: the

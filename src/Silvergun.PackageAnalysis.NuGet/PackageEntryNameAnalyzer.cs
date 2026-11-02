@@ -51,18 +51,26 @@ public static class PackageEntryNameAnalyzer
     // Every anomaly for a single entry name, in PackagingAnomalyCategory declaration order. The collision group is
     // consumed here rather than in a second pass so the group's anomaly lands at its first member's position,
     // keeping the whole result in input order.
+    //
+    // The per-name checks also judge the name as NuGet reads it ('%xx' unescaped, NuGetPackage.NuGetName): NuGet
+    // installs "content/invoice%E2%80%AEfdp.exe" with a real U+202E, and refuses "%2E%2E/…" as traversal (entry-aliasing
+    // review 9, W1). The REPORTED name stays the raw one the package declares.
     private static IEnumerable<PackagingAnomaly> AnalyzeOne(
         string name, IReadOnlyDictionary<string, IReadOnlyList<string>> collisions, HashSet<string> reported)
     {
+        var nugetName = NuGetPackage.NuGetName(name);
+        string? Judge(Func<string, string?> detail) =>
+            detail(name) ?? (nugetName == name ? null : detail(nugetName) is { } d ? $"{d}, as NuGet unescapes it" : null);
+
         var details = new (PackagingAnomalyCategory Category, string? Detail)[]
         {
-            (PackagingAnomalyCategory.ControlCharacter, CodePointDetail(name, IsControlPoint, "control")),
-            (PackagingAnomalyCategory.BidiControl, CodePointDetail(name, IsBidiPoint, "bidirectional control")),
-            (PackagingAnomalyCategory.InvisibleCharacter, CodePointDetail(name, IsInvisiblePoint, "invisible")),
-            (PackagingAnomalyCategory.PathTraversal, TraversalDetail(name)),
+            (PackagingAnomalyCategory.ControlCharacter, Judge(n => CodePointDetail(n, IsControlPoint, "control"))),
+            (PackagingAnomalyCategory.BidiControl, Judge(n => CodePointDetail(n, IsBidiPoint, "bidirectional control"))),
+            (PackagingAnomalyCategory.InvisibleCharacter, Judge(n => CodePointDetail(n, IsInvisiblePoint, "invisible"))),
+            (PackagingAnomalyCategory.PathTraversal, Judge(TraversalDetail)),
             (PackagingAnomalyCategory.CaseOnlyCollision, CollisionDetail(name, collisions, reported)),
-            (PackagingAnomalyCategory.TrailingSpaceOrDot, TrailingSpaceOrDotDetail(name)),
-            (PackagingAnomalyCategory.ReservedDeviceName, ReservedDeviceNameDetail(name)),
+            (PackagingAnomalyCategory.TrailingSpaceOrDot, Judge(TrailingSpaceOrDotDetail)),
+            (PackagingAnomalyCategory.ReservedDeviceName, Judge(ReservedDeviceNameDetail)),
         };
 
         var escapedName = YaraPathSafety.Escape(name);

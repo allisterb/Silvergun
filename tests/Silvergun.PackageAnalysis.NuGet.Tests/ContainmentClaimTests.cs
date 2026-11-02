@@ -150,23 +150,31 @@ public sealed class ContainmentClaimTests : IClassFixture<ClaimOncePackageFixtur
     }
     #endregion
 
-    #region Methods — byte-identical duplicate names are ONE entry, not a collision
-    // A name declared twice, verbatim, is one entry declared twice: it claims once and the second occurrence is not
-    // coverage lost. This is the deliberate carve-out in the claim-once rule, and it has to agree with
-    // PackageEntryNameAnalyzer, which rules exact ordinal duplicates out of CaseOnlyCollision's scope for the same
-    // reason — otherwise a merely sloppy package would report a phantom lost binary and exit 3.
+    #region Methods — an exact duplicate name with byte-identical copies: one file analysed, nothing lost (ADR 0036)
+    // A name declared twice, verbatim, with the SAME bytes. Review 2's C3 made every duplicate lost (the extractor leaves
+    // the LAST copy on disk while NuGet installs the FIRST), and this test pinned that it did not ask whether the copies
+    // differ. S8 (ADR 0036) replaced that rule with the content check: the first occurrence must hold NuGet's bytes (its
+    // first copy), and identical copies do, so nothing is lost and the one file is inventoried and analysed. Duplicates
+    // whose copies DIFFER stay lost (EntryAliasingBackslashAndDuplicateTests, EntryAliasingIdenticalDuplicateTests).
     [Fact]
-    public void Open_ForTheSameEntryNameDeclaredTwice_ClaimsOnceAndReportsNoLoss()
+    public void Open_ForTheSameEntryNameDeclaredTwiceWithIdenticalBytes_InventoriesTheFileAndLosesNothing()
     {
         using var pkg = Open(fixture.ExactDuplicatePath);
 
-        // Ground truth: the archive really does declare the name twice, else this test is vacuous.
+        // Ground truth: the archive really does declare the name twice, with identical bytes, else this test is vacuous.
         Assert.Equal(2, pkg.DeclaredEntryNames.Count(n => n == "content/X.dll"));
+        using (var zip = System.IO.Compression.ZipFile.OpenRead(fixture.ExactDuplicatePath))
+        {
+            var copies = zip.Entries.Where(e => e.FullName == "content/X.dll").Select(ReadAll).ToArray();
+            Assert.Equal(2, copies.Length);
+            Assert.Equal(copies[0], copies[1]);
+        }
         Assert.Empty(pkg.UninventoriedEntryNames);
         Assert.Equal(["content/X.dll"], pkg.Assemblies.Select(a => a.RelativePath));
     }
 
-    // ...and the analyzer agrees: an exact duplicate is not a case-only collision either.
+    // ...while the analyzer still rules an exact duplicate out of CaseOnlyCollision: naming the PAIR is the open
+    // DuplicateEntryName follow-up, not this rule's job.
     [Fact]
     public void Analyze_ForTheDuplicatePackagesDeclaredNames_ReportsNoAnomaly()
     {
@@ -195,31 +203,39 @@ public sealed class ContainmentClaimTests : IClassFixture<ClaimOncePackageFixtur
         Assert.DoesNotContain(pkg.Assemblies, a => a.RelativePath == fixture.ClampedFileName);
     }
 
-    // ...and the contained twin still claims its own extracted file, so nothing is reported lost. The fix must
-    // close the hole without inventing a phantom coverage gap on a package that lost nothing (ADR 0030's converse).
+    // ...the contained twin still claims its own extracted file, and the ESCAPING entry is the one reported lost.
+    // Deliberately flipped by tasks/entry-aliasing-coverage.md "Review 5" (C1-r5): an escaping entry is still never
+    // inventoried (ADR 0008, asserted above), but the extractor clamps its bytes INSIDE the root, last-wins, while
+    // NuGet installs the first copy — so its presence is coverage not delivered, and every PathTraversal package now
+    // reads incomplete. This package used to read complete. Exactly ONE name is lost: the contained twin is not.
     [Fact]
-    public void Open_ForAZipSlipEntryClampedOntoAContainedTwin_ReportsNoCoverageLoss()
+    public void Open_ForAZipSlipEntryClampedOntoAContainedTwin_ReportsOnlyTheEscapingEntryLost()
     {
         using var pkg = Open(fixture.ClampedTwinPath);
 
-        Assert.Empty(pkg.UninventoriedEntryNames);
+        Assert.Equal(["../" + fixture.ClampedFileName], pkg.UninventoriedEntryNames);
         Assert.True(
             NuGetPackage.EscapesContentRoot("../" + fixture.ClampedFileName),
             "ground truth: the twin entry escapes the content root and must never be inventoried.");
         Assert.False(NuGetPackage.EscapesContentRoot("content/../" + fixture.ClampedFileName));
     }
 
-    // End to end: the escaping entry produces no scan result at all (it is containment working, not lost
-    // coverage), and the contained one is genuinely analysed.
+    // End to end: the contained file is genuinely analysed, and the escaping entry is ONE not-inventoried row (no
+    // file, no report) rather than no row at all — Review 5, as above. Role Other: ".." is no role segment.
     [Fact]
-    public void Scan_ForAZipSlipEntryClampedOntoAContainedTwin_AnalysesOnlyTheContainedFile()
+    public void Scan_ForAZipSlipEntryClampedOntoAContainedTwin_AnalysesTheContainedFileAndSkipsTheEscapingEntry()
     {
         var scan = Scan(fixture.ClampedTwinPath);
 
-        var analysed = Assert.Single(scan.Assemblies);
+        var analysed = Assert.Single(scan.Assemblies, a => a.SkipReason is null);
         Assert.Equal("content/" + fixture.ClampedFileName, analysed.Assembly.RelativePath);
-        Assert.Null(analysed.SkipReason);
         Assert.NotNull(analysed.Report);
+
+        var lost = Assert.Single(scan.Assemblies, a => a.SkipReason is not null);
+        Assert.Equal("../" + fixture.ClampedFileName, lost.Assembly.RelativePath);
+        Assert.True(lost.NotInventoried);
+        Assert.Null(lost.Report);
+        Assert.Equal(PackageItemRole.Other, lost.Assembly.Role);
     }
     #endregion
 
@@ -269,6 +285,15 @@ public sealed class ContainmentClaimTests : IClassFixture<ClaimOncePackageFixtur
         var scan = PackageScanner.Scan(nupkgPath, resolveReferences: false, runYara: false);
         Assert.True(scan.IsSuccess, scan.Message);
         return scan.Value;
+    }
+
+    // An entry's decompressed bytes, as ZipArchive (and NuGet) read them.
+    private static byte[] ReadAll(System.IO.Compression.ZipArchiveEntry entry)
+    {
+        using var stream = entry.Open();
+        using var buffer = new MemoryStream();
+        stream.CopyTo(buffer);
+        return buffer.ToArray();
     }
 
     // The premise every folding test rests on, asserted rather than assumed: the extractor really did write the
@@ -324,7 +349,7 @@ public sealed class ClaimOncePackageFixture : IDisposable
         // Four names, one extracted file: "." and empty segments fold exactly like "..".
         ThreeWayFoldPath = Write("PkgFoldFourWay", [.. FoldingEntries.Select(name => (name, payload))]);
 
-        // The same name declared twice, verbatim — one entry, one claim, no loss.
+        // The same name declared twice, verbatim — one claim, and the name lost once (review 2, C3).
         ExactDuplicatePath = Write("PkgFoldDuplicate", [("content/X.dll", payload), ("content/X.dll", payload)]);
 
         // The resolved-key hole: a contained "content/../<name>" whose resolved reading is "<name>" at the archive

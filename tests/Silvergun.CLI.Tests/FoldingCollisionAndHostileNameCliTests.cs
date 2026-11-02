@@ -49,10 +49,10 @@ public sealed class FoldingCollisionAndHostileNameCliTests : IClassFixture<Foldi
         var assessment = CompletenessAssessment.ForPackage(report);
 
         Assert.False(assessment.IsComplete, "two entries folding to one extracted file must not read as complete.");
-        Assert.Contains(
-            assessment.Caveats,
-            c => c.Contains("could not be analysed", StringComparison.Ordinal)
-              && c.Contains("content/X.dll", StringComparison.Ordinal));
+        // Entry-aliasing review 2 (W2): the unclaimed entry is named by the never-extracted caveat — it is an entry, not
+        // a file — while the one real file (content/X.dll, analysed) raises no "could not be analysed" caveat.
+        Assert.Contains("1 declared package entry was never extracted as its own file: content/X.dll", assessment.Caveats);
+        Assert.DoesNotContain(assessment.Caveats, c => c.Contains("could not be analysed", StringComparison.Ordinal));
     }
 
     // Payload second: the same package, reversed central directory, and now the payload entry is the disclosed one.

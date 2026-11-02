@@ -98,9 +98,18 @@ internal static class PackageReportRenderer
         console.MarkupLine(CapabilityGateNote(rich));
         console.WriteLine();
 
+        // Files only: a declared entry never written as a file of its own is not an assembly, so it is listed apart
+        // (entry-aliasing review 2, W2) — with its verbatim SkipReason, under a heading that says what it is.
         console.Write(Section(rich, "Assemblies"));
-        console.Write(AssembliesTree(rich, report.Assemblies));
+        console.Write(AssembliesTree(rich, report.Assemblies.Where(a => !a.NotInventoried).ToList()));
         console.WriteLine();
+
+        if (report.Assemblies.Where(a => a.NotInventoried).ToList() is { Count: > 0 } notExtracted)
+        {
+            console.Write(Section(rich, "Package entries never extracted"));
+            console.Write(NotExtractedWidget(rich, notExtracted));
+            console.WriteLine();
+        }
 
         // Opt-in project-health section (scan-package --health, ADR 0015); present only when health was attached.
         // Advisory only — it never influences the Assessment/exit-code contract.
@@ -182,6 +191,7 @@ internal static class PackageReportRenderer
         }
         // NotRun (no scan ran; nothing produces it today, but a report's JSON can say so) is grey "not run", like YARA's,
         // never the green "(none)" of a scan that ran clean (ADR 0035 S5 review N-1). Any findings it carries are shown.
+        // It raises no completeness caveat (see AnalysisCompleteness.ScriptScanCaveat for when that must change).
         if (findings.Count == 0)
             return new Markup(status == ScriptScanStatus.NotRun ? "[grey](not run)[/]" : "[green](none)[/]");
 
@@ -423,6 +433,19 @@ internal static class PackageReportRenderer
             _ => "-",
         };
     }
+
+    // Declared entries that were never written as an extracted file of their own (NuGetPackage.UninventoriedEntryNames):
+    // a yellow note, then one row per entry name (escaped at the DTO, Esc'd for markup) with its verbatim SkipReason.
+    private static IRenderable NotExtractedWidget(bool rich, IReadOnlyList<AssemblyScanResult> entries) =>
+        new Rows(
+        [
+            new Markup(entries.Count == 1
+                ? $"[yellow]{Esc(AlertGlyph(rich))} 1 declared entry was never written as a file of its own {Dash(rich)} " +
+                  "its content, or the content it replaced, was NOT analysed[/]"
+                : $"[yellow]{Esc(AlertGlyph(rich))} {entries.Count} declared entries were never written as a file of their own " +
+                  $"{Dash(rich)} their content, or the content they replaced, was NOT analysed[/]"),
+            .. entries.Select(e => new Markup($"  {Esc(e.Assembly.RelativePath)} [grey]{Esc(e.SkipReason ?? string.Empty)}[/]")),
+        ]);
 
     // A tree with one node per packaged assembly: meta line, grouped capability findings (or skip/none), obfuscation.
     private static Tree AssembliesTree(bool rich, IReadOnlyList<AssemblyScanResult> assemblies)

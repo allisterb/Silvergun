@@ -114,10 +114,17 @@ internal readonly record struct CompletenessAssessment(
 
         // A skipped file is a whole binary that produced no analysis. The caveat states only that — for native runtime
         // DLLs it is a permanent property, for a managed assembly whose analysis failed it is a real malfunction, and
-        // we cannot tell which from here, so we do not guess.
-        var notAnalyzed = report.Assemblies.Where(a => a.SkipReason is not null).ToList();
+        // we cannot tell which from here, so we do not guess. Counted over FILES only: a declared entry that was never
+        // written as a file of its own (NotInventoried) is not a file, so it gets its own caveat below rather than
+        // inflating "N of M file(s)" (entry-aliasing review 2, W2: a 3-entry package read "1 of 1 file(s)").
+        var files = report.Assemblies.Where(a => !a.NotInventoried).ToList();
+        var notAnalyzed = files.Where(a => a.SkipReason is not null).ToList();
         if (notAnalyzed.Count > 0)
-            caveats.Add(NotAnalyzedFilesCaveat(notAnalyzed.Count, report.Assemblies.Count, Locations(notAnalyzed)));
+            caveats.Add(NotAnalyzedFilesCaveat(notAnalyzed.Count, files.Count, Locations(notAnalyzed)));
+
+        var notExtracted = report.Assemblies.Where(a => a.NotInventoried).ToList();
+        if (notExtracted.Count > 0)
+            caveats.Add(NotExtractedEntriesCaveat(notExtracted.Count, Locations(notExtracted)));
 
         var obfuscationFailed = analyzed.Count(a => a.Obfuscation is null);
         if (obfuscationFailed > 0)
@@ -182,6 +189,12 @@ internal readonly record struct CompletenessAssessment(
     private static string NotAnalyzedFilesCaveat(int skipped, int total, string location) =>
         $"{skipped} of {total} file(s) could not be analysed: {location}";
 
+    // "2 declared package entr(ies) were never extracted as their own file: build/SOMEPA~1.TAR, ./C:/Real.nuspec".
+    // Dropped, renamed, or written over another entry's file (NuGetPackage.UninventoriedEntryNames): their content, or
+    // the content they replaced, was never analysed. Names only — which of those happened is not known from here.
+    private static string NotExtractedEntriesCaveat(int count, string location) =>
+        $"{count} declared package {Plural(count, "entry was", "entries were")} never extracted as {Plural(count, "its", "their")} own file: {location}";
+
     // Up to three assembly paths (untrusted package content — escaped at render), then "and N more".
     private static string Locations(IEnumerable<AssemblyScanResult> results)
     {
@@ -216,7 +229,9 @@ internal readonly record struct CompletenessAssessment(
     // (any of the ScriptRuleScanner failure paths, or PackageScanner.ScanScripts' outer catch). States only that the
     // scan did not complete, never which file or why — ScriptScanUnavailableReason carries that, and is shown by the
     // stderr advisory and the Script findings section. NotRun and Completed are not caveats; legacy JSON reads as
-    // Unavailable and so is one.
+    // Unavailable and so is one. NotRun is exempt only because nothing produces it: YARA's NotRun is exempt because it
+    // is the user's explicit --no-yara opt-out. If anything ever sets ScriptScanStatus.NotRun WITHOUT such an opt-out,
+    // NotRun must become a caveat here — otherwise "not run" under a "Clean" headline is fail-open.
     private static string? ScriptScanCaveat(ScriptScanStatus status) => status switch
     {
         ScriptScanStatus.Unavailable => "script content scanning did not complete",

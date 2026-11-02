@@ -27,10 +27,13 @@ using Xunit;
 /// <see cref="AssemblyScanResult"/>, <see cref="CompletenessAssessment.ForPackage"/> reads the package as incomplete,
 /// and <see cref="Program.ScanPackageExitCode"/> returns <b>3</b>.</para>
 ///
-/// <para><b>The false-positive guard is the load-bearing test here.</b> The same OS behaviour applies to every
-/// trailing-space name, inventoried kind or not. If trimming widened the kind set, a benign package shipping
-/// <c>content/readme.txt </c> would exit 3 on Windows and 0 on Linux — a verdict change on benign input, which is
-/// exactly what ADR 0031 decision 3 insists must be measured before it ships.</para>
+/// <para><b>The kind guard, and the accepted cost.</b> The same OS behaviour applies to every trailing-space name,
+/// inventoried kind or not. Trimming must still never widen the kind set (no phantom binary is analysed). But since
+/// 2026-11-01 (<c>tasks/entry-aliasing-coverage.md</c>, Review 1 rule (a)) every contained entry that claimed no file is
+/// lost whatever its kind, so a package shipping <c>content/readme.txt </c> now exits 3 on Windows and 0 on Linux. That
+/// verdict divergence on such input was the architect's explicit, fail-closed choice (the names are already
+/// TrailingSpaceOrDot anomalies), measured as 0 new uninventoried entries over the 100-package benign corpus (ADR 0031
+/// decision 3); both sides are pinned below so it changes only on purpose.</para>
 ///
 /// <para>These drive a REAL scan of a real <c>.nupkg</c> rather than a hand-built report, for the same reason
 /// <see cref="UninventoriedEntryCompletenessTests"/> does: what could go wrong is the wiring, and a constructed
@@ -44,7 +47,9 @@ public sealed class TrailingSpaceOrDotExitCodeTests : IClassFixture<TrailingName
 
     #region Methods — the trailing space and dot (Windows: incomplete, exit 3)
     // The headline. Two payloads extracted and never analysed, so the package is NOT complete and each is named in
-    // the caveats — a count with no name would leave a reviewer unable to say WHICH binary went unlooked-at.
+    // the caveats — a count with no name would leave a reviewer unable to say WHICH binary went unlooked-at. Since
+    // entry-aliasing review 2 (W2) they are named by the plural NEVER-EXTRACTED caveat, not "N of M file(s) could not be
+    // analysed": they are entries that claimed no file, and the one real file (the ordinary dll) was analysed.
     [WindowsExtractionFact("Windows silently drops a trailing space or dot, so the extracted file matches no entry")]
     public void ForPackage_OnWindows_ForTrailingSpaceAndDotPayloads_IsIncompleteAndNamesBoth()
     {
@@ -53,12 +58,11 @@ public sealed class TrailingSpaceOrDotExitCodeTests : IClassFixture<TrailingName
         var assessment = CompletenessAssessment.ForPackage(report);
 
         Assert.False(assessment.IsComplete, "two extracted, un-analysed payloads must not read as complete.");
-        foreach (var name in new[]
-                 { TrailingNameCliPackageFixture.TrailingSpaceEntry, TrailingNameCliPackageFixture.TrailingDotEntry })
-            Assert.Contains(
-                assessment.Caveats,
-                c => c.Contains("could not be analysed", StringComparison.Ordinal)
-                  && c.Contains(name, StringComparison.Ordinal));
+        Assert.Contains(
+            $"2 declared package entries were never extracted as their own file: " +
+            $"{TrailingNameCliPackageFixture.TrailingSpaceEntry}, {TrailingNameCliPackageFixture.TrailingDotEntry}",
+            assessment.Caveats);
+        Assert.DoesNotContain(assessment.Caveats, c => c.Contains("could not be analysed", StringComparison.Ordinal));
     }
 
     // The exit code, with the before/after in one test: the control package is the SAME package with the two
@@ -118,21 +122,37 @@ public sealed class TrailingSpaceOrDotExitCodeTests : IClassFixture<TrailingName
     }
     #endregion
 
-    #region Methods — the false-positive guard: trimming must not widen the KIND set
-    // Windows strips the trailing space from "content/readme.txt " exactly as it does from "evil.dll ", so this
-    // entry reaches the lost-kind test the same way — and must come out the other side as "not a kind we
-    // inventory". A missing readme is not lost analysis, and a benign package must not flip to exit 3.
-    //
-    // Ungated on purpose: the correct verdict is 0 on BOTH platforms, for different reasons (Windows drops the file
-    // and reports nothing; Linux keeps it verbatim and the entry claims it), and a divergence in either direction is
-    // the bug.
-    //
-    // On Linux this is now the sharper direction: ext4 holds "content/readme.txt " and "content/evil.dll.txt "
-    // verbatim, so both ARE contained and on disk and both reach the trimming kind test at the gate. The inventory
-    // is therefore pinned to the one ordinary assembly — if the trim ever widened the kind set, ".txt " content
-    // would appear here as a binary long before it changed any exit code.
-    [Fact]
-    public void ScanPackageExitCode_ForATrailingSpaceOnAnUninventoriedKind_IsCompleteAndZeroOnEveryPlatform()
+    #region Methods — the kind guard (trimming must not widen the KIND set), and rule (a)'s accepted cost
+    // Windows strips the trailing space from "content/readme.txt " exactly as it does from "evil.dll ". The kind guard
+    // still holds: the one thing ANALYSED is the ordinary assembly, so no ".txt " content became a phantom binary. But
+    // the entries claimed no file, and under rule (a) (tasks/entry-aliasing-coverage.md, Review 1) that is lost
+    // coverage whatever the kind, decided without the host probe review C1 removed — so the package is incomplete and
+    // exits 3. That is the ACCEPTED, fail-closed cost: the bytes were in fact written under the trimmed name, and every
+    // such name is already a TrailingSpaceOrDot anomaly.
+    [WindowsExtractionFact("only Windows strips the trailing space, so only there do the entries claim no file")]
+    public void ScanPackageExitCode_OnWindows_ForATrailingSpaceOnAnUninventoriedKind_IsIncompleteAndThreeButAnalysesNoPhantomBinary()
+    {
+        var report = Scan(fixture.UninventoriedKindPath);
+
+        var analysed = Assert.Single(report.Assemblies, a => a.SkipReason is null);
+        Assert.Equal(TrailingNameCliPackageFixture.OrdinaryEntry, analysed.Assembly.RelativePath);
+        Assert.Equal(
+            ["content/readme.txt ", "content/evil.dll.txt "],
+            report.Assemblies.Where(a => a.SkipReason is not null).Select(a => a.Assembly.RelativePath));
+
+        var assessment = CompletenessAssessment.ForPackage(report);
+        Assert.False(assessment.IsComplete);
+        Assert.Contains(assessment.Caveats, c => c.Contains("never extracted as their own file", StringComparison.Ordinal)
+                                               && c.Contains("content/readme.txt ", StringComparison.Ordinal));
+        Assert.Equal(3, Program.ScanPackageExitCode(report, strict: true, allowIncomplete: false));
+    }
+
+    // On Linux ext4 holds "content/readme.txt " and "content/evil.dll.txt " verbatim, so both ARE contained and on disk,
+    // both claim their own file, and both reach the trimming kind test at the gate. The inventory is therefore pinned
+    // to the one ordinary assembly — if the trim ever widened the kind set, ".txt " content would appear here as a
+    // binary long before it changed any exit code — and the verdict is complete, exit 0.
+    [LinuxExtractionFact("ext4 holds the trailing space verbatim, so each entry claims its own file")]
+    public void ScanPackageExitCode_OnLinux_ForATrailingSpaceOnAnUninventoriedKind_IsCompleteAndZero()
     {
         var report = Scan(fixture.UninventoriedKindPath);
 
@@ -141,20 +161,20 @@ public sealed class TrailingSpaceOrDotExitCodeTests : IClassFixture<TrailingName
         Assert.All(report.Assemblies, a => Assert.Null(a.SkipReason));
         Assert.True(
             CompletenessAssessment.ForPackage(report).IsComplete,
-            "a trailing space on a .txt entry is not lost analysis and must not make the package incomplete.");
+            "on Linux a trailing space on a .txt entry is its own file, so nothing was lost.");
         Assert.Equal(0, Program.ScanPackageExitCode(report, strict: true, allowIncomplete: false));
     }
     #endregion
 
-    #region Methods — regression pin: the duplicate-name carve-out, with DIFFERENT bytes
-    // W2's documented starting state, at the seam an operator actually sees. Zip permits one name twice with
-    // different bytes: GetEntry returns the FIRST, a sequential extract-all leaves the LAST on disk (re-measured on
-    // .NET 10, both platforms, 2026-08-22 — the reviewer's original measurement was taken on PowerShell 5.1 /
-    // .NET Framework). Today the matcher claims once and reports nothing, so the run is complete and exits 0. That
-    // is deliberate — neither NAME is the right thing to call lost; the finding belongs to the PAIR, and a future
-    // DuplicateEntryName category will own it. When it lands, this test changes consciously rather than by drift.
+    #region Methods — a duplicate name with DIFFERENT bytes: incomplete, exit 3 (entry-aliasing review 2, C3)
+    // At the seam an operator actually sees. Zip permits one name twice with different bytes: GetEntry returns the
+    // FIRST, a sequential extract-all leaves the LAST on disk (re-measured on .NET 10, both platforms, 2026-08-22). This
+    // used to pin "complete, exit 0" as a deliberate carve-out that would "change consciously rather than by drift". It
+    // has, on purpose: tasks/entry-aliasing-coverage.md Review 2 (C3) measured a webhook .targets followed by a
+    // "<Project />" of the same name scanning clean while NuGet installed the webhook, so a duplicated name is lost once.
+    // The survivor is still analysed; the overwritten copy is the never-extracted caveat, not a file that failed to load.
     [Fact]
-    public void ScanPackageExitCode_ForADuplicateNameWithDifferentBytes_IsCompleteAndZero()
+    public void ScanPackageExitCode_ForADuplicateNameWithDifferentBytes_IsIncompleteAndThree()
     {
         var report = Scan(fixture.DuplicateDifferentBytesPath);
 
@@ -169,11 +189,20 @@ public sealed class TrailingSpaceOrDotExitCodeTests : IClassFixture<TrailingName
             Assert.NotEqual(occurrences[0], occurrences[1]);
         }
 
-        var analysed = Assert.Single(report.Assemblies);
+        var analysed = Assert.Single(report.Assemblies, a => !a.NotInventoried);
         Assert.Equal(TrailingNameCliPackageFixture.DuplicateEntry, analysed.Assembly.RelativePath);
         Assert.Null(analysed.SkipReason);
-        Assert.True(CompletenessAssessment.ForPackage(report).IsComplete);
-        Assert.Equal(0, Program.ScanPackageExitCode(report, strict: true, allowIncomplete: false));
+        Assert.NotNull(analysed.Report);
+        var lost = Assert.Single(report.Assemblies, a => a.NotInventoried);
+        Assert.Equal(TrailingNameCliPackageFixture.DuplicateEntry, lost.Assembly.RelativePath);
+
+        var assessment = CompletenessAssessment.ForPackage(report);
+        Assert.False(assessment.IsComplete);
+        Assert.Contains(
+            $"1 declared package entry was never extracted as its own file: {TrailingNameCliPackageFixture.DuplicateEntry}",
+            assessment.Caveats);
+        Assert.DoesNotContain(assessment.Caveats, c => c.Contains("could not be analysed", StringComparison.Ordinal));
+        Assert.Equal(3, Program.ScanPackageExitCode(report, strict: true, allowIncomplete: false));
     }
     #endregion
 

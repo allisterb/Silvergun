@@ -40,7 +40,9 @@ public sealed class ScriptRuleScanner : Runtime
     /// <see cref="ScriptFinding.Source"/> and redaction. This is the generic arbitrary-file path, so the content is
     /// scanned <b>as-is</b> (no redaction) and findings are <see cref="ScriptFindingSource.Script"/>;
     /// <paramref name="relativePath"/> is the package-relative path recorded on each finding. Never throws.
-    /// For the package manifest use <see cref="ScanPackageMetadata"/>, which redacts prose first.
+    /// For the package manifest use <see cref="ScanPackageMetadata"/>, which redacts prose first. The language is chosen
+    /// from the file name as NuGet would install it (<see cref="NuGetPackage.KindFileName"/>: '%xx' unescaped, trailing
+    /// spaces and dots trimmed), so a loose file named "install%2Eps1" is scanned as PowerShell too.
     /// <para>Not called from <c>src/</c> today: it is the unredacted control in the redaction tests and is reserved for
     /// future non-package inputs (a loose script or manifest handed straight to the scanner) — not dead code.</para>
     /// </summary>
@@ -431,7 +433,8 @@ public sealed class ScriptRuleScanner : Runtime
             if (!TryTransform(transform, raw, relativePath, out var content))
                 return Unscanned(RedactionFailed);
 
-            var name = Path.GetFileName(fullPath);
+            // The language comes from the name NuGet installs, not the raw one on disk: "install%2Eps1" is a .ps1.
+            var name = NuGetPackage.KindFileName(Path.GetFileName(fullPath));
             if (!languages.FromFileNameOut(name, out var language))
                 language = new LanguageInfo();   // language-agnostic backdoor patterns still apply
 
@@ -570,9 +573,9 @@ public sealed class ScriptRuleScanner : Runtime
     // The package manifest that never reached disk (PackageScanner, ADR 0035 review W1): NuGetPackage.Open succeeds only
     // when NuGet's reader found a root .nuspec in the zip, so a null NuspecPath means its content was never scanned, e.g.
     // a root CON.nuspec Windows cannot create, or one whose name NuGet and the disk spell differently. Its on-disk name is
-    // unknown, so it is listed under a fixed placeholder, rendering as 'package manifest (the .nuspec was not found on disk)'.
+    // unknown, so it is listed under a fixed placeholder, rendering as 'package manifest (not matched on disk)'.
     internal const string ManifestPlaceholder = "package manifest";
-    internal const string ManifestNotOnDisk = "the .nuspec was not found on disk";
+    internal const string ManifestNotOnDisk = "not matched on disk";
     internal const string NoRulesLoaded = "no script rules loaded";
     internal static readonly string OverCapSuffix = $", over the {MaxScriptBytes}-byte script cap";
     private const int MaxExceptionTypeChars = 128;

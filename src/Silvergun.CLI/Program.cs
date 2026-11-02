@@ -477,7 +477,9 @@ internal static class Program
         // low-water mark.
         if (snapshot is not null)
         {
-            var assemblyLoadFailures = report.Assemblies.Count(a => a.SkipReason is not null);
+            // Files only (entry-aliasing review 2, W2): a declared entry never extracted as its own file is not an
+            // assembly that failed to load; it still makes the package incomplete via completeness.IsComplete.
+            var assemblyLoadFailures = report.Assemblies.Count(a => a.SkipReason is not null && !a.NotInventoried);
             var scanCompleteness = new ScanCompleteness(
                 completeness.IsComplete, completeness.MethodsTotal, completeness.MethodsAnalyzed, completeness.MethodsSkipped, assemblyLoadFailures);
             var snapshots = report.Assemblies

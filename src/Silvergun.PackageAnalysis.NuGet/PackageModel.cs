@@ -87,7 +87,20 @@ public sealed record AssemblyScanResult(
     ObfuscationReport? Obfuscation,   // null if obfuscation analysis failed or the assembly produced no analysis
     // Additive trailing member (indicator-cli-integration task), same posture as Obfuscation: null if indicator
     // analysis failed, was never attempted (SkipReason case), or predates this field in old JSON.
-    IndicatorReport? Indicators = null);
+    IndicatorReport? Indicators = null)
+{
+    #region Properties
+    /// <summary>
+    /// Whether this row is a DECLARED package entry that was never written as an extracted file of its own (see
+    /// <see cref="NuGetPackage.UninventoriedEntryNames"/>) rather than a file on disk. Such a row has empty
+    /// <see cref="PackageAssembly.FullPath"/> and <see cref="PackageAssembly.Sha256"/> by construction (PackageScanner),
+    /// which an inventoried file never has; both are serialized, so this holds for a report read back from JSON too.
+    /// Reports count and list these apart from files (entry-aliasing review 2, W2): they are entries, not files.
+    /// </summary>
+    [JsonIgnore]
+    public bool NotInventoried => string.IsNullOrEmpty(Assembly.FullPath) && string.IsNullOrEmpty(Assembly.Sha256);
+    #endregion
+}
 
 /// <summary>Aggregate, serializable scan result for one package (ADR 0002 pattern — strings/records only).</summary>
 public sealed record PackageCapabilityReport(

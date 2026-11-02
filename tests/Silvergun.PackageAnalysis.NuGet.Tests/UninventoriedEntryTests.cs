@@ -23,9 +23,12 @@ using Xunit;
 /// <item><b>Uninventoried.</b> The entry is contained, but no extracted file exists for it, because the OS or the
 /// extractor would not create one. It appears in <see cref="NuGetPackage.UninventoriedEntryNames"/>, gets its own
 /// warning, and <see cref="PackageScanner"/> turns it into a skipped <see cref="AssemblyScanResult"/>.</item>
-/// <item><b>Zip-slip excluded.</b> The entry escapes the content root, so it is dropped (ADR 0008) and the file the
-/// extractor clamped into the root is skipped with a <i>different</i> warning. This is containment WORKING, and it
-/// must never be confusable with (2).</item>
+/// <item><b>Zip-slip excluded.</b> The entry escapes the content root, so it is never inventoried (ADR 0008) and the
+/// FILE the extractor clamped into the root is skipped with a <i>different</i> warning — containment working, never
+/// confusable with (2). Since <c>tasks/entry-aliasing-coverage.md</c> "Review 5" (C1-r5) the escaping ENTRY is also
+/// reported lost, as in (2): its bytes were clamped inside the root, last-wins, over whatever file shares that path,
+/// while NuGet installs the first copy. So a zip-slip package now reads incomplete; the two warnings stay distinct,
+/// one about the clamped file and one about the declared entry.</item>
 /// </list>
 ///
 /// <para><b>Platform divergence is pinned, not hidden.</b> Whether a contained entry can be written to disk is an
@@ -229,29 +232,32 @@ public sealed class UninventoriedEntryTests : IClassFixture<UninventoriedPackage
             "the zip-slip entry escaped the extraction directory.");
     }
 
-    // The distinction this fix added, and the one that must never blur. A clamped on-disk file gets "no contained
-    // package entry declares this path" — containment WORKING. An entry we declared and lost gets "was NOT
+    // The distinction this fix added, and the one that must never blur. The clamped on-disk FILE gets "no contained
+    // package entry declares this path" — containment WORKING. A declared ENTRY that was lost gets "was NOT
     // inventoried … coverage NOT delivered" — analysis that did not happen. The old code emitted only the first
     // message for both situations, which is precisely why a payload named COM1.dll read as a zip-slip drop.
+    //
+    // Since "Review 5" (tasks/entry-aliasing-coverage.md, C1-r5) a zip-slip package emits BOTH, about two different
+    // things: the clamped file (named by its on-disk relative path) and the escaping entry (named as declared, with its
+    // "../../"), which is now lost coverage. Deliberately flipped from "no coverage-lost warning, nothing lost".
     [Fact]
-    public void Open_ForAClampedZipSlipFile_WarnsThatNoEntryDeclaresIt_AndNotThatCoverageWasLost()
+    public void Open_ForAZipSlipEntry_WarnsThatNoEntryDeclaresTheClampedFile_AndThatTheEntryWasLost()
     {
         var (pkg, warnings) = OpenCapturingWarnings(fixture.SlipPath);
         using var _ = pkg;
 
         Assert.Contains(warnings, w =>
             w.Contains(ClampedPhrase, StringComparison.Ordinal) &&
-            w.Contains(fixture.SlipFileName, StringComparison.Ordinal));
-        Assert.DoesNotContain(warnings, w =>
-            w.Contains(CoverageLostPhrase, StringComparison.Ordinal) &&
-            w.Contains(fixture.SlipFileName, StringComparison.Ordinal));
-        // An escaping entry is NOT lost coverage: containment excluded it on purpose, so it must not inflate the
-        // "we failed to analyse this" list either.
-        Assert.Empty(pkg.UninventoriedEntryNames);
+            w.Contains(fixture.SlipFileName, StringComparison.Ordinal) &&
+            !w.Contains(fixture.SlipEntry, StringComparison.Ordinal));
+        CoverageLostWarning(warnings, fixture.SlipEntry);
+        Assert.Equal([fixture.SlipEntry], pkg.UninventoriedEntryNames);
     }
 
     // The two messages, side by side, must not be confusable: neither contains the other's distinguishing phrase.
-    // They mean opposite things — one is a guard firing, the other is a hole in coverage.
+    // They mean different things — one is a guard firing on a file, the other is a hole in coverage. Since Review 5 the
+    // zip-slip package itself carries one of each (the file and the entry), so it is checked on both; the NUL-named
+    // entry's warning is the coverage-lost message with no zip slip anywhere near it.
     [Fact]
     public void TheClampedAndCoverageLostWarnings_ShareNoDistinguishingPhrase()
     {
@@ -260,28 +266,43 @@ public sealed class UninventoriedEntryTests : IClassFixture<UninventoriedPackage
         var hostile = OpenCapturingWarnings(fixture.HostileNamePath);
         using var hostilePackage = hostile.Package;
 
-        var clamped = Assert.Single(
-            slip.Warnings, w => w.Contains(fixture.SlipFileName, StringComparison.Ordinal));
-        var lost = CoverageLostWarning(hostile.Warnings, UninventoriedPackageFixture.HostileEntryEscaped);
+        var naming = slip.Warnings.Where(w => w.Contains(fixture.SlipFileName, StringComparison.Ordinal)).ToArray();
+        Assert.Equal(2, naming.Length);
+        var clamped = Assert.Single(naming, w => !w.Contains(fixture.SlipEntry, StringComparison.Ordinal));
+        var slipLost = Assert.Single(naming, w => w.Contains(fixture.SlipEntry, StringComparison.Ordinal));
+        var hostileLost = CoverageLostWarning(hostile.Warnings, UninventoriedPackageFixture.HostileEntryEscaped);
 
         Assert.Contains(ClampedPhrase, clamped, StringComparison.Ordinal);
         Assert.DoesNotContain(CoverageLostPhrase, clamped, StringComparison.Ordinal);
-        Assert.DoesNotContain(ClampedPhrase, lost, StringComparison.Ordinal);
+        foreach (var lost in new[] { slipLost, hostileLost })
+        {
+            Assert.Contains(CoverageLostPhrase, lost, StringComparison.Ordinal);
+            Assert.DoesNotContain(ClampedPhrase, lost, StringComparison.Ordinal);
+        }
     }
 
-    // A zip-slip entry produces no scan result at all — it is not a file we failed to analyse, so synthesizing a
-    // skip for it would turn every traversal attempt into a false incompleteness (ADR 0030's converse: an
-    // over-firing guard is a different bug, not the safe direction).
+    // The scanner half. The escaping ENTRY is one not-inventoried row (no file, no report, role Other: ".." is no role
+    // segment) and the clamped FILE is no row at all — it is never inventoried, so never analysed under any name.
+    // Deliberately flipped by "Review 5" (C1-r5): this used to assert NO skip row, calling one an over-firing guard; the
+    // measurement showed the entry's bytes land inside the root over a real file of that name, so its presence is
+    // coverage not delivered and every PathTraversal package reads incomplete — the accepted cost.
     [Fact]
-    public void Scan_ForAZipSlipEntry_SynthesizesNoSkipResultForIt()
+    public void Scan_ForAZipSlipEntry_SynthesizesOneNotInventoriedRowForTheEntryAndNoneForTheClampedFile()
     {
         var scan = PackageScanner.Scan(fixture.SlipPath, resolveReferences: false, runYara: false);
         Assert.True(scan.IsSuccess, scan.Message);
 
-        Assert.DoesNotContain(
+        var row = Assert.Single(
             scan.Value.Assemblies,
             a => a.Assembly.RelativePath.Contains(fixture.SlipFileName, StringComparison.Ordinal));
-        Assert.All(scan.Value.Assemblies, a => Assert.Null(a.SkipReason));
+        Assert.Equal(fixture.SlipEntry, row.Assembly.RelativePath);
+        Assert.True(row.NotInventoried);
+        AssertLostCoverageResult(row, expectedRole: PackageItemRole.Other, expectedTfm: null);
+
+        var ordinary = Assert.Single(
+            scan.Value.Assemblies, a => a.Assembly.RelativePath == UninventoriedPackageFixture.OrdinaryEntry);
+        Assert.Null(ordinary.SkipReason);
+        Assert.NotNull(ordinary.Report);
     }
     #endregion
 
@@ -366,7 +387,8 @@ public sealed class UninventoriedEntryTests : IClassFixture<UninventoriedPackage
     // The phrase unique to "the extractor put a file here that no contained entry declares" (containment working).
     private const string ClampedPhrase = "no contained package entry declares this path";
 
-    // The phrase unique to "we declared this entry, it is contained, and nothing ever looked at it" (coverage lost).
+    // The phrase unique to "this declared entry was never written as a file of its own, so nothing looked at its
+    // bytes" (coverage lost) — contained or, since Review 5, escaping.
     private const string CoverageLostPhrase = "was NOT inventoried";
 
     private readonly UninventoriedPackageFixture fixture;

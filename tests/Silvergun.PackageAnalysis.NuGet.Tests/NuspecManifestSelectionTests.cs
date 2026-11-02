@@ -19,10 +19,13 @@ using Xunit;
 /// the root, where it sorts before the real manifest; the old first-match pick scanned the decoy, so a real manifest
 /// finding vanished and the scan still read <c>Completed</c>.</para>
 ///
-/// <para><b>The escaped-only manifest.</b> A package whose only manifest entry is <c>Real%2Enuspec</c>: NuGet reads it as
-/// <c>Real.nuspec</c>, but no such file exists on disk, so <see cref="NuGetPackage.NuspecPath"/> is null and the scan is
-/// <see cref="ScriptScanStatus.Unavailable"/> with the manifest reason (ADR 0035 review W1), never a Completed scan that
-/// skipped the manifest.</para>
+/// <para><b>The escaped-only manifest.</b> A package whose only manifest entry is <c>Real%2Enuspec</c> (or
+/// <c>Real%2enuspec</c>): NuGet reads it as <c>Real.nuspec</c>, while the extractor writes the raw name. Until S9 that file
+/// was not recognised as the manifest, so <see cref="NuGetPackage.NuspecPath"/> was null and the scan fail-closed to
+/// <see cref="ScriptScanStatus.Unavailable"/> (ADR 0035 review W1). Since S9 (the ADR 0036 amendment, entry-aliasing
+/// review 8; it also closes S6's N3) whether an entry is the manifest is decided on the name NuGet reads, so the raw
+/// file IS selected and its content scanned: the manifest's finding is reported under the raw name and the scan
+/// completes.</para>
 ///
 /// <para>The rule-matching manifest content is the existing fixture's benign pastebin <c>&lt;projectUrl&gt;</c>
 /// (<see cref="PackageFixture.NuspecMatchProjectUrl"/>), in a non-prose element so it survives prose redaction. All
@@ -86,34 +89,40 @@ public sealed class NuspecManifestSelectionTests
     #endregion
 
     #region Methods: a manifest NuGet and the disk spell differently
-    [Fact]
-    public void Open_WhenTheOnlyManifestEntryIsPercentEscaped_HasANullNuspecPath()
+    [Theory]
+    [InlineData(EscapedOnlyEntry)]
+    [InlineData(EscapedOnlyEntryLowerHex)]
+    public void Open_WhenTheOnlyManifestEntryIsPercentEscaped_SelectsTheRawFileAsTheManifest(string entry)
     {
         using var tree = new TempTree();
-        var nupkg = EscapedOnlyPackage(tree);
+        var nupkg = EscapedOnlyPackage(tree, entry);
         using (var reader = new PackageArchiveReader(nupkg))
             Assert.Equal(RealManifest, reader.GetNuspecFile());   // precondition: NuGet unescapes it to Real.nuspec
 
         using var package = OpenPackage(nupkg);
 
-        Assert.True(File.Exists(Path.Combine(package.ContentRoot, EscapedOnlyEntry)), "precondition: the entry is on disk verbatim");
-        Assert.Null(package.NuspecPath);
+        Assert.True(File.Exists(Path.Combine(package.ContentRoot, entry)), "precondition: the entry is on disk verbatim");
+        Assert.NotNull(package.NuspecPath);
+        Assert.Equal(entry, Path.GetFileName(package.NuspecPath));
+        Assert.Empty(package.UninventoriedEntryNames);
     }
 
-    // ... so the manifest is reported unscanned: Unavailable, 1 of (1 script + the manifest), with the manifest reason.
-    [Fact]
-    public void Scan_WhenTheOnlyManifestEntryIsPercentEscaped_IsUnavailable_WithTheManifestReason()
+    // ... so the manifest is scanned: its finding is reported under the raw name, and the scan completes.
+    [Theory]
+    [InlineData(EscapedOnlyEntry)]
+    [InlineData(EscapedOnlyEntryLowerHex)]
+    public void Scan_WhenTheOnlyManifestEntryIsPercentEscaped_ReportsTheManifestsFindingAndCompletes(string entry)
     {
         using var tree = new TempTree();
-        var nupkg = EscapedOnlyPackage(tree);
+        var nupkg = EscapedOnlyPackage(tree, entry);
 
         var report = Scan(nupkg);
 
-        Assert.Equal(ScriptScanStatus.Unavailable, report.ScriptScanStatus);
-        Assert.Equal(
-            $"1 of 2 script/manifest file(s) were not scanned: '{ScriptRuleScanner.ManifestPlaceholder} ({ScriptRuleScanner.ManifestNotOnDisk})'",
-            report.ScriptScanUnavailableReason);
-        Assert.DoesNotContain(report.ScriptFindings, f => f.RelativePath.EndsWith("nuspec", StringComparison.OrdinalIgnoreCase));
+        var manifestFindings = report.ScriptFindings.Where(f => f.RelativePath == entry).ToArray();
+        Assert.NotEmpty(manifestFindings);
+        Assert.All(manifestFindings, f => Assert.Equal(ScriptFindingSource.PackageMetadata, f.Source));
+        Assert.Equal(ScriptScanStatus.Completed, report.ScriptScanStatus);
+        Assert.Null(report.ScriptScanUnavailableReason);
     }
     #endregion
 
@@ -160,8 +169,8 @@ public sealed class NuspecManifestSelectionTests
     private static string DecoyPackage(TempTree tree, string decoy) =>
         Package(tree, "Decoy", [(RealManifest, MatchingNuspec()), (decoy, Encoding.UTF8.GetBytes("decoy")), (PlainScript, PlainScriptBytes)]);
 
-    private static string EscapedOnlyPackage(TempTree tree) =>
-        Package(tree, "EscapedOnly", [(EscapedOnlyEntry, MatchingNuspec()), (PlainScript, PlainScriptBytes)]);
+    private static string EscapedOnlyPackage(TempTree tree, string entry) =>
+        Package(tree, "EscapedOnly", [(entry, MatchingNuspec()), (PlainScript, PlainScriptBytes)]);
 
     // Raw entry names, stored verbatim by ZipArchive.CreateEntry (NupkgBuilder.WriteEntry).
     private static string Package(TempTree tree, string name, (string Name, byte[] Bytes)[] entries)
@@ -182,6 +191,7 @@ public sealed class NuspecManifestSelectionTests
     private const string DecoyForwardSlash = "A%2Fx.nuspec";
     private const string DecoyBackslash = "A%5Cx.nuspec";
     private const string EscapedOnlyEntry = "Real%2Enuspec";
+    private const string EscapedOnlyEntryLowerHex = "Real%2enuspec";
     private const string PlainScript = "tools/plain.ps1";
     private static readonly byte[] PlainScriptBytes = Encoding.UTF8.GetBytes("Write-Host 'installing'\n");
     #endregion

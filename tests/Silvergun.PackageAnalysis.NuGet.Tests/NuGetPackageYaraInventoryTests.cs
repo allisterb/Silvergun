@@ -102,9 +102,10 @@ public sealed class NuGetPackageYaraInventoryTests(PackageFixture fixture) : ICl
     }
 
     // What Open hands out on that package, pinned: the lib dll and the case-collision survivor(s) as assemblies, the
-    // script, the nuspec, and (Windows only, where NTFS overwrites one of the pair) the lost twin as uninventoried. The
-    // zip-slip entry is never an assembly and never uninventoried, but its clamped bytes ARE in the YARA inventory, which
-    // is still every file on disk under the extraction dir.
+    // script, the nuspec, and as uninventoried (Windows only, where NTFS overwrites one of the pair) the lost twin. The
+    // zip-slip entry is never an assembly, and its clamped bytes ARE in the YARA inventory, which is still every file on
+    // disk under the extraction dir. Since tasks/entry-aliasing-coverage.md "Review 5" (C1-r5) the zip-slip ENTRY is
+    // also uninventoried, on every platform and after the twin (archive order): its bytes were clamped inside the root.
     [Fact]
     public void Open_OnAPackageWithAZipSlipEntryAndACaseCollision_InventoriesAsBefore_AndTheYaraInventoryIsUnchanged()
     {
@@ -119,15 +120,16 @@ public sealed class NuGetPackageYaraInventoryTests(PackageFixture fixture) : ICl
             Assert.DoesNotContain(assemblies, a => a.Contains(slipName, StringComparison.Ordinal));
             Assert.Equal(["tools/init.ps1"], pkg.Scripts.Select(s => s.RelativePath));
             Assert.Equal("PkgN8.nuspec", Path.GetFileName(pkg.NuspecPath));
+            var slipEntry = "../../" + slipName;
             if (OperatingSystem.IsWindows())
             {
                 var survivor = Assert.Single(assemblies, a => a.StartsWith("lib/net8.0/", StringComparison.Ordinal));
-                Assert.Equal(CaseTwins.Single(t => t != survivor), Assert.Single(pkg.UninventoriedEntryNames));
+                Assert.Equal([CaseTwins.Single(t => t != survivor), slipEntry], pkg.UninventoriedEntryNames);
             }
             else
             {
                 Assert.Equal(CaseTwins.Order(StringComparer.Ordinal), assemblies.Where(a => a.StartsWith("lib/net8.0/", StringComparison.Ordinal)));
-                Assert.Empty(pkg.UninventoriedEntryNames);
+                Assert.Equal([slipEntry], pkg.UninventoriedEntryNames);
             }
 
             Assert.Equal(

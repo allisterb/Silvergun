@@ -25,11 +25,12 @@ using Xunit;
 /// analysed, and the package reported complete, exit 0, <i>even under <c>--strict</c></i>. The kind test now runs on
 /// <c>key.TrimEnd(' ', '.')</c> while the REPORTED name stays the declared one.</para>
 ///
-/// <para><b>The false-positive guard matters more than the positives.</b> Trimming decides a KIND, and widening the
-/// kind set would turn every benign <c>content/readme.txt </c> into a phantom lost binary and a false exit 3 — ADR
-/// 0030's converse, an over-firing guard. <see cref="Open_OnWindows_ForATrailingSpaceOnAnUninventoriedKind_ReportsNoCoverageLoss"/>
-/// is the assertion that catches that, and the Linux twins are the assertion that catches the whole fix over-firing
-/// on the platform that can hold these names.</para>
+/// <para><b>The kind guard.</b> Trimming decides a KIND, and widening the kind set would inventory benign
+/// <c>content/readme.txt </c> as a phantom binary. That guard stands. What changed (2026-11-01,
+/// <c>tasks/entry-aliasing-coverage.md</c>, Review 1 rule (a)) is the LOST list: it no longer filters by kind, so on
+/// Windows a non-binary trailing-name entry, which claims no file, is now reported lost — the accepted, fail-closed cost
+/// of that rule. <see cref="Open_OnWindows_ForATrailingSpaceOnAnUninventoriedKind_ReportsItLostButInventoriesNoBinary"/>
+/// pins both halves, and the Linux twins catch the whole fix over-firing on the platform that can hold these names.</para>
 ///
 /// <para><b>N1 — role and TFM came off the ESCAPED name.</b> <see cref="YaraPathSafety.Escape"/> emits backslashes
 /// and the segment splitter treats a backslash as a separator, so the escaped form RE-SEGMENTS: measured, raw
@@ -190,29 +191,33 @@ public sealed class TrailingSpaceOrDotCoverageTests : IClassFixture<TrailingName
     }
     #endregion
 
-    #region Methods — W1's false-positive guard: trimming must not widen the KIND set
-    // The assertion that matters most in this file. Windows strips the trailing space from "content/readme.txt "
-    // exactly as it does from "evil.dll ", so the extracted file is dropped by the inventory gate and the entry
-    // reaches the lost-kind test the same way — but ".txt" is not a kind we inventory, trimmed or not, and a missing
-    // readme is not lost analysis. If the trim ever widened what counts as an assembly or a script, every benign
-    // package with a stray trailing space would report a phantom lost binary and exit 3.
-    //
-    // "content/evil.dll.txt " is the sharper half: it CONTAINS ".dll" and trims to a name that still does not END in
-    // one, so a naive Contains-based kind test would fire on it.
-    [WindowsExtractionFact("only Windows strips the trailing space, so only there does the entry reach the kind test")]
-    public void Open_OnWindows_ForATrailingSpaceOnAnUninventoriedKind_ReportsNoCoverageLoss()
+    #region Methods — W1's kind guard: trimming must not widen the KIND set (and rule (a)'s accepted cost)
+    // Windows strips the trailing space from "content/readme.txt " exactly as it does from "evil.dll ", so the extracted
+    // file is dropped by the inventory gate. Two statements, and they used to be one:
+    //   * the KIND guard, unchanged: ".txt" is not a kind we inventory, trimmed or not, so no phantom binary appears.
+    //     "content/evil.dll.txt " is the sharper half: it CONTAINS ".dll" and trims to a name that still does not END
+    //     in one, so a naive Contains-based kind test would fire on it;
+    //   * the LOST list, changed on purpose (tasks/entry-aliasing-coverage.md, Review 1 rule (a), 2026-11-01): every
+    //     contained entry that claimed no file is lost whatever its kind, decided without touching the filesystem, so
+    //     these three now read lost on Windows although their bytes were written under the trimmed names. That is the
+    //     ACCEPTED cost: fail-closed, and every such name is already a TrailingSpaceOrDot anomaly. Telling "trimmed onto
+    //     a new file" from "trimmed onto another entry's file" (Real.nuspec. over Real.nuspec) would take the host probe
+    //     review C1 removed.
+    [WindowsExtractionFact("only Windows strips the trailing space, so only there does the entry claim no file")]
+    public void Open_OnWindows_ForATrailingSpaceOnAnUninventoriedKind_ReportsItLostButInventoriesNoBinary()
     {
         using var pkg = Open(fixture.UninventoriedKindPath);
 
-        // Ground truth: these entries DID lose their trailing space/dot on disk and so DID reach the lost-kind test
-        // — without this the test would pass vacuously on a platform that wrote them verbatim.
+        // Ground truth: these entries DID lose their trailing space/dot on disk — without this the test would pass
+        // vacuously on a platform that wrote them verbatim.
         var onDisk = ExtractedRelativePaths(pkg);
         Assert.Contains("content/readme.txt", onDisk);
         Assert.Contains("content/notes.txt", onDisk);
         Assert.Contains("content/evil.dll.txt", onDisk);
 
-        Assert.Empty(pkg.UninventoriedEntryNames);
+        Assert.Equal(["content/readme.txt ", "content/notes.txt.", "content/evil.dll.txt "], pkg.UninventoriedEntryNames);
         Assert.Equal([TrailingNamePackageFixture.OrdinaryEntry], pkg.Assemblies.Select(a => a.RelativePath));
+        Assert.Empty(pkg.Scripts);
     }
 
     // The Linux twin, and the half the trim at the GATE newly puts at risk. On Windows these entries never reach the
@@ -239,10 +244,32 @@ public sealed class TrailingSpaceOrDotCoverageTests : IClassFixture<TrailingName
         Assert.Empty(pkg.UninventoriedEntryNames);
     }
 
-    // ...and end to end: no skip row, so the package stays complete and the run stays green. (The exit-code half is
-    // in the CLI suite, where CompletenessAssessment lives.)
-    [Fact]
-    public void Scan_ForATrailingSpaceOnAnUninventoriedKind_SynthesizesNoSkipRowOnEitherPlatform()
+    // ...and end to end on Windows: the ordinary assembly is the one thing ANALYSED (no phantom binary), and each lost
+    // text entry is a skip row of role Content, so the package is incomplete (the exit-code half is in the CLI suite,
+    // where CompletenessAssessment lives). The accepted cost of rule (a), see above.
+    [WindowsExtractionFact("only Windows strips the trailing space, so only there are the entries lost")]
+    public void Scan_OnWindows_ForATrailingSpaceOnAnUninventoriedKind_AnalysesOnlyTheAssemblyAndSkipsEachLostEntry()
+    {
+        var scan = Scan(fixture.UninventoriedKindPath);
+
+        var analysed = Assert.Single(scan.Assemblies, a => a.SkipReason is null);
+        Assert.Equal(TrailingNamePackageFixture.OrdinaryEntry, analysed.Assembly.RelativePath);
+        Assert.NotNull(analysed.Report);
+
+        var skipped = scan.Assemblies.Where(a => a.SkipReason is not null).ToArray();
+        Assert.Equal(["content/readme.txt ", "content/notes.txt.", "content/evil.dll.txt "], skipped.Select(a => a.Assembly.RelativePath));
+        Assert.All(skipped, a =>
+        {
+            Assert.Contains("NOT inventoried", a.SkipReason, StringComparison.Ordinal);
+            Assert.Equal(PackageItemRole.Content, a.Assembly.Role);
+            Assert.Null(a.Report);
+        });
+    }
+
+    // The Linux twin: each entry claims its own verbatim file, so there is no skip row and nothing the trim widened into
+    // a kind — one ordinary assembly, analysed.
+    [LinuxExtractionFact("ext4 holds the trailing space or dot verbatim, so each entry claims its own file")]
+    public void Scan_OnLinux_ForATrailingSpaceOnAnUninventoriedKind_SynthesizesNoSkipRow()
     {
         var scan = Scan(fixture.UninventoriedKindPath);
 
@@ -349,6 +376,12 @@ public sealed class TrailingSpaceOrDotCoverageTests : IClassFixture<TrailingName
     // assertion circular. Entries are matched by their escaped name, which is what both sides publish; that relies
     // on the declared name and the extracted path coinciding, true for every package staged here (none of them
     // folds a "..", the case CaseOnlyCollision/PathFoldingCollision own).
+    //
+    // ONE carve-out, and it is not a weakening: a name declared MORE THAN ONCE. Since tasks/entry-aliasing-coverage.md
+    // Review 2 (C3) such a name is always lost — the extractor kept the last copy, NuGet installs the first, so one copy
+    // was written over the other — while the surviving file is still inventoried and analysed. "Both" is therefore the
+    // correct answer for it (one copy analysed, one not), and the requirement there is the stronger "must be lost",
+    // which still rules out "neither". Review 3 N3 recorded this listing and left naming the pair to DuplicateEntryName.
     [Fact]
     public void Open_ForEveryStagedPackage_PutsEveryInventoriableEntryInExactlyOneOfInventoryAndLost()
     {
@@ -363,19 +396,25 @@ public sealed class TrailingSpaceOrDotCoverageTests : IClassFixture<TrailingName
 
             var owed = pkg.DeclaredEntryNames
                 .Where(n => !n.EndsWith('/') && !NuGetPackage.EscapesContentRoot(n) && NamesAnInventoriableKind(n))
-                .Distinct(StringComparer.Ordinal);
+                .GroupBy(n => n, StringComparer.Ordinal);
 
             foreach (var declared in owed)
             {
-                var reported = YaraPathSafety.Escape(declared);
+                var reported = YaraPathSafety.Escape(declared.Key);
                 var isInventoried = inventoried.Contains(reported);
                 var isLost = lost.Contains(reported);
 
-                Assert.True(
-                    isInventoried ^ isLost,
-                    $"{Path.GetFileName(path)}: entry '{reported}' is inventoried={isInventoried}, " +
-                    $"lost={isLost} — it must be in EXACTLY one. 'Neither' is a payload we neither analysed nor " +
-                    "disclosed; 'both' is a report that contradicts itself.");
+                if (declared.Count() > 1)
+                    Assert.True(
+                        isLost,
+                        $"{Path.GetFileName(path)}: entry '{reported}' is declared {declared.Count()} times but lost={isLost} " +
+                        "— a duplicated name had one copy written over the other, so it must be reported lost (C3).");
+                else
+                    Assert.True(
+                        isInventoried ^ isLost,
+                        $"{Path.GetFileName(path)}: entry '{reported}' is inventoried={isInventoried}, " +
+                        $"lost={isLost} — it must be in EXACTLY one. 'Neither' is a payload we neither analysed nor " +
+                        "disclosed; 'both' is a report that contradicts itself.");
             }
         }
     }
@@ -433,19 +472,18 @@ public sealed class TrailingSpaceOrDotCoverageTests : IClassFixture<TrailingName
     }
     #endregion
 
-    #region Methods — regression pin: the duplicate-name carve-out, with DIFFERENT bytes
-    // W2 of the same review: the carve-out's justification was wrong, but the DECISION stands, and this pins the
-    // starting state the future DuplicateEntryName category will change.
-    //
+    #region Methods — a duplicate name with DIFFERENT bytes: the survivor analysed, the name lost once (C3)
     // Zip permits two entries with the same name and different bytes, and they resolve differently — re-measured on
     // .NET 10, both platforms, 2026-08-22 and asserted below: ZipArchive.GetEntry returns the FIRST while a
     // sequential extract-all leaves the LAST on disk. So a consumer reading by name and Silvergun reading the
-    // extraction can see different bytes: "the file scanned is not the file shipped" again. Today the matcher's
-    // `seen` set claims once and reports nothing, and the analyzer's Distinct collapses the pair — deliberately,
-    // because neither NAME is the right thing to call lost; the finding belongs to the PAIR. When that category
-    // lands, THIS test is the one that must change, consciously.
+    // extraction can see different bytes: "the file scanned is not the file shipped" again.
+    //
+    // This region used to pin a carve-out (claim once, report nothing) and said it was the test that "must change,
+    // consciously". It has: tasks/entry-aliasing-coverage.md Review 2 (C3) measured a webhook .targets followed by a
+    // "<Project />" of the same name scanning clean while NuGet installed the webhook, and made a duplicate name lost
+    // ONCE. The analyzer's CaseOnlyCollision still ignores exact duplicates; naming the PAIR stays DuplicateEntryName's.
     [Fact]
-    public void Open_ForADuplicateNameWithDifferentBytes_ClaimsOnceAndReportsNoLoss()
+    public void Open_ForADuplicateNameWithDifferentBytes_InventoriesTheSurvivorAndReportsTheNameLostOnce()
     {
         using var pkg = Open(fixture.DuplicateDifferentBytesPath);
 
@@ -453,7 +491,7 @@ public sealed class TrailingSpaceOrDotCoverageTests : IClassFixture<TrailingName
         var declared = pkg.DeclaredEntryNames.Where(n => n == TrailingNamePackageFixture.DuplicateEntry).ToArray();
         Assert.Equal(2, declared.Length);
 
-        Assert.Empty(pkg.UninventoriedEntryNames);
+        Assert.Equal([TrailingNamePackageFixture.DuplicateEntry], pkg.UninventoriedEntryNames);
         Assert.Equal([TrailingNamePackageFixture.DuplicateEntry], pkg.Assemblies.Select(a => a.RelativePath));
     }
 
@@ -476,17 +514,23 @@ public sealed class TrailingSpaceOrDotCoverageTests : IClassFixture<TrailingName
         Assert.NotEqual(fixture.ShadowedLength, fixture.SurvivingLength);
     }
 
-    // ...and the surviving file is genuinely analysed, with no skip row: the carve-out must not cost the package the
-    // coverage it does have, and must not manufacture an incompleteness either.
+    // ...and the surviving file is still genuinely analysed — C3 must not cost the package the coverage it does have —
+    // next to exactly ONE not-inventoried row for the name (the overwritten copy), so the package reads incomplete.
     [Fact]
-    public void Scan_ForADuplicateNameWithDifferentBytes_AnalysesTheSurvivingFileWithNoSkipRow()
+    public void Scan_ForADuplicateNameWithDifferentBytes_AnalysesTheSurvivingFileAndAddsOneNotInventoriedRow()
     {
         var scan = Scan(fixture.DuplicateDifferentBytesPath);
 
-        var analysed = Assert.Single(scan.Assemblies);
-        Assert.Equal(TrailingNamePackageFixture.DuplicateEntry, analysed.Assembly.RelativePath);
+        Assert.Equal(2, scan.Assemblies.Count);
+        Assert.All(scan.Assemblies, a => Assert.Equal(TrailingNamePackageFixture.DuplicateEntry, a.Assembly.RelativePath));
+
+        var analysed = Assert.Single(scan.Assemblies, a => !a.NotInventoried);
         Assert.Null(analysed.SkipReason);
         Assert.NotNull(analysed.Report);
+
+        var lost = Assert.Single(scan.Assemblies, a => a.NotInventoried);
+        Assert.Contains("NOT inventoried", lost.SkipReason, StringComparison.Ordinal);
+        Assert.Null(lost.Report);
     }
     #endregion
 
