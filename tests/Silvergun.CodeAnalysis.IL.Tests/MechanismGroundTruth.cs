@@ -23,11 +23,17 @@ public enum Expectation
     KnownGap,
 }
 
-/// <summary>The call-graph phase from which a row is checked. Ordered: a row is active when <c>ActiveFrom &lt;= CurrentPhase</c>.</summary>
+/// <summary>
+/// The call-graph phase from which a row is checked. Ordered: a row is active when <c>ActiveFrom &lt;= CurrentPhase</c>.
+/// <see cref="A2Dispatch"/> is phase A2's first slice (S1: CHA fan-out, <c>MethodEdgeKind.Dispatch</c>); <see cref="A2"/>
+/// is the whole phase, reached once the state-machine and type-initializer edges land too
+/// (docs/agent/tasks/cha-a2-dispatch-and-implicit-edges.md).
+/// </summary>
 public enum Phase
 {
     Baseline,
     A1,
+    A2Dispatch,
     A2,
     A2Multi,
     Reachability,
@@ -67,13 +73,15 @@ public static class MechanismGroundTruth
 {
     #region Properties
     /// <summary>
-    /// The phase the call graph has reached. At <see cref="Phase.A1"/> (static call-site targets, both fixture
-    /// assemblies in one <see cref="MemberIndex"/>) every row the static graph already satisfies is active — each row
-    /// is tagged with the EARLIEST phase at which it holds, and <c>MechanismGroundTruthTests</c> checks that every
-    /// still-pending row really fails today. Bumping this to <see cref="Phase.A2"/> is the red-to-green moment of
-    /// phase A2.
+    /// The phase the call graph has reached. Each row is tagged with the EARLIEST phase at which it holds, and
+    /// <c>MechanismGroundTruthTests</c> checks that every still-pending row really fails today. At
+    /// <see cref="Phase.A1"/> the static call-site targets (both fixture assemblies in one <see cref="MemberIndex"/>)
+    /// satisfied every row but the A2 and Reachability ones. Phase A2 ratchets in slices: <see cref="Phase.A2Dispatch"/>
+    /// (S1, CHA fan-out) activated the seven CHA rows and the S1 dispatch mechanisms (ObjectVirtual, ExplicitImpl,
+    /// GenericInterface, StaticAbstract, OpenHierarchy); bumping this to <see cref="Phase.A2"/> once the
+    /// state-machine and type-initializer edges land is the red-to-green moment of the rest of the phase.
     /// </summary>
-    public static Phase CurrentPhase => Phase.A1;
+    public static Phase CurrentPhase => Phase.A2Dispatch;
 
     /// <summary>The path rows active at <see cref="CurrentPhase"/>.</summary>
     public static IReadOnlyList<MechanismPath> ActivePaths => Paths.Where(p => p.ActiveFrom <= CurrentPhase).ToArray();
@@ -134,11 +142,11 @@ public static class MechanismGroundTruth
         // ---- Interface ---------------------------------------------------------------------------------------
         new("Interface.CallsThroughInterface", "Interface",
             [Own("Interface.Dispatch.CallsThroughInterface()"), Own("Interface.EnvProbe.Run()"), GetEnv],
-            Env, Expectation.Present, Phase.A2,
+            Env, Expectation.Present, Phase.A2Dispatch,
             "callvirt IProbe.Run; CHA fans out to every IProbe implementor, EnvProbe.Run among them."),
         new("Interface.ShouldHaveNoCapability", "Interface",
             [Own("Interface.Dispatch.ShouldHaveNoCapability()"), Own("Interface.EnvProbe.Run()"), GetEnv],
-            Env, Expectation.KnownImprecision, Phase.A2,
+            Env, Expectation.KnownImprecision, Phase.A2Dispatch,
             "The receiver is only ever a QuietProbe, but CHA fans IProbe.Run out to EnvProbe.Run too (Capslock's ShouldHaveNoCapabilities). ideal: Absent."),
         new("Interface.CallsThroughSafeInterface", "Interface", [Own("Interface.Dispatch.CallsThroughSafeInterface()")], null,
             Expectation.Absent, Phase.A1,
@@ -147,7 +155,7 @@ public static class MechanismGroundTruth
         // ---- Virtual -----------------------------------------------------------------------------------------
         new("Virtual.CallsThroughBase", "Virtual",
             [Own("Virtual.Callers.CallsThroughBase()"), Own("Virtual.EnvWorker.Run()"), GetEnv],
-            Env, Expectation.Present, Phase.A2,
+            Env, Expectation.Present, Phase.A2Dispatch,
             "callvirt Worker.Run (benign) on a Worker-typed receiver; CHA adds the EnvWorker override."),
         new("Virtual.CallsThroughSafeBase", "Virtual", [Own("Virtual.Callers.CallsThroughSafeBase()")], null, Expectation.Absent, Phase.A1,
             "Twin hierarchy: neither SafeWorker.Run nor its override reaches a sink."),
@@ -156,7 +164,7 @@ public static class MechanismGroundTruth
         new("TypeTest.CallsMaybeTouch", "TypeTest",
             [Own("TypeTest.Inspector.CallsMaybeTouch()"), Own("TypeTest.Inspector.MaybeTouch(System.Object)"),
              Own("TypeTest.FileToucher.Touch()"), Platform("System.IO.File.ReadAllText(System.String)")],
-            Capability.FileSystem, Expectation.KnownImprecision, Phase.A2,
+            Capability.FileSystem, Expectation.KnownImprecision, Phase.A2Dispatch,
             "`o is IFileToucher t` guards t.Touch(), and nothing ever passes an IFileToucher (Capslock's MaybeChmod); CHA still reaches FileToucher.Touch. ideal: Absent."),
         new("TypeTest.CallsMaybeTouchSafe", "TypeTest", [Own("TypeTest.Inspector.CallsMaybeTouchSafe()")], null, Expectation.Absent, Phase.A1,
             "Twin: ISafeToucher's only implementor is benign."),
@@ -274,7 +282,7 @@ public static class MechanismGroundTruth
         // ---- Generics ----------------------------------------------------------------------------------------
         new("Generics.ConstrainedCall", "Generics",
             [Own("Generics.Constrained.Bar()"), Own("Generics.Constrained.Foo`1(!!0)"), Own("Generics.A.Baz()"), GetEnv],
-            Env, Expectation.Present, Phase.A2,
+            Env, Expectation.Present, Phase.A2Dispatch,
             "Bar calls Foo<A>(A) - an instantiation whose call-site name is Foo`1(MechanismFixture.Generics.A); the waypoint is the definition Foo`1(!!0). " +
             "Inside, `constrained. !!T callvirt IBaz.Baz` fans out by CHA to A.Baz."),
         new("Generics.ConstrainedCallSafe", "Generics", [Own("Generics.Constrained.BarSafe()")], null, Expectation.Absent, Phase.A1,
@@ -325,12 +333,12 @@ public static class MechanismGroundTruth
         new("Iterator.Consumer", "Iterator",
             [Own("Iterator.Consumers.Consumes(System.Collections.Generic.IEnumerable`1<System.String>)"),
              Own("Iterator.Sequences.<Enum>d__0.MoveNext()"), GetEnv],
-            Env, Expectation.Present, Phase.A2,
+            Env, Expectation.Present, Phase.A2Dispatch,
             "The consumer receives IEnumerable<string> as a parameter and never names the iterator; its callvirt System.Collections.IEnumerator.MoveNext reaches <Enum>d__0.MoveNext by CHA."),
         new("Iterator.ConsumerOfSafeSequence", "Iterator",
             [Own("Iterator.Consumers.ConsumesEnumSafe()"), Own("Iterator.Consumers.Consumes(System.Collections.Generic.IEnumerable`1<System.String>)"),
              Own("Iterator.Sequences.<Enum>d__0.MoveNext()"), GetEnv],
-            Env, Expectation.KnownImprecision, Phase.A2,
+            Env, Expectation.KnownImprecision, Phase.A2Dispatch,
             "Twin DRIVER: hands the shared consumer only EnumSafe(), but the consumer's IEnumerator.MoveNext fans out by CHA to every own iterator, the interesting one included. " +
             "Not in the spec's decision table (which says twins are Absent): an iterator consumer's twin cannot be Absent under CHA. ideal: Absent."),
 
@@ -383,6 +391,83 @@ public static class MechanismGroundTruth
         new("ExpressionTree.CompilesSafeTree", "ExpressionTree", [Own("ExpressionTree.Trees.CompilesSafeTree()")], Env, Expectation.Absent, Phase.A1,
             "Twin: the same tree shape with ldtoken System.String.Concat. Scoped to EnvironmentProbe because Compile (DynamicCodeLoading) is reached by both; " +
             "stays Absent even once an ldtoken edge lands, since Concat is safe."),
+
+        // ---- A2 S1 dispatch mechanisms (cha-a2-dispatch-and-implicit-edges.md §8) -----------------------------
+        // Tagged A2Dispatch, the phase they are about: the Absent rows hold vacuously on the static graph, and only
+        // mean something once Dispatch edges exist.
+
+        // ---- ObjectVirtual -----------------------------------------------------------------------------------
+        new("ObjectVirtual.DescribesEnv", "ObjectVirtual",
+            [Own("ObjectVirtual.Describers.DescribesEnv()"), Own("ObjectVirtual.Describers.Describe(System.Object)"),
+             Own("ObjectVirtual.EnvDescribed.ToString()"), GetEnv],
+            Env, Expectation.Present, Phase.A2Dispatch,
+            "Describe(object o) => o.ToString() is callvirt System.Object.ToString, a platform-declared virtual: decision D1 fans it out to every own ToString override, EnvDescribed.ToString among them."),
+        new("ObjectVirtual.DescribesSafe", "ObjectVirtual",
+            [Own("ObjectVirtual.Describers.DescribesSafe()"), Own("ObjectVirtual.Describers.DescribeSafe(System.Object)"),
+             Own("ObjectVirtual.EnvDescribed.ToString()"), GetEnv],
+            Env, Expectation.KnownImprecision, Phase.A2Dispatch,
+            "Twin DRIVER: DescribeSafe is only ever handed a SafeDescribed, but its callvirt Object.ToString fans out to every own override (D1; the receiver cannot be narrowed without TAC). ideal: Absent."),
+        new("ObjectVirtual.DescribesNumber", "ObjectVirtual", [Own("ObjectVirtual.Describers.DescribesNumber(System.Int32)")], null,
+            Expectation.Absent, Phase.A2Dispatch,
+            "number.ToString() on an int is a plain `call System.Int32.ToString` (a value-type receiver needs no dispatch), so it never fans out to the own ToString overrides."),
+
+        // ---- ExplicitImpl ------------------------------------------------------------------------------------
+        new("ExplicitImpl.CallsExplicit", "ExplicitImpl",
+            [Own("ExplicitImpl.Callers.CallsExplicit()"),
+             Own("ExplicitImpl.EnvExplicitProbe.MechanismFixture.ExplicitImpl.IExplicitProbe.Run()"), GetEnv],
+            Env, Expectation.Present, Phase.A2Dispatch,
+            "callvirt IExplicitProbe.Run; the implementation is the explicit `string IExplicitProbe.Run()`, whose metadata name is interface-qualified - CHA matches it by its last segment."),
+        new("ExplicitImpl.CallsSafeExplicit", "ExplicitImpl", [Own("ExplicitImpl.Callers.CallsSafeExplicit()")], null,
+            Expectation.Absent, Phase.A2Dispatch,
+            "Twin: ISafeExplicitProbe's only implementor (an explicit, benign SafeExplicitProbe.Run) reaches no sink."),
+
+        // ---- GenericInterface --------------------------------------------------------------------------------
+        new("GenericInterface.ComparesThroughInterface", "GenericInterface",
+            [Own("GenericInterface.Sorters.ComparesThroughInterface()"),
+             Own("GenericInterface.EnvOrder.Compare(System.String,System.String)"), GetEnv],
+            Env, Expectation.Present, Phase.A2Dispatch,
+            "callvirt IComparer<string>.Compare - a platform generic interface instantiation - fans out under the definition key IComparer`1 to own implementors (PlatformCallback.EnvComparer too)."),
+        new("GenericInterface.ComparesThroughSafeInterface", "GenericInterface", [Own("GenericInterface.Sorters.ComparesThroughSafeInterface()")], null,
+            Expectation.Absent, Phase.A2Dispatch,
+            "Twin: the same Compare shape through the own generic ISafeComparer<string>, whose only implementor is benign (the twin needs no platform interface, so it is Absent with its own, per A1 spec §1.7)."),
+
+        // ---- StaticAbstract ----------------------------------------------------------------------------------
+        new("StaticAbstract.BuildsEnv", "StaticAbstract",
+            [Own("StaticAbstract.Builders.BuildsEnv()"), Own("StaticAbstract.Builders.Build`1()"),
+             Own("StaticAbstract.EnvFactory.Make()"), GetEnv],
+            Env, Expectation.Present, Phase.A2Dispatch,
+            "T.Make() compiles to `constrained. !!T call IFactory::Make()`; CCIProvider drops the prefix, so Model sees a static call to the abstract interface member, which CHA's static rule fans out to EnvFactory.Make."),
+        new("StaticAbstract.BuildsSafe", "StaticAbstract", [Own("StaticAbstract.Builders.BuildsSafe()")], null,
+            Expectation.Absent, Phase.A2Dispatch,
+            "Twin: ISafeFactory's only implementor SafeFactory.Make is benign."),
+
+        // ---- OpenHierarchy -----------------------------------------------------------------------------------
+        new("OpenHierarchy.FlushesEnvStream", "OpenHierarchy",
+            [Own("OpenHierarchy.Flushers.FlushesEnvStream()"), Own("OpenHierarchy.Flushers.FlushIt(System.IO.Stream)"),
+             Own("OpenHierarchy.EnvStream.Flush()"), GetEnv],
+            Env, Expectation.Present, Phase.A2Dispatch,
+            "EnvStream : MemoryStream overrides Stream.Flush; the subtype map never learns MemoryStream : Stream, so callvirt Stream.Flush reaches it only by decision D2 (an external declared type also fans out to every open own type)."),
+        new("OpenHierarchy.FlushesSafeStream", "OpenHierarchy",
+            [Own("OpenHierarchy.Flushers.FlushesSafeStream()"), Own("OpenHierarchy.Flushers.FlushItSafe(System.IO.Stream)"),
+             Own("OpenHierarchy.EnvStream.Flush()"), GetEnv],
+            Env, Expectation.KnownImprecision, Phase.A2Dispatch,
+            "Twin DRIVER: FlushItSafe is only ever handed a SafeStream, but D2 fans its callvirt Stream.Flush out to every open type's Flush, EnvStream's included. ideal: Absent."),
+        new("OpenHierarchy.FlushesJournal", "OpenHierarchy", [Own("OpenHierarchy.Flushers.FlushesJournal()")], null,
+            Expectation.Absent, Phase.A2Dispatch,
+            "callvirt Journal.Flush has an OWN declared type, so the open-type rule does not apply: only Journal's own subtype SafeJournal is reached, never the same-shaped EnvStream.Flush."),
+
+        // ---- InheritedImpl (A2 S1 review C1) -----------------------------------------------------------------
+        new("InheritedImpl.CallsInherited", "InheritedImpl",
+            [Own("InheritedImpl.Callers.CallsInherited()"), Own("InheritedImpl.EnvBase.Run()"), GetEnv],
+            Env, Expectation.Present, Phase.A2Dispatch,
+            "class EnvInheritor : EnvBase, IInheritedProbe declares no Run: the CLR fills the interface slot with the inherited EnvBase.Run, whose type is not below IInheritedProbe. Reached by S1b's InheritedBelow rule."),
+        new("InheritedImpl.CallsPlainInherited", "InheritedImpl",
+            [Own("InheritedImpl.Callers.CallsPlainInherited()"), Own("InheritedImpl.PlainBase.Run()"), GetEnv],
+            Env, Expectation.Present, Phase.A2Dispatch,
+            "The same through a base method that is NOT virtual in source: Roslyn emits PlainBase.Run `virtual final` so it can fill PlainInheritor's IPlainProbe slot, so it is a dispatch candidate like any virtual."),
+        new("InheritedImpl.CallsSafeInherited", "InheritedImpl", [Own("InheritedImpl.Callers.CallsSafeInherited()")], null,
+            Expectation.Absent, Phase.A2Dispatch,
+            "Twin: SafeInheritor inherits a benign SafeBase.Run for ISafeInheritedProbe; EnvBase.Run is inherited only below IInheritedProbe, so it is not reached."),
     ];
 
     /// <summary>Every opacity row.</summary>
@@ -394,13 +479,14 @@ public static class MechanismGroundTruth
 
     /// <summary>
     /// The mechanisms of the spec's §1.3 catalogue, in its order, then ExpressionTree (added with S1 from review 1's
-    /// suggestions, spec §2.5).
+    /// suggestions, spec §2.5), then the A2 S1 dispatch mechanisms (cha-a2-dispatch-and-implicit-edges.md §8).
     /// </summary>
     public static IReadOnlyList<string> Mechanisms { get; } =
     [
         "Direct", "Transitive", "CrossAssembly", "DelegateLocal", "DelegateField", "Interface", "Virtual", "TypeTest",
         "StaticInit", "ModuleInit", "Lambda", "PlatformCallback", "LocalFunction", "Generics", "Async", "Iterator",
         "Opacity", "Safe", "ExpressionTree",
+        "ObjectVirtual", "ExplicitImpl", "GenericInterface", "StaticAbstract", "OpenHierarchy", "InheritedImpl",
     ];
     #endregion
 

@@ -12,7 +12,8 @@
     process tree (plus any VBCSCompiler.exe started after the guard, in case one starts anyway - a compiler server
     that was already running, e.g. Visual Studio's, is never counted or killed; one that something else starts
     DURING the run would be) and kills the whole tree when the sum exceeds -LimitMB or the run exceeds
-    -TimeoutSec. Sampling can miss a process that lives under 500 ms, so the reported peak is a lower bound. If the
+    -TimeoutSec. A process joins the tree only if it started after the guard and after its parent, so a reused
+    process id cannot pull an unrelated process into it; every process killed is logged first. Sampling can miss a process that lives under 500 ms, so the reported peak is a lower bound. If the
     script stops on Ctrl-C or an error, the tree is killed too; if the script itself is hard-killed, its finally
     block does not run and dotnet can outlive it.
 
@@ -76,15 +77,20 @@ function Get-Tree([int]$rootId, [datetime]$since) {
     }
     $tree = New-Object System.Collections.Generic.List[object]
     $seen = New-Object System.Collections.Generic.HashSet[int]
-    $root = $all | Where-Object { $_.ProcessId -eq $rootId }
-    if ($root) { $tree.Add($root); $null = $seen.Add($rootId) }
-    $queue = New-Object System.Collections.Generic.Queue[int]
-    $queue.Enqueue($rootId)
+    $root = $all | Where-Object { $_.ProcessId -eq $rootId } | Select-Object -First 1
+    if (-not $root) { return $tree }
+    $tree.Add($root); $null = $seen.Add($rootId)
+    $queue = New-Object System.Collections.Generic.Queue[object]
+    $queue.Enqueue($root)
     while ($queue.Count -gt 0) {
-        $id = $queue.Dequeue()
+        $parent = $queue.Dequeue()
+        $id = [int]$parent.ProcessId
         if ($children.ContainsKey($id)) {
             foreach ($c in $children[$id]) {
-                if ($seen.Add([int]$c.ProcessId)) { $tree.Add($c); $queue.Enqueue([int]$c.ProcessId) }
+                # Windows keeps a dead parent's id in ParentProcessId and reuses ids, so an unrelated process can
+                # name one of ours as its parent. A real descendant starts after the guard and after its parent.
+                if ($c.CreationDate -lt $since -or $c.CreationDate -lt $parent.CreationDate) { continue }
+                if ($seen.Add([int]$c.ProcessId)) { $tree.Add($c); $queue.Enqueue($c) }
             }
         }
     }
@@ -98,8 +104,10 @@ function Get-Tree([int]$rootId, [datetime]$since) {
 # Kills the tree, then the root again by handle in case the CIM query itself fails.
 function Stop-Tree([System.Diagnostics.Process]$process, [datetime]$since) {
     try {
-        foreach ($id in @(Get-Tree $process.Id $since | ForEach-Object { [int]$_.ProcessId })) {
-            Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
+        foreach ($p in @(Get-Tree $process.Id $since)) {
+            Write-Output ("guarded-dotnet: killing {0} pid {1} (parent {2}, started {3:HH:mm:ss.fff}, {4} MB)" -f `
+                $p.Name, $p.ProcessId, $p.ParentProcessId, $p.CreationDate, [math]::Round($p.PrivatePageCount / 1MB))
+            Stop-Process -Id ([int]$p.ProcessId) -Force -ErrorAction SilentlyContinue
         }
     }
     finally {

@@ -121,28 +121,33 @@ public sealed class SubstitutionDepthBoundTests : IClassFixture<SubstitutionDept
     }
 
     /// <summary>
-    /// The exact branch is unaffected: a non-instantiated reference whose signature renders <c>&lt;unknown&gt;</c> (an
-    /// <c>int[] ×64</c> parameter) still resolves Exact to its own definition — the true definition renders exactly as
-    /// its own reference — and gets no "read in full" reason. The definition is checked against the emitted IL, walking
-    /// Model's parameter type: 64 array levels around <c>System.Int32</c>.
+    /// A2 S1 review C2: a TRUNCATED rendering verifies nothing, not even on the exact branch. A non-instantiated
+    /// reference whose signature renders <c>&lt;unknown&gt;</c> (an <c>int[] ×64</c> parameter) is no longer Exact on a
+    /// node-id match (before S1b it was): it is Ambiguous over every same-shaped candidate of <c>NS.D</c> — both
+    /// one-parameter <c>M</c>s — with the reason "the signature could not be read in full", and the true depth-64
+    /// definition (checked against the emitted IL by walking Model's parameter type: 64 array levels around
+    /// <c>System.Int32</c>) is among the candidates.
     /// </summary>
     [Fact]
-    public void Resolve_ANonInstantiatedDeepReference_StillResolvesExact()
+    public void Resolve_ANonInstantiatedTruncatedReference_IsAmbiguousOverEverySameShapedCandidate_TheTrueOneIncluded()
     {
         var index = fixture.Deep.Index();
         var site = Assert.Single(ModelCallSite.All(index), s => s.Caller.NodeId == BindsDeepExact);
         Assert.Contains(CanonicalName.UnknownPart, CanonicalName.NodeId(ModelNames.Of(site.Target)), StringComparison.Ordinal);
         Assert.Equal(Array.Empty<string>(), ModelNames.TypeArguments(site.Target.ContainingType));
+        var sameShape = index.Methods.Where(m => m.DeclaringTypeId == "NS.D" && m.Definition.Name == "M").ToArray();
+        var deep = Assert.Single(sameShape, m => ElementOf(Assert.Single(m.Definition.Parameters).Type) == ("System", "Int32", 64));
 
         var resolution = index.Resolve(site.Target);
 
-        Assert.True(resolution.Kind == ResolutionKind.Exact,
-            $"resolved {resolution.Kind} -> {resolution.NodeId} [{string.Join(", ", resolution.Candidates)}] ({resolution.Reason}); expected Exact.");
-        Assert.Null(resolution.Reason);
-        var definition = Assert.IsType<ModelTypes.MethodDefinition>(resolution.Definition);
-        Assert.Equal("D", definition.ContainingType.Name);
-        Assert.Equal(("System", "Int32", 64), ElementOf(Assert.Single(definition.Parameters).Type));
-        Assert.Equal([resolution.NodeId], resolution.Candidates);
+        Assert.True(resolution.Kind == ResolutionKind.Ambiguous,
+            $"resolved {resolution.Kind} -> {resolution.NodeId} [{string.Join(", ", resolution.Candidates)}] ({resolution.Reason}); expected Ambiguous.");
+        Assert.Null(resolution.Definition);
+        Assert.Equal("the signature could not be read in full", resolution.Reason);
+        Assert.Equal(sameShape.Select(m => m.NodeId).Distinct().Order(StringComparer.Ordinal), resolution.Candidates);
+        Assert.Equal(2, resolution.Candidates.Count);
+        Assert.Contains(deep.NodeId, resolution.Candidates);
+        Assert.Equal(DeepAssembly, resolution.Assembly);
     }
 
     // The one call of M in BindsMOfTArray (its other site is the newobj of the instantiation).

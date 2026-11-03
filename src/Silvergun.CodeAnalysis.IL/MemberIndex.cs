@@ -67,12 +67,15 @@ public sealed record MethodResolution(
 /// <summary>
 /// What could not be indexed. Nothing is skipped silently (ADR 0020 decision 8). <see cref="ForwardersUnreadable"/>
 /// counts assemblies whose type forwarders could not be read: no reference into one resolves to own code.
+/// <see cref="SupertypesUnresolved"/> counts base-type and interface references that did not land on one known place
+/// (an unreadable assembly, a forwarder cycle, a type missing from the indexed assembly that should define it); each
+/// is kept under its bare id as well, so CHA over-approximates rather than loses the subtype.
 /// </summary>
-public sealed record IndexCoverage(int AssembliesUnreadable, int TypesSkipped, int MethodsSkipped, int ForwardersUnreadable = 0)
+public sealed record IndexCoverage(int AssembliesUnreadable, int TypesSkipped, int MethodsSkipped, int ForwardersUnreadable = 0, int SupertypesUnresolved = 0)
 {
     #region Properties
-    /// <summary>True when every assembly, type, method and forwarder table was read.</summary>
-    public bool IsComplete => AssembliesUnreadable == 0 && TypesSkipped == 0 && MethodsSkipped == 0 && ForwardersUnreadable == 0;
+    /// <summary>True when every assembly, type, method, forwarder table and supertype was read.</summary>
+    public bool IsComplete => AssembliesUnreadable == 0 && TypesSkipped == 0 && MethodsSkipped == 0 && ForwardersUnreadable == 0 && SupertypesUnresolved == 0;
     #endregion
 }
 
@@ -96,6 +99,11 @@ public sealed record IndexCoverage(int AssembliesUnreadable, int TypesSkipped, i
 /// <para>
 /// A reference into an indexed assembly that forwards the reference's type (<see cref="TypeForwarders"/>) is followed
 /// to where the CLR sends it, so a package cannot hide a platform call behind a forwarder and a same-named decoy.
+/// Supertypes are keyed by the same walk, so the subtype map and a call site's declared type agree on every key.
+/// </para>
+/// <para>
+/// <see cref="DispatchTargets"/> is class-hierarchy analysis (phase A2): the own overrides and implementations a
+/// virtual call may run, matched by name and shape over the subtype map.
 /// </para>
 /// </summary>
 public sealed class MemberIndex
@@ -107,6 +115,8 @@ public sealed class MemberIndex
         IReadOnlyList<IndexedMethod> methods,
         IReadOnlyDictionary<string, IReadOnlyList<string>> subtypes,
         IReadOnlyDictionary<string, TypeForwarders> forwarders,
+        TypeScope scope,
+        IReadOnlySet<string> open,
         IndexCoverage coverage)
     {
         Assemblies = assemblies;
@@ -114,10 +124,13 @@ public sealed class MemberIndex
         Methods = methods;
         this.subtypes = subtypes;
         this.forwarders = forwarders;
+        this.scope = scope;
+        this.open = open;
         Coverage = coverage;
         assemblySet = new HashSet<string>(assemblies, StringComparer.OrdinalIgnoreCase);
         byNodeId = Group(methods, m => m.NodeId);
         byShape = Group(methods, m => Shape(m.DeclaringTypeId, m.Definition.Name, m.Identity.GenericArity, m.Identity.ParameterTypes.Count));
+        byImplementedShape = Group(methods, m => ImplementedShape(ImplementedName(m.Definition.Name), m.Identity.GenericArity, m.Identity.ParameterTypes.Count));
         // By reference: Model's MethodDefinition has no value equality worth trusting. Build removes duplicate assembly
         // instances, and the first entry wins anyway, so a definition reachable twice cannot throw here.
         ownMethods = methods.GroupBy<IndexedMethod, MethodDefinition>(m => m.Definition, ReferenceEqualityComparer.Instance)
@@ -160,18 +173,28 @@ public sealed class MemberIndex
         var assemblyNames = CanonicalNames(typeLists.Select(t => t.Assembly));
         var assemblySet = new HashSet<string>(assemblyNames, StringComparer.OrdinalIgnoreCase);
 
+        // Per assembly name, like ownership: one name loaded twice forwards what either copy forwards.
+        var forwarders = inputs
+            .GroupBy(a => a.Assembly.Name ?? CanonicalName.UnknownPart, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => TypeForwarders.Merge(g.Select(a => a.Forwarders)), StringComparer.OrdinalIgnoreCase);
+
         var typeCandidates = typeLists
             .SelectMany(l => (l.Types ?? []).Select(t => (l.Assembly, Type: t, NodeId: Guard<string?>(() => CanonicalName.NodeId(ModelNames.Of(t)), null))))
             .ToArray();
-        var ownTypeIds = typeCandidates.Where(t => t.NodeId is not null).Select(t => t.NodeId!).ToHashSet(StringComparer.Ordinal);
+        var definedIn = typeCandidates
+            .Where(t => t.NodeId is not null)
+            .GroupBy(t => t.NodeId!, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.Select(t => t.Assembly).ToHashSet(StringComparer.OrdinalIgnoreCase), StringComparer.Ordinal);
+        var scope = new TypeScope(assemblySet, forwarders, definedIn);
 
         var indexedTypes = typeCandidates
             .Where(t => t.NodeId is not null)
-            .Select(t => Guard<IndexedType?>(() => IndexType(t.Assembly, t.NodeId!, t.Type, assemblySet, ownTypeIds), null))
+            .Select(t => Guard<(IndexedType Type, int Unresolved)?>(() => IndexType(t.Assembly, t.NodeId!, t.Type, scope), null))
             .ToArray();
-        var types = indexedTypes.OfType<IndexedType>()
+        var types = indexedTypes.OfType<(IndexedType Type, int Unresolved)>().Select(t => t.Type)
             .OrderBy(t => t.NodeId, StringComparer.Ordinal).ThenBy(t => t.Assembly, StringComparer.Ordinal)
             .ToArray();
+        var typesById = Group(types, t => t.NodeId);
 
         var methodCandidates = types
             .Select(t => (Type: t, Methods: Guard<MethodDefinition[]?>(() => t.Definition.Members.OfType<MethodDefinition>().ToArray(), null)))
@@ -191,18 +214,14 @@ public sealed class MemberIndex
                 g => (IReadOnlyList<string>)g.Select(x => x.Sub).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(),
                 StringComparer.Ordinal);
 
-        // Per assembly name, like ownership: one name loaded twice forwards what either copy forwards.
-        var forwarders = inputs
-            .GroupBy(a => a.Assembly.Name ?? CanonicalName.UnknownPart, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => TypeForwarders.Merge(g.Select(a => a.Forwarders)), StringComparer.OrdinalIgnoreCase);
-
         var coverage = new IndexCoverage(
             typeLists.Count(l => l.Types is null),
             typeCandidates.Count(t => t.NodeId is null) + indexedTypes.Count(t => t is null) + methodCandidates.Count(x => x.Methods is null),
             indexedMethods.Count(m => m is null),
-            inputs.Count(a => a.Forwarders is not { IsReadable: true }));
+            inputs.Count(a => a.Forwarders is not { IsReadable: true }),
+            indexedTypes.Sum(t => t?.Unresolved ?? 0));
 
-        return new MemberIndex(assemblyNames, Group(types, t => t.NodeId), methods, subtypes, forwarders, coverage);
+        return new MemberIndex(assemblyNames, typesById, methods, subtypes, forwarders, scope, OpenTypes(typesById, scope), coverage);
     }
 
     /// <summary>
@@ -221,8 +240,9 @@ public sealed class MemberIndex
     /// Resolves a call-site reference to the indexed definition it names, or says why it cannot. A generic method
     /// instance is resolved through its unspecialized <see cref="IMethodReference.GenericMethod"/>. A reference through
     /// a generic type instantiation is matched by substituting the instantiation's arguments into each candidate's
-    /// parameters and comparing the rendered signatures exactly; anything left over is <see cref="ResolutionKind.Ambiguous"/>
-    /// rather than guessed. A reference whose type the declaring assembly forwards is followed to the forward's target;
+    /// parameters and comparing the rendered signatures exactly, return type included; anything left over is
+    /// <see cref="ResolutionKind.Ambiguous"/> rather than guessed, and so is a match on a signature that renders
+    /// truncated or clamped. A reference whose type the declaring assembly forwards is followed to the forward's target;
     /// if the type is also defined along the way, both are kept as <see cref="ResolutionKind.Ambiguous"/>. Results are
     /// memoized. Never throws.
     /// </summary>
@@ -245,7 +265,7 @@ public sealed class MemberIndex
 
         var target = Guard<IMethodReference?>(() => reference.GenericMethod, null) ?? reference;
         var targetIdentity = ReferenceEquals(target, reference) ? identity : ModelNames.Of(target);
-        var site = new Site(nodeId, key, targetIdentity, ModelNames.TypeArguments(Guard<IBasicType?>(() => target.ContainingType, null)));
+        var site = new Site(nodeId, key, targetIdentity, ModelNames.ReturnType(target, []), ModelNames.TypeArguments(Guard<IBasicType?>(() => target.ContainingType, null)));
 
         return forwarders.GetValueOrDefault(assembly) is { IsReadable: true, Count: 0 } ? Defined(assembly, site) : Follow(assembly, site);
     }
@@ -258,6 +278,56 @@ public sealed class MemberIndex
     public IReadOnlyList<IndexedType> Types(string typeNodeId) =>
         types.TryGetValue(typeNodeId, out var found) ? found : [];
 
+    /// <summary>
+    /// Class-hierarchy analysis for one call site: the node ids of the own methods that <paramref name="reference"/>
+    /// may also run, besides its <paramref name="resolution"/>. Null when the site does not dispatch: a verified
+    /// definition that is neither virtual nor abstract runs as named, and a non-virtual site (<paramref name="virtualSite"/>
+    /// false) dispatches only to a static member of a type that may be an interface and has own subtypes (a static
+    /// abstract interface member, called through a dropped <c>constrained.</c> prefix).
+    /// <para>
+    /// The targets are the own methods that match the declared method's name (or end in it, as a C# explicit
+    /// implementation does), generic arity and parameter count, are instance and virtual or abstract (static, for a
+    /// static site), and are declared below the declared type. Below an interface or an external type, a method a class
+    /// inherits also counts when an own subtype of that class takes on the declared type (<c>class C : B, IProbe</c>
+    /// runs <c>B.Run</c>), and so does every <see cref="IsOpen">open</see> type, whose platform supertypes the subtype
+    /// map cannot see. Parameter types narrow the match only below an own class, and only where both sides are
+    /// concrete; Model carries neither <c>newslot</c> nor <c>sealed</c>. All of this over-matches, which costs
+    /// precision only, since these targets are added beside the resolution, never in its place. Hierarchy walks are
+    /// bounded and count as a match past the bound. Memoized per declared shape. Never throws.
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<string>? DispatchTargets(IMethodReference? reference, MethodResolution resolution, bool virtualSite)
+    {
+        if (reference is null || resolution.Definition is { IsVirtual: false, IsAbstract: false })
+            return null;
+        var isStatic = Guard(() => reference.IsStatic, false);
+        if (!virtualSite && !isStatic)
+            return null;
+
+        var target = Guard<IMethodReference?>(() => reference.GenericMethod, null) ?? reference;
+        var identity = ModelNames.Of(target);
+        var declared = scope.Of(Guard<string?>(() => target.ContainingType?.ContainingAssembly?.Name, null), identity.DeclaringType).Keys;
+        // Static virtual members exist only on interfaces: a static call into anything else is a plain call
+        // (String.Concat, object.Equals), and so is one into a type nothing own derives from.
+        if (!virtualSite && !declared.Any(k => MayBeInterface(k) && subtypes.ContainsKey(k)))
+            return null;
+        var name = ImplementedName(identity.MethodName);
+        var arity = identity.GenericArity;
+        var parameterTypes = identity.ParameterTypes;
+
+        return dispatched.GetOrAdd(
+            Key([declared.Count.ToString(CultureInfo.InvariantCulture), .. declared, name, arity.ToString(CultureInfo.InvariantCulture),
+                 parameterTypes.Count.ToString(CultureInfo.InvariantCulture), .. parameterTypes, isStatic ? "static" : "instance"]),
+            _ => Dispatch(declared, name, arity, parameterTypes, isStatic));
+    }
+
+    /// <summary>
+    /// True when <paramref name="typeNodeId"/> is an own class whose base-class chain leaves the index at a platform or
+    /// dependency class other than <c>System.Object</c>, <c>System.ValueType</c>, <c>System.Enum</c> or a delegate
+    /// base (<c>EnvStream : MemoryStream</c>): it may override a virtual of a type the subtype map never links it to.
+    /// </summary>
+    public bool IsOpen(string typeNodeId) => open.Contains(typeNodeId);
+
     // Into an indexed assembly that forwards types. The CLR resolves a reference from another assembly through the
     // forwarder even when the assembly also defines the type, but binds a MethodDef token inside the assembly to that
     // definition - and Model renders both alike. So every place the reference can land is collected, walking forwards
@@ -269,40 +339,15 @@ public sealed class MemberIndex
     // cannot be read, or a declaring type too unreadable to look up, ends the walk Unresolved: never Own on a guess.
     private MethodResolution Follow(string assembly, Site site)
     {
-        var places = new List<MethodResolution>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { assembly };
-        var queue = new Queue<string>([assembly]);
-        var forwards = false;
-        while (queue.TryDequeue(out var current))
-        {
-            if (!assemblySet.Contains(current))
-            {
-                places.Add(new(ResolutionKind.External, site.NodeId, site.Key, current, null, [], null));
-                continue;
-            }
-
-            var table = forwarders.GetValueOrDefault(current) ?? TypeForwarders.Unreadable;
-            var outermost = site.Outermost;
-            if (!table.IsReadable || (table.Count > 0 && outermost is null))
-            {
-                places.Add(Unresolved(current, site, table.IsReadable
-                    ? $"the declaring type could not be read, and {current} forwards types"
-                    : $"the type forwarders of {current} could not be read"));
-                continue;
-            }
-
-            var onward = table.Count == 0 ? [] : table.Targets(outermost!.Value.Namespace, outermost.Value.Name);
-            var modules = table.Count == 0 ? [] : table.Modules(outermost!.Value.Namespace, outermost.Value.Name);
-            forwards |= onward.Count > 0;
-            var defined = Defined(current, site);
-            if ((onward.Count == 0 && modules.Count == 0) || defined.Kind != ResolutionKind.Unresolved)
-                places.Add(defined);
-            places.AddRange(modules.Select(m => Unresolved(current, site, $"{current} exports this type from module file {m}, which is not indexed")));
-            places.AddRange(onward.Where(next => seen.Contains(next))
-                .Select(next => Unresolved(next, site, $"the type forwarders of {current} lead back to {next}: a cycle, or a second way into it")));
-            foreach (var next in onward.Where(seen.Add))
-                queue.Enqueue(next);
-        }
+        var (places, forwards) = Walk(
+            assembly,
+            Outermost(site.Target.DeclaringType),
+            assemblySet,
+            forwarders,
+            current => new MethodResolution(ResolutionKind.External, site.NodeId, site.Key, current, null, [], null),
+            current => Defined(current, site),
+            place => place.Kind == ResolutionKind.Unresolved,
+            (current, reason) => Unresolved(current, site, reason));
 
         // Worded by what was followed: a forwarder (even back into the same assembly), or only a module export.
         var forwarded = forwards ? $"forwarded by {assembly}" : null;
@@ -317,6 +362,95 @@ public sealed class MemberIndex
         };
     }
 
+    // The forwarder walk behind Follow and TypeScope, over places of any kind: from an indexed assembly, breadth-first
+    // over the forwards of the outermost type, each assembly once. An unindexed assembly is an external place; an indexed
+    // one contributes its own definition (kept when it is not unresolved, or when nothing leads on), an unresolved place
+    // per module export and per forward back to an assembly already visited, and ends unresolved when its table cannot
+    // be read or the type is too unreadable to look up while it forwards anything.
+    private static (List<T> Places, bool Forwards) Walk<T>(
+        string assembly,
+        (string Namespace, string Name)? outermost,
+        HashSet<string> assemblies,
+        IReadOnlyDictionary<string, TypeForwarders> forwarders,
+        Func<string, T> external,
+        Func<string, T> defined,
+        Func<T, bool> isUnresolved,
+        Func<string, string, T> unresolved)
+    {
+        var places = new List<T>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { assembly };
+        var queue = new Queue<string>([assembly]);
+        var forwards = false;
+        while (queue.TryDequeue(out var current))
+        {
+            if (!assemblies.Contains(current))
+            {
+                places.Add(external(current));
+                continue;
+            }
+
+            var table = forwarders.GetValueOrDefault(current) ?? TypeForwarders.Unreadable;
+            if (!table.IsReadable || (table.Count > 0 && outermost is null))
+            {
+                places.Add(unresolved(current, table.IsReadable
+                    ? $"the declaring type could not be read, and {current} forwards types"
+                    : $"the type forwarders of {current} could not be read"));
+                continue;
+            }
+
+            var onward = table.Count == 0 ? [] : table.Targets(outermost!.Value.Namespace, outermost.Value.Name);
+            var modules = table.Count == 0 ? [] : table.Modules(outermost!.Value.Namespace, outermost.Value.Name);
+            forwards |= onward.Count > 0;
+            var here = defined(current);
+            if ((onward.Count == 0 && modules.Count == 0) || !isUnresolved(here))
+                places.Add(here);
+            places.AddRange(modules.Select(m => unresolved(current, $"{current} exports this type from module file {m}, which is not indexed")));
+            places.AddRange(onward.Where(next => seen.Contains(next))
+                .Select(next => unresolved(next, $"the type forwarders of {current} lead back to {next}: a cycle, or a second way into it")));
+            foreach (var next in onward.Where(seen.Add))
+                queue.Enqueue(next);
+        }
+        return (places, forwards);
+    }
+
+    // The outermost declaring type, which is what a forwarder names; null when unreadable or truncated.
+    private static (string Namespace, string Name)? Outermost(TypeIdentity type) =>
+        type.NestingChain is [var name, ..] && name != CanonicalName.UnknownPart ? (type.Namespace ?? string.Empty, name) : null;
+
+    // DispatchTargets for one declared shape. Starts from the methods of that shape, so the cost follows the candidates,
+    // not the size of the hierarchy, and nothing per hierarchy is kept (review S1 W1).
+    private IReadOnlyList<string> Dispatch(IReadOnlyList<string> declared, string name, int arity, IReadOnlyList<string> parameterTypes, bool isStatic)
+    {
+        var keys = declared.ToHashSet(StringComparer.Ordinal);
+        // Only an own class hierarchy is narrowed by parameter types: an interface may be variant (IComparer<in T> runs
+        // Compare(object, object) for a Compare(string, string) call), and an external type may be an interface.
+        var narrow = declared.All(k => types.TryGetValue(k, out var defined) && defined.All(t => t.Definition is not InterfaceDefinition));
+        var external = !isStatic && declared.Any(k => !types.ContainsKey(k));
+        var inherited = !isStatic && declared.Any(MayBeInterface);
+        var walk = new HierarchyWalk(this, keys);
+
+        // A candidate declared in the declared type itself is the site's own target, not a dispatch target.
+        return (byImplementedShape.GetValueOrDefault(ImplementedShape(name, arity, parameterTypes.Count)) ?? [])
+            .Where(m => !keys.Contains(m.DeclaringTypeId))
+            .Where(m => isStatic ? m.Definition.IsStatic : !m.Definition.IsStatic && (m.Definition.IsVirtual || m.Definition.IsAbstract))
+            .Where(m => !narrow || MayOverride(parameterTypes, m.Identity.ParameterTypes))
+            .Where(m => walk.Below(m.DeclaringTypeId)
+                || (external && open.Contains(m.DeclaringTypeId))
+                || (inherited && walk.InheritedBelow(m.DeclaringTypeId)))
+            .Select(m => m.NodeId)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private IEnumerable<string> Supertypes(string key) =>
+        (types.TryGetValue(key, out var defined) ? defined.SelectMany(t => t.Supertypes) : [])
+            .Concat(implicitSupertypes.GetValueOrDefault(key) ?? []);
+
+    // An external type might be one; an own type is one only if every definition of it is; a platform root is not.
+    private bool MayBeInterface(string key) =>
+        !closedRoots.Contains(key) && !(types.TryGetValue(key, out var defined) && defined.All(t => t.Definition is not InterfaceDefinition));
+
     // The memoized definition-level answer for one indexed assembly, rebound to the reference's own id and key. Keyed on
     // every input ResolveOwn reads, each part separately (a node id alone is not injective: names may contain '.' and
     // '`'), with counts so the variable-length lists cannot run into each other.
@@ -330,10 +464,11 @@ public sealed class MemberIndex
             site.Target.GenericArity.ToString(CultureInfo.InvariantCulture),
             site.Target.ParameterTypes.Count.ToString(CultureInfo.InvariantCulture),
             .. site.Target.ParameterTypes,
+            site.ReturnType,
             site.TypeArguments is null ? "?" : "=",
             .. site.TypeArguments ?? [],
         ]);
-        var found = resolved.GetOrAdd(memo, _ => ResolveOwn(assembly, site.NodeId, site.Key, site.Target, site.TypeArguments));
+        var found = resolved.GetOrAdd(memo, _ => ResolveOwn(assembly, site.NodeId, site.Key, site.Target, site.ReturnType, site.TypeArguments));
 
         return found with { NodeId = found.Definition is null ? site.NodeId : found.NodeId, ClassificationKey = site.Key };
     }
@@ -350,26 +485,32 @@ public sealed class MemberIndex
     // Into an indexed assembly. Not an instantiation: the reference's signature is the definition's, so only an exact
     // node id can match. An instantiation: CCI has substituted the type arguments into the reference's parameters
     // (and kept no unspecialized version), so every same-shaped candidate is rendered with the same substitution and
-    // compared exactly. A candidate is never excluded on a guess: two that render alike stay Ambiguous. When nothing
-    // can be checked - arguments that cannot be recovered, or a substituted signature that rendered <unknown> (CCI's
-    // reference truncates at its real depth, the substituted candidate at another, so a text match on it proves
-    // nothing) - nothing is excluded: every same-shaped candidate is kept, and even a lone one is Ambiguous. The
-    // exact branch needs no such guard: the true definition renders exactly as its own reference does.
-    private MethodResolution ResolveOwn(string assembly, string nodeId, string key, MethodIdentity target, IReadOnlyList<string>? typeArguments)
+    // compared exactly, return type included. A candidate is never excluded on a guess: two that render alike stay
+    // Ambiguous. The return type is not in a node id, so it is what separates a sibling that shares one (an own
+    // `int Q()` beside the `string Q()` a reference names, which the CLR looks up in a base type instead: review S1
+    // C2); no match at all is Unresolved. When nothing can be checked - arguments that cannot be recovered, or a
+    // signature that rendered truncated (<unknown>) or with a clamped array rank, so that a text match proves nothing
+    // (CCI's reference truncates at its real depth, a candidate at another) - nothing is excluded: every same-shaped
+    // candidate is kept, and even a lone one is Ambiguous.
+    private MethodResolution ResolveOwn(string assembly, string nodeId, string key, MethodIdentity target, string returnType, IReadOnlyList<string>? typeArguments)
     {
+        var truncated = target.ParameterTypes.Any(IsTruncated) || IsTruncated(returnType);
         var cannotCheck = typeArguments switch
         {
             null => "the instantiation's type arguments could not be recovered",
-            { Count: > 0 } when target.ParameterTypes.Any(p => p.Contains(CanonicalName.UnknownPart, StringComparison.Ordinal))
-                => "the instantiated signature could not be read in full",
+            { Count: > 0 } when truncated => "the instantiated signature could not be read in full",
+            { Count: 0 } when truncated => "the signature could not be read in full",
             _ => null,
         };
-        var sameShape = typeArguments is { Count: 0 }
+        var sameShape = typeArguments is { Count: 0 } && cannotCheck is null
             ? []
             : InAssembly(byShape, Shape(CanonicalName.NodeId(target.DeclaringType), target.MethodName, target.GenericArity, target.ParameterTypes.Count), assembly);
         var matches = cannotCheck is not null || typeArguments is null ? sameShape
-            : typeArguments.Count == 0 ? InAssembly(byNodeId, CanonicalName.NodeId(target), assembly)
-            : sameShape.Where(m => ModelNames.ParameterTypes(m.Definition, typeArguments).SequenceEqual(target.ParameterTypes, StringComparer.Ordinal)).ToArray();
+            : typeArguments.Count == 0
+                ? InAssembly(byNodeId, CanonicalName.NodeId(target), assembly)
+                    .Where(m => ModelNames.ReturnType(m.Definition, []) == returnType).ToArray()
+            : sameShape.Where(m => ModelNames.ParameterTypes(m.Definition, typeArguments).SequenceEqual(target.ParameterTypes, StringComparer.Ordinal)
+                && ModelNames.ReturnType(m.Definition, typeArguments) == returnType).ToArray();
 
         return (matches.Length, cannotCheck) switch
         {
@@ -382,29 +523,89 @@ public sealed class MemberIndex
         };
     }
 
-    private static IndexedType IndexType(string assembly, string nodeId, ITypeDefinition type, HashSet<string> assemblies, HashSet<string> ownTypeIds)
+    // A supertype is keyed where the CLR lands it (TypeScope). A struct's base, System.ValueType, is implicit in Model;
+    // it is what makes a struct's ToString an override of Object's.
+    private static (IndexedType Type, int Unresolved) IndexType(string assembly, string nodeId, ITypeDefinition type, TypeScope scope)
     {
-        var supertypes = type switch
+        var supertypes = (type switch
         {
             ClassDefinition c => Prepend(c.Base, c.Interfaces),
             StructDefinition s => s.Interfaces.AsEnumerable(),
             InterfaceDefinition i => i.Interfaces.AsEnumerable(),
             _ => [],
-        };
-        return new IndexedType(
-            assembly,
-            nodeId,
-            type,
-            supertypes.Select(s => SupertypeId(s, assemblies, ownTypeIds)).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray());
+        }).Select(scope.Of).ToArray();
+        IEnumerable<string> implicitBase = type is StructDefinition ? ["System.ValueType"] : [];
+        return (
+            new IndexedType(
+                assembly,
+                nodeId,
+                type,
+                supertypes.SelectMany(s => s.Keys).Concat(implicitBase).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray()),
+            supertypes.Count(s => s.Unresolved));
     }
 
-    // A supertype declared by an unindexed assembly keeps its bare id unless an indexed type shares it - then the
-    // platform System.IDisposable and a package's own System.IDisposable must stay two different supertypes.
-    private static string SupertypeId(IBasicType supertype, HashSet<string> assemblies, HashSet<string> ownTypeIds)
+    // See IsOpen. Iterative with a depth bound, since the chain is attacker-controlled: past the bound, or on an unreadable
+    // base, a type counts as open (over-approximate). A base-class cycle counts as closed at the repeat.
+    private static HashSet<string> OpenTypes(IReadOnlyDictionary<string, IReadOnlyList<IndexedType>> types, TypeScope scope)
     {
-        var id = CanonicalName.NodeId(ModelNames.Of(supertype));
-        var assembly = Guard<string?>(() => supertype.ContainingAssembly?.Name, null);
-        return ownTypeIds.Contains(id) && (assembly is null || !assemblies.Contains(assembly)) ? Qualified(assembly, id) : id;
+        var open = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var start in types.Keys)
+        {
+            var chain = new HashSet<string>(StringComparer.Ordinal);
+            var frontier = new List<string> { start };
+            var isOpen = false;
+            for (var depth = 0; !isOpen && frontier.Count > 0; depth++)
+            {
+                var bases = frontier.Where(chain.Add)
+                    .SelectMany(id => types[id])
+                    .Select(t => Guard<IReadOnlyList<string>?>(() => t.Definition is ClassDefinition { Base: { } b } ? scope.Of(b).Keys : [], null))
+                    .ToArray();
+                isOpen = depth > MaxBaseDepth || bases.Any(b => b is null)
+                    || bases.SelectMany(b => b!).Any(k => !types.ContainsKey(k) && !closedRoots.Contains(k));
+                frontier = bases.SelectMany(b => b!).Where(types.ContainsKey).Distinct(StringComparer.Ordinal).ToList();
+            }
+            if (isOpen)
+                open.Add(start);
+        }
+        return open;
+    }
+
+    // An override's parameters are the declared method's, exactly, after substitution - but a reference carries
+    // substitutions the override does not (A1 review C1), so a position settles only when both sides are concrete: a
+    // generic parameter (!0, !!0) or an unreadable part on either side matches anything. Over-matches only.
+    private static bool MayOverride(IReadOnlyList<string> declared, IReadOnlyList<string> candidate) =>
+        declared.Zip(candidate).All(p => p.First == p.Second || IsUnsettled(p.First) || IsUnsettled(p.Second));
+
+    private static bool IsUnsettled(string rendered) =>
+        rendered.Contains('!', StringComparison.Ordinal) || IsTruncated(rendered);
+
+    // A rendering that stands for more than one type: cut at the depth bound, or an array rank clamped to the maximum.
+    private static bool IsTruncated(string rendered) =>
+        rendered.Contains(CanonicalName.UnknownPart, StringComparison.Ordinal) || rendered.Contains(clampedRank, StringComparison.Ordinal);
+
+    // The name a method implements: its own, or the last segment of a C# explicit implementation's
+    // ("System.Collections.Generic.IEnumerator<System.String>.get_Current" implements "get_Current"). Dots inside <...>
+    // and a leading dot (".ctor") do not count.
+    private static string ImplementedName(string? name)
+    {
+        if (name is null)
+            return CanonicalName.UnknownPart;
+        var depth = 0;
+        for (var i = name.Length - 1; i > 0; i--)
+        {
+            switch (name[i])
+            {
+                case '>':
+                    depth++;
+                    break;
+                case '<':
+                    depth--;
+                    break;
+                case '.' when depth == 0:
+                    return name[(i + 1)..];
+            }
+        }
+        return name;
     }
 
     private static IndexedMethod IndexMethod(IndexedType type, MethodDefinition method)
@@ -435,6 +636,9 @@ public sealed class MemberIndex
     private static string Shape(string typeNodeId, string? name, int arity, int parameters) =>
         Key([typeNodeId, name ?? CanonicalName.UnknownPart, arity.ToString(CultureInfo.InvariantCulture), parameters.ToString(CultureInfo.InvariantCulture)]);
 
+    private static string ImplementedShape(string name, int arity, int parameters) =>
+        Key([name, arity.ToString(CultureInfo.InvariantCulture), parameters.ToString(CultureInfo.InvariantCulture)]);
+
     // Length-prefixed, so no choice of part contents (metadata names may hold any character) makes two different
     // part lists one key.
     private static string Key(IEnumerable<string> parts) =>
@@ -464,16 +668,61 @@ public sealed class MemberIndex
     private readonly IReadOnlyDictionary<string, IReadOnlyList<IndexedMethod>> byNodeId;
     private readonly IReadOnlyDictionary<string, IReadOnlyList<IndexedMethod>> byShape;
     private readonly IReadOnlyDictionary<MethodDefinition, IndexedMethod> ownMethods;
+    private readonly IReadOnlyDictionary<string, IReadOnlyList<IndexedMethod>> byImplementedShape;
     private readonly HashSet<string> assemblySet;
     private readonly IReadOnlyDictionary<string, TypeForwarders> forwarders;
+    private readonly TypeScope scope;
+    private readonly IReadOnlySet<string> open;
 
     // Resolution of a reference into an indexed assembly, keyed on every input ResolveOwn reads (see Defined) and
     // rebound to each reference's own id and key on a hit; memoized so a repeated call site costs one candidate scan.
     private readonly ConcurrentDictionary<string, MethodResolution> resolved = new(StringComparer.Ordinal);
+
+    // DispatchTargets per (declared type keys, implemented name, arity, parameter types, static).
+    private readonly ConcurrentDictionary<string, IReadOnlyList<string>> dispatched = new(StringComparer.Ordinal);
+
+    // Platform bases an open-ness walk stops at: every own type's chain may end in one without hiding a supertype
+    // (implicitSupertypes links each to System.Object).
+    private static readonly HashSet<string> closedRoots = new(
+        ["System.Object", "System.ValueType", "System.Enum", "System.Delegate", "System.MulticastDelegate"], StringComparer.Ordinal);
+
+    // Supertypes of platform types the index cannot see, under their bare ids (generic arguments stripped, like every
+    // key): the value-type and delegate roots, which Model leaves implicit (IndexType adds a struct's ValueType), and
+    // the BCL collection interfaces, whose bases a hand-written InterfaceImpl may omit (review S1 W2, W3). Other
+    // external interfaces' bases stay unknown. A package shadowing these names is not modelled.
+    private static readonly Dictionary<string, string[]> implicitSupertypes = new(StringComparer.Ordinal)
+    {
+        ["System.ValueType"] = ["System.Object"],
+        ["System.Enum"] = ["System.ValueType"],
+        ["System.Delegate"] = ["System.Object"],
+        ["System.MulticastDelegate"] = ["System.Delegate"],
+        ["System.Collections.ICollection"] = ["System.Collections.IEnumerable"],
+        ["System.Collections.IList"] = ["System.Collections.ICollection"],
+        ["System.Collections.IDictionary"] = ["System.Collections.ICollection"],
+        ["System.Collections.Generic.IEnumerable`1"] = ["System.Collections.IEnumerable"],
+        ["System.Collections.Generic.IEnumerator`1"] = ["System.Collections.IEnumerator", "System.IDisposable"],
+        ["System.Collections.Generic.ICollection`1"] = ["System.Collections.Generic.IEnumerable`1"],
+        ["System.Collections.Generic.IList`1"] = ["System.Collections.Generic.ICollection`1"],
+        ["System.Collections.Generic.ISet`1"] = ["System.Collections.Generic.ICollection`1"],
+        ["System.Collections.Generic.IDictionary`2"] = ["System.Collections.Generic.ICollection`1"],
+        ["System.Collections.Generic.IReadOnlyCollection`1"] = ["System.Collections.Generic.IEnumerable`1"],
+        ["System.Collections.Generic.IReadOnlyList`1"] = ["System.Collections.Generic.IReadOnlyCollection`1"],
+        ["System.Collections.Generic.IReadOnlyDictionary`2"] = ["System.Collections.Generic.IReadOnlyCollection`1"],
+        ["System.Collections.Generic.IAsyncEnumerator`1"] = ["System.IAsyncDisposable"],
+    };
+
+    // The array suffix every rank at or above CanonicalName's clamp renders as.
+    private static readonly string clampedRank = CanonicalName.ArrayOf("T", int.MaxValue)[1..];
+
+    private const int MaxBaseDepth = 256;
+    private const int MaxHierarchyWalk = 4096;
     #endregion
 
     #region Child types
-    /// <summary>An indexed type definition and the definition-normalized node ids of its base and interfaces.</summary>
+    /// <summary>
+    /// An indexed type definition and the subtype-map keys of its base and interfaces: definition-normalized node ids,
+    /// following forwarders, <see cref="Qualified"/> when external and shadowed by an own type.
+    /// </summary>
     public sealed record IndexedType(string Assembly, string NodeId, ITypeDefinition Definition, IReadOnlyList<string> Supertypes);
 
     /// <summary>An indexed method definition with its identity, node id and declaring type's node id.</summary>
@@ -481,13 +730,115 @@ public sealed class MemberIndex
 
     // One reference being resolved: its own id and key, the definition-level identity behind it, and the
     // instantiation's type arguments.
-    private readonly record struct Site(string NodeId, string Key, MethodIdentity Target, IReadOnlyList<string>? TypeArguments)
+    private readonly record struct Site(string NodeId, string Key, MethodIdentity Target, string ReturnType, IReadOnlyList<string>? TypeArguments);
+
+    // Where a type reference lands, as subtype-map keys (A2 spec §1). One answer for supertypes and for a call site's
+    // declared type, so CHA joins them on the same key: a type the CLR finds in an indexed assembly (following its
+    // forwarders, as Follow does for methods) keeps its bare id; one in an unindexed assembly keeps it too, unless an own
+    // type shares it, then it is Qualified by that assembly. A place the walk cannot settle is unresolved and keyed by
+    // the bare id (and the Qualified one, when shadowed and the assembly is unreadable): over-approximate, and counted.
+    private sealed class TypeScope(HashSet<string> assemblies, IReadOnlyDictionary<string, TypeForwarders> forwarders, IReadOnlyDictionary<string, HashSet<string>> definedIn)
     {
-        // The outermost declaring type, which is what a forwarder names; null when unreadable or truncated.
-        public (string Namespace, string Name)? Outermost =>
-            Target.DeclaringType.NestingChain is [var name, ..] && name != CanonicalName.UnknownPart
-                ? (Target.DeclaringType.Namespace ?? string.Empty, name)
-                : null;
+        #region Methods
+        public TypeKeys Of(IBasicType? type) =>
+            Of(Guard<string?>(() => type?.ContainingAssembly?.Name, null), ModelNames.Of(type));
+
+        public TypeKeys Of(string? assembly, TypeIdentity identity)
+        {
+            var id = CanonicalName.NodeId(identity);
+            if (assembly is null)
+                return new(definedIn.ContainsKey(id) ? [id, Qualified(null, id)] : [id], true);
+            var chain = identity.NestingChain ?? [];
+            return memo.GetOrAdd(
+                Key([assembly, identity.Namespace ?? string.Empty, chain.Count.ToString(CultureInfo.InvariantCulture), .. chain, identity.GenericArity.ToString(CultureInfo.InvariantCulture)]),
+                _ => Land(assembly, id, identity));
+        }
+
+        private TypeKeys Land(string assembly, string id, TypeIdentity identity)
+        {
+            if (!assemblies.Contains(assembly))
+                return new([External(assembly, id)], false);
+            var (places, _) = Walk<string?>(
+                assembly,
+                Outermost(identity),
+                assemblies,
+                forwarders,
+                current => External(current, id),
+                current => definedIn.TryGetValue(id, out var where) && where.Contains(current) ? id : null,
+                place => place is null,
+                (_, _) => null);
+            return new(places.Select(p => p ?? id).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(), places.Any(p => p is null));
+        }
+
+        private string External(string assembly, string id) => definedIn.ContainsKey(id) ? Qualified(assembly, id) : id;
+        #endregion
+
+        #region Fields
+        private readonly ConcurrentDictionary<string, TypeKeys> memo = new(StringComparer.Ordinal);
+        #endregion
+    }
+
+    // The subtype-map keys a type reference stands for, and whether any place it lands was unresolved.
+    private sealed record TypeKeys(IReadOnlyList<string> Keys, bool Unresolved);
+
+    // The hierarchy questions of one Dispatch, against one set of declared keys. What a walk settles is kept for the
+    // next candidate - every type on a path that reaches a key is below it, every type of a walk that finds none is
+    // not - so a long chain is walked about once per declared shape, not once per candidate (review S1 W1, case H).
+    // Each walk is bounded, since the hierarchy is attacker-controlled: past the bound it counts as a match, and
+    // nothing is recorded. Lives for one Dispatch only, so nothing per hierarchy is retained.
+    private sealed class HierarchyWalk(MemberIndex index, IReadOnlySet<string> keys)
+    {
+        #region Methods
+        // True when typeId is a proper subtype of a key: up the indexed supertypes and the fixed platform links.
+        public bool Below(string typeId) =>
+            Search(typeId, index.Supertypes, t => keys.Contains(t) || below.Contains(t), below, notBelow);
+
+        // True when typeId is an own class (not a declared type) with an own subtype below a key: the CLR fills an
+        // interface slot from a method the subtype inherits (review S1 C1).
+        public bool InheritedBelow(string typeId) =>
+            !keys.Contains(typeId)
+            && index.types.TryGetValue(typeId, out var defined) && defined.Any(t => t.Definition is not InterfaceDefinition)
+            && Search(typeId, index.DirectSubtypes, t => inherits.Contains(t) || keys.Contains(t) || Below(t), inherits, inheritsNot);
+
+        // Breadth-first from start (exclusive) along next, until a type satisfies hit. On a hit, start and every type on
+        // the path to the hit are recorded in yes; on a full search without one, every type seen is recorded in no.
+        private static bool Search(string start, Func<string, IEnumerable<string>> next, Func<string, bool> hit, HashSet<string> yes, HashSet<string> no)
+        {
+            if (yes.Contains(start))
+                return true;
+            if (no.Contains(start))
+                return false;
+            var parent = new Dictionary<string, string?>(StringComparer.Ordinal) { [start] = null };
+            var queue = new Queue<string>([start]);
+            while (queue.TryDequeue(out var current))
+            {
+                foreach (var step in next(current))
+                {
+                    if (!parent.TryAdd(step, current))
+                        continue;
+                    if (hit(step))
+                    {
+                        for (string? node = current; node is not null; node = parent[node])
+                            yes.Add(node);
+                        return true;
+                    }
+                    if (parent.Count > MaxHierarchyWalk)
+                        return true;
+                    if (!no.Contains(step))
+                        queue.Enqueue(step);
+                }
+            }
+            no.UnionWith(parent.Keys);
+            return false;
+        }
+        #endregion
+
+        #region Fields
+        private readonly HashSet<string> below = new(StringComparer.Ordinal);
+        private readonly HashSet<string> notBelow = new(StringComparer.Ordinal);
+        private readonly HashSet<string> inherits = new(StringComparer.Ordinal);
+        private readonly HashSet<string> inheritsNot = new(StringComparer.Ordinal);
+        #endregion
     }
     #endregion
 }

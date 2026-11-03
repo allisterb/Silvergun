@@ -22,7 +22,9 @@ public sealed record MechanismGraph(
 /// CrossAssembly rows see the Dependency side), each loaded with <see cref="AssemblyDisassembler"/>. It is whatever
 /// <c>src/</c> builds today: phase A1 records static targets only, and A2 adds its CHA, state-machine and
 /// type-initializer edges inside <see cref="MethodGraph.Build"/> itself — so bumping
-/// <see cref="MechanismGroundTruth.CurrentPhase"/> to A2 before those land turns the A2 rows red, never green.
+/// <see cref="MechanismGroundTruth.CurrentPhase"/> past the slice that has landed (today <see cref="Phase.A2Dispatch"/>,
+/// CHA fan-out) turns the later rows red, never green. <see cref="BuildStatic"/> is the same graph with every
+/// <see cref="MethodEdgeKind.Dispatch"/> edge removed: what the A1 graph saw.
 /// </para>
 /// <para>
 /// <see cref="MechanismGraph.CapabilityOf"/> classifies <see cref="MethodNodeKind.External"/> nodes only, with
@@ -40,12 +42,18 @@ public static class MechanismGraphSource
             : throw new NotSupportedException(
                 $"Phase {phase} needs the bodyless-extern classification rule (reachability ADR), which MechanismGraphSource does not model yet.");
 
-    /// <summary>The matcher's view of a real graph: every node a key, successors distinct and in edge order.</summary>
-    public static MechanismGraph From(MethodGraph graph)
+    /// <summary>The fixture graph without its <see cref="MethodEdgeKind.Dispatch"/> edges (the static call-site targets only).</summary>
+    public static MechanismGraph BuildStatic() => staticGraph.Value;
+
+    /// <summary>
+    /// The matcher's view of a real graph: every node a key, successors distinct and in edge order — only the edges
+    /// <paramref name="keep"/> accepts, when given.
+    /// </summary>
+    public static MechanismGraph From(MethodGraph graph, Func<MethodEdge, bool>? keep = null)
     {
         var adjacency = graph.Nodes.ToDictionary(
             n => n.NodeId,
-            n => (IReadOnlyList<string>)graph.Successors(n.NodeId).Select(e => e.To).Distinct(StringComparer.Ordinal).ToArray(),
+            n => (IReadOnlyList<string>)graph.Successors(n.NodeId).Where(e => keep?.Invoke(e) ?? true).Select(e => e.To).Distinct(StringComparer.Ordinal).ToArray(),
             StringComparer.Ordinal);
         var external = graph.Nodes.Where(n => n.Kind == MethodNodeKind.External)
             .ToDictionary(n => n.NodeId, n => n.ClassificationKey, StringComparer.Ordinal);
@@ -59,14 +67,17 @@ public static class MechanismGraphSource
     }
 
     // Built once per test run: plain strings only, so the Analysis.Net hosts are released as soon as it exists.
-    private static MechanismGraph BuildFixtureGraph()
+    private static (MechanismGraph Full, MechanismGraph Static) BuildFixtureGraphs()
     {
         using var assemblies = ModelAssemblies.Load(MechanismFixtureAssemblies.Fixture, MechanismFixtureAssemblies.Dependency);
-        return From(MethodGraph.Build(assemblies.Index()));
+        var built = MethodGraph.Build(assemblies.Index());
+        return (From(built), From(built, e => e.Kind != MethodEdgeKind.Dispatch));
     }
     #endregion
 
     #region Fields
-    private static readonly Lazy<MechanismGraph> graph = new(BuildFixtureGraph);
+    private static readonly Lazy<(MechanismGraph Full, MechanismGraph Static)> graphs = new(BuildFixtureGraphs);
+    private static readonly Lazy<MechanismGraph> graph = new(() => graphs.Value.Full);
+    private static readonly Lazy<MechanismGraph> staticGraph = new(() => graphs.Value.Static);
     #endregion
 }

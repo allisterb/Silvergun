@@ -22,6 +22,15 @@ public sealed record ModelCallSite(MemberIndex.IndexedMethod Caller, uint Offset
 
     /// <summary>The name of the assembly that declares the reference's type, or null if unreadable.</summary>
     public string? DeclaringAssembly => Target.ContainingType?.ContainingAssembly?.Name;
+
+    /// <summary>
+    /// Whether the instruction dispatches virtually (<c>callvirt</c>, <c>ldvirtftn</c>) — the
+    /// <c>virtualSite</c> argument of <see cref="MemberIndex.DispatchTargets"/>.
+    /// </summary>
+    public bool IsVirtual => Kind is MethodEdgeKind.CallVirt or MethodEdgeKind.Ldvirtftn;
+
+    /// <summary>What <see cref="MemberIndex.DispatchTargets"/> answers for this site in <paramref name="index"/>.</summary>
+    public IReadOnlyList<string>? DispatchTargets(MemberIndex index) => index.DispatchTargets(Target, index.Resolve(Target), IsVirtual);
     #endregion
 
     #region Methods

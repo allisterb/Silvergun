@@ -162,12 +162,13 @@ public sealed class MemberIndexCoverageTests : IClassFixture<MechanismMethodGrap
     /// <summary>
     /// The control for the W2 cases below: a hand-built reference (no host, no metadata) to a real fixture method
     /// resolves Exact, and one into an unindexed assembly External — so the synthetic references exercise the real
-    /// paths, and only the unreadable assembly name makes the difference.
+    /// paths, and only the unreadable assembly name makes the difference. Since A2 S1b (review C2) Exact also checks the
+    /// return type, so the control declares the real one, <c>string ReadsEnv()</c>.
     /// </summary>
     [Fact]
     public void Resolve_AHandBuiltReference_TakesTheSamePathsAsARealOne()
     {
-        var own = fixture.Index.Resolve(Reference("MechanismFixture.Direct", "Probes", "ReadsEnv", new Model.AssemblyReference(MechanismFixtureAssemblies.FixtureName)));
+        var own = fixture.Index.Resolve(Reference("MechanismFixture.Direct", "Probes", "ReadsEnv", new Model.AssemblyReference(MechanismFixtureAssemblies.FixtureName), "String"));
         var external = fixture.Index.Resolve(Reference("Some.Platform", "Thing", "Run", new Model.AssemblyReference("Some.Platform")));
 
         Assert.Equal(ResolutionKind.Exact, own.Kind);
@@ -175,6 +176,25 @@ public sealed class MemberIndexCoverageTests : IClassFixture<MechanismMethodGrap
         Assert.True(own.IsOwn);
         Assert.Equal(ResolutionKind.External, external.Kind);
         Assert.Equal("Some.Platform", external.Assembly);
+    }
+
+    /// <summary>
+    /// A2 S1b (review C2): a node id carries no return type, so a reference that names a real method's node id but a
+    /// DIFFERENT return type (<c>void ReadsEnv()</c> for the fixture's <c>string ReadsEnv()</c>) does not verify it — the
+    /// CLR would not bind it there either. Unresolved, never Exact to the string method.
+    /// </summary>
+    [Fact]
+    public void Resolve_AHandBuiltReferenceWithTheWrongReturnType_IsUnresolved()
+    {
+        var resolution = fixture.Index.Resolve(Reference("MechanismFixture.Direct", "Probes", "ReadsEnv", new Model.AssemblyReference(MechanismFixtureAssemblies.FixtureName), "Void"));
+
+        Assert.Equal(ResolutionKind.Unresolved, resolution.Kind);
+        Assert.False(resolution.IsOwn);
+        Assert.Null(resolution.Definition);
+        Assert.Empty(resolution.Candidates);
+        Assert.Equal("MechanismFixture.Direct.Probes.ReadsEnv()", resolution.NodeId);
+        Assert.Equal(MechanismFixtureAssemblies.FixtureName, resolution.Assembly);
+        Assert.Equal("no indexed definition matches", resolution.Reason);
     }
 
     [Fact]
@@ -200,9 +220,9 @@ public sealed class MemberIndexCoverageTests : IClassFixture<MechanismMethodGrap
         Assert.Equal("declaring assembly unreadable", resolution.Reason);
     }
 
-    // A parameterless static method reference built by hand: namespace.type.name() in `assembly`.
-    private static ModelTypes.MethodReference Reference(string space, string type, string name, Model.IAssemblyReference? assembly) =>
-        new(name, new ModelTypes.BasicType("Void") { ContainingNamespace = "System" })
+    // A parameterless static method reference built by hand: System.{returns} namespace.type.name() in `assembly`.
+    private static ModelTypes.MethodReference Reference(string space, string type, string name, Model.IAssemblyReference? assembly, string returns = "Void") =>
+        new(name, new ModelTypes.BasicType(returns) { ContainingNamespace = "System" })
         {
             ContainingType = new ModelTypes.BasicType(type) { ContainingNamespace = space, ContainingAssembly = assembly },
             IsStatic = true,

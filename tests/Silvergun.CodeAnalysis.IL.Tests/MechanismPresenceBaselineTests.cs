@@ -72,6 +72,18 @@ public sealed class MechanismPresenceBaselineTests : IClassFixture<MechanismFixt
             // bodyless getpid DECLARATION (a NativeImport metadata finding), not on CallsNative, which calls it.
             // Expected by the spec's decision table (extern classification belongs to the reachability ADR).
             ["Opacity.PInvokeCapability"] = (false, false),
+            // A2 S1 dispatch mechanisms (measured 2026-11-02): the override/implementation that calls the sink has
+            // the finding; the caller that only dispatches to it does not.
+            ["ObjectVirtual.DescribesEnv"] = (true, false),
+            ["ObjectVirtual.DescribesSafe"] = (true, false),
+            ["ExplicitImpl.CallsExplicit"] = (true, false),
+            ["GenericInterface.ComparesThroughInterface"] = (true, false),
+            ["StaticAbstract.BuildsEnv"] = (true, false),
+            ["OpenHierarchy.FlushesEnvStream"] = (true, false),
+            ["OpenHierarchy.FlushesSafeStream"] = (true, false),
+            // S1b (review C1), measured 2026-11-03: the inherited base method has the finding, the caller does not.
+            ["InheritedImpl.CallsInherited"] = (true, false),
+            ["InheritedImpl.CallsPlainInherited"] = (true, false),
         };
 
     public static TheoryData<string> PresentRowsWithCapability() =>
@@ -152,13 +164,22 @@ public sealed class MechanismPresenceBaselineTests : IClassFixture<MechanismFixt
                 "Async.Lambda",                       // state-machine edge
                 "Async.LocalFunction",                // state-machine edge
                 "Async.Method",                       // state-machine edge
+                "ExplicitImpl.CallsExplicit",         // CHA: explicit implementation name
+                "GenericInterface.ComparesThroughInterface", // CHA from IComparer<string>.Compare
                 "Generics.ConstrainedCall",           // CHA: constrained callvirt IBaz.Baz -> A.Baz
+                "InheritedImpl.CallsInherited",       // CHA: interface slot filled by an inherited method (C1)
+                "InheritedImpl.CallsPlainInherited",  // CHA: the same, base method non-virtual in source (C1)
                 "Interface.CallsThroughInterface",    // CHA
                 "Interface.ShouldHaveNoCapability",   // CHA
                 "Iterator.Consumer",                  // CHA from System.Collections.IEnumerator.MoveNext
                 "Iterator.ConsumerOfSafeSequence",    // CHA from System.Collections.IEnumerator.MoveNext
                 "Iterator.Stub",                      // newobj closure => MoveNext edge
+                "ObjectVirtual.DescribesEnv",         // CHA from System.Object.ToString (D1)
+                "ObjectVirtual.DescribesSafe",        // CHA from System.Object.ToString (D1)
                 "Opacity.PInvokeCapability",          // extern classification (Reachability)
+                "OpenHierarchy.FlushesEnvStream",     // CHA open-type rule from System.IO.Stream.Flush (D2)
+                "OpenHierarchy.FlushesSafeStream",    // CHA open-type rule from System.IO.Stream.Flush (D2)
+                "StaticAbstract.BuildsEnv",           // CHA static rule: constrained. call IFactory.Make
                 "StaticInit.TriggersExplicitInit",    // TypeInitializer edge
                 "StaticInit.TriggersInit",            // TypeInitializer edge
                 "TypeTest.CallsMaybeTouch",           // CHA
@@ -234,6 +255,14 @@ public sealed class MechanismPresenceBaselineTests : IClassFixture<MechanismFixt
         "EnvironmentProbe Call MechanismFixture.DelegateLocal.LocalDelegates::ReadsEnv -> System.Environment.GetEnvironmentVariable",
         "EnvironmentProbe Call MechanismFixture.Dependency.EnvReader::Read -> System.Environment.GetEnvironmentVariable",
         "EnvironmentProbe Call MechanismFixture.Direct.Probes::ReadsEnv -> System.Environment.GetEnvironmentVariable",
+        // A2 S1's dispatch mechanisms: one sink per interesting override/implementation, none on the twins.
+        "EnvironmentProbe Call MechanismFixture.ExplicitImpl.EnvExplicitProbe::MechanismFixture.ExplicitImpl.IExplicitProbe.Run -> System.Environment.GetEnvironmentVariable",
+        "EnvironmentProbe Call MechanismFixture.GenericInterface.EnvOrder::Compare -> System.Environment.GetEnvironmentVariable",
+        "EnvironmentProbe Call MechanismFixture.InheritedImpl.EnvBase::Run -> System.Environment.GetEnvironmentVariable",
+        "EnvironmentProbe Call MechanismFixture.InheritedImpl.PlainBase::Run -> System.Environment.GetEnvironmentVariable",
+        "EnvironmentProbe Call MechanismFixture.ObjectVirtual.EnvDescribed::ToString -> System.Environment.GetEnvironmentVariable",
+        "EnvironmentProbe Call MechanismFixture.OpenHierarchy.EnvStream::Flush -> System.Environment.GetEnvironmentVariable",
+        "EnvironmentProbe Call MechanismFixture.StaticAbstract.EnvFactory::Make -> System.Environment.GetEnvironmentVariable",
         "EnvironmentProbe Call MechanismFixture.Generics.A::Baz -> System.Environment.GetEnvironmentVariable",
         "EnvironmentProbe Call MechanismFixture.Generics.Box::Run -> System.Environment.GetEnvironmentVariable",
         "EnvironmentProbe Call MechanismFixture.Generics.Closures.<>c__DisplayClass0_0::<Wraps>b__0 -> System.Environment.GetEnvironmentVariable",

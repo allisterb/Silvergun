@@ -78,6 +78,14 @@ public static class ModelNames
         method is null ? [] : Guard(() => ParameterNames(method, typeArguments), []);
 
     /// <summary>
+    /// The rendered return type of <paramref name="method"/>, substituted exactly as <see cref="ParameterTypes"/>
+    /// substitutes a parameter at the same depth. Not part of any node id (ADR 0019); it tells apart definitions
+    /// that share one. <see cref="CanonicalName.UnknownPart"/> when unreadable.
+    /// </summary>
+    public static string ReturnType(IMethodReference? method, IReadOnlyList<string> typeArguments) =>
+        method is null ? CanonicalName.UnknownPart : Guard(() => TypeName(method.ReturnType, 1, typeArguments), CanonicalName.UnknownPart);
+
+    /// <summary>
     /// The rendered generic arguments of <paramref name="type"/>, cumulative over its nesting chain in signature
     /// position — one per type generic parameter <c>!n</c> of the definition; empty for a definition or a
     /// non-generic chain. Unlike the node-id rendering, this walks the chain outward: CCIProvider prepends a

@@ -26,7 +26,7 @@ public enum MethodEdgeKind
     /// <summary>A <c>call</c> (or <c>jmp</c>) to its static target.</summary>
     Call,
 
-    /// <summary>A <c>callvirt</c> to its declared target; overrides are added by CHA in phase A2.</summary>
+    /// <summary>A <c>callvirt</c> to its declared target; overrides are <see cref="Dispatch"/> edges.</summary>
     CallVirt,
 
     /// <summary>A <c>newobj</c> to the constructor.</summary>
@@ -42,7 +42,14 @@ public enum MethodEdgeKind
     StateMachine,
 
     /// <summary>From a method that touches a type to that type's static constructor (phase A2).</summary>
-    TypeInitializer
+    TypeInitializer,
+
+    /// <summary>
+    /// From a virtual (or static abstract) call site to an own override or implementation it may run instead of its
+    /// declared target, by class-hierarchy analysis (<see cref="MemberIndex.DispatchTargets"/>). Added beside the
+    /// site's own edge, at the same offset.
+    /// </summary>
+    Dispatch
 }
 
 /// <summary>Why part of the program could not be followed. Opacity is reported, never dropped.</summary>
@@ -116,7 +123,8 @@ public sealed record ResolutionCounts(int Exact, int Substituted, int External, 
 /// <summary>
 /// What the build saw and what it could not see. "Could not analyze" must never read as "no capability", so this is a
 /// first-class part of the graph (ADR 0020 decision 8). <see cref="Index"/> carries what the member index itself
-/// could not read.
+/// could not read. <see cref="DispatchSites"/> counts the call sites CHA fanned out from (including those it found no
+/// override for), and <see cref="DispatchEdges"/> the <see cref="MethodEdgeKind.Dispatch"/> edges they produced.
 /// </summary>
 public sealed record GraphCoverage(
     IndexCoverage Index,
@@ -125,14 +133,16 @@ public sealed record GraphCoverage(
     int BodiesFailed,
     int CallSites,
     ResolutionCounts Resolutions,
+    int DispatchSites,
+    int DispatchEdges,
     bool Truncated,
     string? TruncatedBy);
 
 /// <summary>
-/// A call graph over the methods of a <see cref="MemberIndex"/> (ADR 0020). Phase A1 records each call site's
-/// <b>static</b> target from Analysis.Net's bytecode instructions — the rung below three-address code, which needs no
-/// stack simulation — and never runs the <c>Disassembler</c>. CHA fan-out of virtual calls, state-machine edges and
-/// type-initializer edges are added in phase A2.
+/// A call graph over the methods of a <see cref="MemberIndex"/> (ADR 0020). Each call site's <b>static</b> target comes
+/// from Analysis.Net's bytecode instructions — the rung below three-address code, which needs no stack simulation —
+/// and the <c>Disassembler</c> is never run. A virtual site, or a static call to an interface member, also gets a
+/// <see cref="MethodEdgeKind.Dispatch"/> edge to every own override or implementation CHA finds. State-machine and type-initializer edges are added later in phase A2.
 /// <para>
 /// Every collection is ordinal-sorted, so two builds over the same input are identical. Unresolved and ambiguous
 /// sites keep an edge to the reference's own node id as well as an opacity record, so no site is lost. Never throws.
@@ -241,7 +251,7 @@ public sealed class MethodGraph
                 [.. nodes.Values.OrderBy(n => n.NodeId, StringComparer.Ordinal)],
                 [.. edges.OrderBy(e => e.From, StringComparer.Ordinal).ThenBy(e => e.To, StringComparer.Ordinal).ThenBy(e => e.Kind).ThenBy(e => e.Offset)],
                 [.. opacities.OrderBy(o => o.Site, StringComparer.Ordinal).ThenBy(o => o.Offset).ThenBy(o => o.Kind).ThenBy(o => o.Detail, StringComparer.Ordinal)],
-                new GraphCoverage(index, methodsIndexed, bodiesRead, bodiesFailed, callSites, resolutions, truncatedBy is not null, truncatedBy));
+                new GraphCoverage(index, methodsIndexed, bodiesRead, bodiesFailed, callSites, resolutions, dispatchSites, dispatchEdges, truncatedBy is not null, truncatedBy));
 
         private void Visit(MemberIndex index, string caller, Model.IInstruction instruction)
         {
@@ -310,6 +320,18 @@ public sealed class MethodGraph
                     return;
                 edges.Add(new MethodEdge(caller, to, kind, offset));
             }
+
+            // CHA: the overrides this site may run instead. Own methods only, all already nodes.
+            if (index.DispatchTargets(target, resolution, kind is MethodEdgeKind.CallVirt or MethodEdgeKind.Ldvirtftn) is not { } overrides)
+                return;
+            dispatchSites++;
+            foreach (var to in overrides)
+            {
+                if (!Room(edges.Count, budget.MaxEdges, "edges"))
+                    return;
+                edges.Add(new MethodEdge(caller, to, MethodEdgeKind.Dispatch, offset));
+                dispatchEdges++;
+            }
         }
 
         // True while there is room; the first time a budget is hit the build is marked truncated and stops.
@@ -330,6 +352,8 @@ public sealed class MethodGraph
         private int bodiesRead;
         private int bodiesFailed;
         private int callSites;
+        private int dispatchSites;
+        private int dispatchEdges;
         private string? truncatedBy;
         #endregion
     }

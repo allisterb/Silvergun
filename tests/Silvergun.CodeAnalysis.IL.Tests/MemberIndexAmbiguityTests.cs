@@ -127,17 +127,30 @@ public sealed class MemberIndexAmbiguityTests
         Assert.Equal($"{BoxRun}: several definitions match the instantiated signature", opacity.Detail);
         Assert.Equal(2, graph.Edges.Count(e => e == new MethodEdge(RunsBox, BoxRun, MethodEdgeKind.Call, opacity.Offset)));
 
-        // One edge per (site, distinct candidate). A doubled definition is ONE candidate id, so most sites keep one
-        // edge; only Overloads<int>.M(t:)/M(i:) (M(!0), M(System.Int32)) and, since S2, Outer4<string>.Mid.Inner<int>
+        // One STATIC edge per (site, distinct candidate). A doubled definition is ONE candidate id, so most sites keep
+        // one edge; only Overloads<int>.M(t:)/M(i:) (M(!0), M(System.Int32)) and, since S2, Outer4<string>.Mid.Inner<int>
         // .Innermost<bool>.M(t:)/M(s:) (M(!0), M(System.String)) have two genuinely different candidates, and each of
         // those four sites exists once per copy: 4 sites x 2 copies x 1 extra candidate = 8 extra edges.
+        var staticEdges = graph.Edges.Where(e => e.Kind != MethodEdgeKind.Dispatch).ToArray();
         Assert.Equal(
             sites.Sum(s => index.Resolve(s.Target) is { Kind: ResolutionKind.Ambiguous } a ? a.Candidates.Count : 1),
-            graph.Edges.Count);
-        Assert.Equal(sites.Count + 8, graph.Edges.Count);
+            staticEdges.Length);
+        Assert.Equal(sites.Count + 8, staticEdges.Length);
         Assert.Equal(8, sites.Count(s => index.Resolve(s.Target).Candidates.Count == 2));
         Assert.Equal(MethodNodeKind.OwnWithBody, graph.Node(BoxRun)?.Kind);
         Assert.False(graph.Coverage.Truncated);
+
+        // A2 S1: an Ambiguous resolution has no Definition to rule dispatch out, so CHA still fans out from it (never
+        // drops a site on ambiguity). Every Dispatch edge is DispatchTargets' answer for its site, the coverage counts
+        // agree, and the doubled hierarchy is still reached: both copies of CallsThroughInterface reach EnvProbe.Run.
+        var expectedDispatch = sites
+            .SelectMany(s => (s.DispatchTargets(index) ?? []).Select(to => new MethodEdge(s.Caller.NodeId, to, MethodEdgeKind.Dispatch, s.Offset)))
+            .OrderBy(e => e.From, StringComparer.Ordinal).ThenBy(e => e.To, StringComparer.Ordinal).ThenBy(e => e.Offset)
+            .ToArray();
+        Assert.Equal(expectedDispatch, graph.Edges.Where(e => e.Kind == MethodEdgeKind.Dispatch));
+        Assert.Equal(expectedDispatch.Length, graph.Coverage.DispatchEdges);
+        Assert.Equal(sites.Count(s => s.DispatchTargets(index) is not null), graph.Coverage.DispatchSites);
+        Assert.Equal(2, graph.Edges.Count(e => e.Kind == MethodEdgeKind.Dispatch && e.From == CallsThroughInterface && e.To == EnvProbeRun));
     }
 
     /// <summary>
@@ -177,5 +190,7 @@ public sealed class MemberIndexAmbiguityTests
     private const string FooDefinition = "MechanismFixture.Generics.Constrained.Foo`1(!!0)";
     private const string HoldsString = "Silvergun.CodeAnalysis.IL.Tests.Fixture.GenericBox`1.Holds(System.String)";
     private const string HoldsDefinition = "Silvergun.CodeAnalysis.IL.Tests.Fixture.GenericBox`1.Holds(!0)";
+    private const string CallsThroughInterface = "MechanismFixture.Interface.Dispatch.CallsThroughInterface()";
+    private const string EnvProbeRun = "MechanismFixture.Interface.EnvProbe.Run()";
     #endregion
 }

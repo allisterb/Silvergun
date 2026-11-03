@@ -184,10 +184,16 @@ public sealed class MethodGraphAcceptanceTests : IClassFixture<MechanismMethodGr
     // ---- the graph against an independent walk -----------------------------------------------------------------
 
     /// <summary>
-    /// One edge per call-site instruction to the node <see cref="MemberIndex.Resolve"/> names — or, for an
-    /// <see cref="ResolutionKind.Ambiguous"/> site, one edge to EVERY candidate (S1: over-approximate, never pick one
-    /// and drop the rest) — each with the instruction's kind and IL offset; the whole edge sequence, compared element
-    /// by element.
+    /// The STATIC edges (every kind but <see cref="MethodEdgeKind.Dispatch"/>): one per call-site instruction to the
+    /// node <see cref="MemberIndex.Resolve"/> names — or, for an <see cref="ResolutionKind.Ambiguous"/> site, one edge
+    /// to EVERY candidate (S1: over-approximate, never pick one and drop the rest) — each with the instruction's kind
+    /// and IL offset; the whole edge sequence, compared element by element.
+    /// <para>
+    /// Since A2 S1 a dispatching site ALSO has one <see cref="MethodEdgeKind.Dispatch"/> edge, at its own offset, to
+    /// each node <see cref="MemberIndex.DispatchTargets"/> names for it — virtual for <c>callvirt</c>/<c>ldvirtftn</c>,
+    /// not for <c>call</c>/<c>newobj</c>/<c>ldftn</c> — and there is no Dispatch edge anywhere else; that sequence is
+    /// compared element by element too. Non-vacuous: the fixture's CHA rows' dispatch edges are among them.
+    /// </para>
     /// </summary>
     [Fact]
     public void Edges_AreOnePerCallSiteAndTarget_ToTheResolvedNodeOrEveryAmbiguousCandidate()
@@ -198,17 +204,63 @@ public sealed class MethodGraphAcceptanceTests : IClassFixture<MechanismMethodGr
                 : [new MethodEdge(s.Caller.NodeId, graph.Index.Resolve(s.Target).NodeId, s.Kind, s.Offset)])
             .OrderBy(e => e.From, StringComparer.Ordinal).ThenBy(e => e.To, StringComparer.Ordinal).ThenBy(e => e.Kind).ThenBy(e => e.Offset)
             .ToArray();
+        var expectedDispatch = graph.Sites
+            .SelectMany(s => (s.DispatchTargets(graph.Index) ?? [])
+                .Select(to => new MethodEdge(s.Caller.NodeId, to, MethodEdgeKind.Dispatch, s.Offset)))
+            .OrderBy(e => e.From, StringComparer.Ordinal).ThenBy(e => e.To, StringComparer.Ordinal).ThenBy(e => e.Offset)
+            .ToArray();
 
-        Assert.Equal(expected, graph.Graph.Edges);
+        Assert.Equal(expected, graph.Graph.Edges.Where(e => e.Kind != MethodEdgeKind.Dispatch));
+        Assert.Equal(expectedDispatch, graph.Graph.Edges.Where(e => e.Kind == MethodEdgeKind.Dispatch));
+
+        // Non-vacuous: interface, virtual, platform-declared (IEnumerator.MoveNext) and static-abstract fan-out.
+        Assert.Contains(new MethodEdge(Fixture("Interface.Dispatch.CallsThroughInterface()"), Fixture("Interface.EnvProbe.Run()"), MethodEdgeKind.Dispatch,
+            Assert.Single(graph.SitesIn(Fixture("Interface.Dispatch.CallsThroughInterface()"), Fixture("Interface.IProbe.Run()"))).Offset), graph.Graph.Edges);
+        Assert.Contains(graph.Graph.Edges, e => e.Kind == MethodEdgeKind.Dispatch && e.From == Fixture("Virtual.Callers.CallsThroughBase()") && e.To == Fixture("Virtual.EnvWorker.Run()"));
+        Assert.Contains(graph.Graph.Edges, e => e.Kind == MethodEdgeKind.Dispatch && e.To == Fixture("Iterator.Sequences.<Enum>d__0.MoveNext()"));
+        Assert.Contains(graph.Graph.Edges, e => e.Kind == MethodEdgeKind.Dispatch && e.From == Fixture("StaticAbstract.Builders.Build`1()") && e.To == Fixture("StaticAbstract.EnvFactory.Make()"));
+    }
+
+    /// <summary>
+    /// Every <see cref="MethodEdgeKind.Dispatch"/> edge, checked against properties read from the graph and the index
+    /// rather than from <see cref="MemberIndex.DispatchTargets"/>: it sits at a real call site of its source whose
+    /// instruction is <c>callvirt</c>/<c>ldvirtftn</c> or a <c>call</c> to a static method; it leads to an own method (a
+    /// node that is not External) that is not the site's static target; and that method implements the declared
+    /// method's name (exactly, or as the last segment of a C# explicit implementation) with the same parameter count.
+    /// </summary>
+    [Fact]
+    public void DispatchEdges_LeaveOnlyDispatchingSites_ForOwnMethodsOfTheDeclaredShape()
+    {
+        var sitesAt = graph.Sites.GroupBy(s => (s.Caller.NodeId, s.Offset)).ToDictionary(g => g.Key, g => Assert.Single(g));
+        var methods = graph.Index.Methods.ToLookup(m => m.NodeId, StringComparer.Ordinal);
+        var dispatch = graph.Graph.Edges.Where(e => e.Kind == MethodEdgeKind.Dispatch).ToArray();
+        Assert.NotEmpty(dispatch);
+
+        foreach (var edge in dispatch)
+        {
+            var site = sitesAt[(edge.From, edge.Offset)];
+            var declared = ModelNames.Of(site.Target.GenericMethod ?? site.Target);
+            Assert.True(site.Kind is MethodEdgeKind.CallVirt or MethodEdgeKind.Ldvirtftn || (site.Kind == MethodEdgeKind.Call && site.Target.IsStatic),
+                $"{edge}: dispatch from a {site.Kind} site");
+            Assert.NotEqual(MethodNodeKind.External, graph.Graph.Node(edge.To)?.Kind);
+            Assert.DoesNotContain(graph.Graph.Edges, e => e.From == edge.From && e.Offset == edge.Offset && e.To == edge.To && e.Kind != MethodEdgeKind.Dispatch);
+            var target = Assert.Single(methods[edge.To]).Identity;
+            Assert.True(target.MethodName == declared.MethodName || target.MethodName!.EndsWith("." + declared.MethodName, StringComparison.Ordinal),
+                $"{edge}: {target.MethodName} does not implement {declared.MethodName}");
+            Assert.Equal(declared.ParameterTypes.Count, target.ParameterTypes.Count);
+            Assert.Equal(declared.GenericArity, target.GenericArity);
+        }
     }
 
     /// <summary>
     /// The counts add up. Pinned: exactly FOUR <see cref="ResolutionKind.Ambiguous"/> sites — the
     /// <c>Overloads&lt;int&gt;.M(t: 1)</c>/<c>.M(i: 1)</c> pair (S1, spec §2.5) and, since S2 (spec §2.6, C-A), the
     /// <c>Outer4&lt;string&gt;.Mid.Inner&lt;int&gt;.Innermost&lt;bool&gt;.M(t:)</c>/<c>.M(s:)</c> pair, neither of which Model
-    /// can tell apart — each with two candidate edges, so the graph has exactly four more edges than call sites. The
-    /// member index itself skipped nothing (W1: <see cref="IndexCoverage"/> all zero, surfaced unchanged as
-    /// <see cref="GraphCoverage.Index"/>).
+    /// can tell apart — each with two candidate edges, so the graph has exactly four more STATIC edges than call sites.
+    /// The <see cref="MethodEdgeKind.Dispatch"/> edges (A2 S1) are not call sites: <see cref="GraphCoverage.DispatchEdges"/>
+    /// counts them, and <see cref="GraphCoverage.DispatchSites"/> counts the sites <see cref="MemberIndex.DispatchTargets"/>
+    /// answers for (an empty answer included). The member index itself skipped nothing (W1: <see cref="IndexCoverage"/>
+    /// all zero — no unresolved supertype either — surfaced unchanged as <see cref="GraphCoverage.Index"/>).
     /// </summary>
     [Fact]
     public void Coverage_IsInternallyConsistent_WithTheCallSitesAndTheEdges()
@@ -230,28 +282,52 @@ public sealed class MethodGraphAcceptanceTests : IClassFixture<MechanismMethodGr
         Assert.Equal(graph.Sites.Count + calli, coverage.CallSites);
         Assert.Equal(calli, graph.Graph.Opacities.Count(o => o.Kind == OpacityKind.IndirectCall));
         Assert.Equal(4, counts.Ambiguous);
-        Assert.Equal(resolved + counts.Ambiguous, graph.Graph.Edges.Count);   // each ambiguous site: 2 candidates = 1 extra edge
+        Assert.Equal(resolved + counts.Ambiguous, graph.Graph.Edges.Count(e => e.Kind != MethodEdgeKind.Dispatch));   // each ambiguous site: 2 candidates = 1 extra edge
         Assert.Equal(own, counts.Exact + counts.Substituted + counts.Ambiguous);
         Assert.Equal(graph.Sites.Count - own, counts.External);
         Assert.Equal(0, counts.Unresolved);
         Assert.False(coverage.Truncated);
         Assert.Null(coverage.TruncatedBy);
+
+        var answers = graph.Sites.Select(s => s.DispatchTargets(graph.Index)).ToArray();
+        Assert.Equal(graph.Graph.Edges.Count(e => e.Kind == MethodEdgeKind.Dispatch), coverage.DispatchEdges);
+        Assert.Equal(answers.Sum(a => a?.Count ?? 0), coverage.DispatchEdges);
+        Assert.Equal(answers.Count(a => a is not null), coverage.DispatchSites);
+        Assert.InRange(coverage.DispatchSites, 1, graph.Sites.Count);
+        Assert.True(coverage.DispatchEdges > 0);
     }
 
     /// <summary>
     /// Every call-site instruction carries exactly its own kind. Counted per INSTRUCTION (caller + offset), not per
     /// edge: since S1 an Ambiguous site has one edge per candidate (each of the four honestly ambiguous <c>call</c>
-    /// sites gives two Call edges), and every edge of a site has the site's kind.
+    /// sites gives two Call edges), and every static edge of a site has the site's kind.
+    /// <para>
+    /// Since A2 S1 a dispatching site also carries <see cref="MethodEdgeKind.Dispatch"/> edges beside its static ones:
+    /// never a site of its own (every Dispatch edge sits at an instruction that also has its static edge), and only at
+    /// a <c>callvirt</c>, an <c>ldvirtftn</c> or a <c>call</c> (the static rule) — never at a <c>newobj</c> or an
+    /// <c>ldftn</c> in this fixture.
+    /// </para>
     /// </summary>
     [Fact]
     public void EdgeKinds_MatchTheInstructionKinds()
     {
+        var staticEdges = graph.Graph.Edges.Where(e => e.Kind != MethodEdgeKind.Dispatch).ToArray();
+        var dispatchEdges = graph.Graph.Edges.Where(e => e.Kind == MethodEdgeKind.Dispatch).ToArray();
+
         Assert.Equal(
             graph.Sites.GroupBy(s => s.Kind).OrderBy(g => g.Key).Select(g => (g.Key, g.Count())),
-            graph.Graph.Edges.Select(e => (e.From, e.Offset, e.Kind)).Distinct().GroupBy(e => e.Kind).OrderBy(g => g.Key).Select(g => (g.Key, g.Count())));
-        Assert.All(graph.Graph.Edges.GroupBy(e => (e.From, e.Offset)), site => Assert.Single(site.Select(e => e.Kind).Distinct()));
+            staticEdges.Select(e => (e.From, e.Offset, e.Kind)).Distinct().GroupBy(e => e.Kind).OrderBy(g => g.Key).Select(g => (g.Key, g.Count())));
+        Assert.All(staticEdges.GroupBy(e => (e.From, e.Offset)), site => Assert.Single(site.Select(e => e.Kind).Distinct()));
 
-        // A1 records static targets only: the two A2 kinds are declared, never populated.
+        var staticKindAt = staticEdges.GroupBy(e => (e.From, e.Offset)).ToDictionary(g => g.Key, g => g.First().Kind);
+        Assert.NotEmpty(dispatchEdges);
+        Assert.All(dispatchEdges, e => Assert.True(
+            staticKindAt.TryGetValue((e.From, e.Offset), out var kind) && kind is MethodEdgeKind.CallVirt or MethodEdgeKind.Ldvirtftn or MethodEdgeKind.Call,
+            $"{e}: no static edge of a dispatching kind at this site"));
+        Assert.Contains(dispatchEdges, e => staticKindAt[(e.From, e.Offset)] == MethodEdgeKind.CallVirt);
+        Assert.Contains(dispatchEdges, e => staticKindAt[(e.From, e.Offset)] == MethodEdgeKind.Call);   // StaticAbstract's T.Make()
+
+        // State-machine and type-initializer edges are later A2 slices: declared, never populated yet.
         Assert.DoesNotContain(graph.Graph.Edges, e => e.Kind is MethodEdgeKind.StateMachine or MethodEdgeKind.TypeInitializer);
     }
 
@@ -287,15 +363,25 @@ public sealed class MethodGraphAcceptanceTests : IClassFixture<MechanismMethodGr
 
         var ambiguousSites = graph.Graph.Opacities.Where(o => o.Kind == OpacityKind.Ambiguous).Select(o => (o.Site, o.Offset)).ToHashSet();
         var checkedAmbiguous = new List<string>();
+        var dispatchChecked = 0;
         foreach (var caller in ownWithBody)
         {
-            var edgesByOffset = graph.Graph.Successors(caller).GroupBy(e => e.Offset).ToDictionary(g => g.Key, g => g.ToArray());
+            // The static edges only: Dispatch edges (A2 S1) are CHA's addition, not a call-site target CCI names.
+            var edgesByOffset = graph.Graph.Successors(caller).Where(e => e.Kind != MethodEdgeKind.Dispatch).GroupBy(e => e.Offset).ToDictionary(g => g.Key, g => g.ToArray());
             var cciSites = sites.Sites.Where(s => s.Caller == caller).ToArray();
 
             var offsetsInGraph = edgesByOffset.Keys.Order().ToArray();
             var offsetsInCci = cciSites.Select(s => s.Offset).Order().ToArray();
             if (!offsetsInGraph.SequenceEqual(offsetsInCci))
                 problems.Add($"{caller}: call-site offsets [{string.Join(", ", offsetsInGraph)}] vs CCI [{string.Join(", ", offsetsInCci)}]");
+
+            // ...but each one sits at an instruction CCI also sees as a call site.
+            foreach (var dispatch in graph.Graph.Successors(caller).Where(e => e.Kind == MethodEdgeKind.Dispatch))
+            {
+                dispatchChecked++;
+                if (!offsetsInCci.Contains(dispatch.Offset))
+                    problems.Add($"{caller} @IL_{dispatch.Offset:x4}: Dispatch edge to {dispatch.To} at no CCI call site");
+            }
 
             foreach (var site in cciSites)
             {
@@ -332,6 +418,8 @@ public sealed class MethodGraphAcceptanceTests : IClassFixture<MechanismMethodGr
             Assert.Contains(sites.Sites, s => s.Target == Fixture(definition) && s.Caller.StartsWith(Fixture("Resolution."), StringComparison.Ordinal));
         Assert.Equal(4, checkedAmbiguous.Count);
         Assert.Equal(2, checkedAmbiguous.Count(at => at.StartsWith(Fixture("Resolution.NestedCallers.CallsInnermost"), StringComparison.Ordinal)));
+        Assert.Equal(graph.Graph.Coverage.DispatchEdges, dispatchChecked);
+        Assert.True(dispatchChecked > 0);
     }
 
     [Fact]
