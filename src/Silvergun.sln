@@ -86,6 +86,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Silvergun.CodeAnalysis.IL.T
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Silvergun.CodeAnalysis.IL.Tests.ShadowFixture", "..\tests\Silvergun.CodeAnalysis.IL.Tests.ShadowFixture\Silvergun.CodeAnalysis.IL.Tests.ShadowFixture.csproj", "{6F2B8C41-3D7E-4A95-B0C8-2E9D17A4F583}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Silvergun.CodeAnalysis.IL.Tests.MechanismFixture.Debug", "..\tests\Silvergun.CodeAnalysis.IL.Tests.MechanismFixture.Debug\Silvergun.CodeAnalysis.IL.Tests.MechanismFixture.Debug.csproj", "{76B898D6-401F-4C23-8630-E1FBEAA2E736}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -208,6 +210,10 @@ Global
 		{6F2B8C41-3D7E-4A95-B0C8-2E9D17A4F583}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{6F2B8C41-3D7E-4A95-B0C8-2E9D17A4F583}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{6F2B8C41-3D7E-4A95-B0C8-2E9D17A4F583}.Release|Any CPU.Build.0 = Release|Any CPU
+		{76B898D6-401F-4C23-8630-E1FBEAA2E736}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{76B898D6-401F-4C23-8630-E1FBEAA2E736}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{76B898D6-401F-4C23-8630-E1FBEAA2E736}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{76B898D6-401F-4C23-8630-E1FBEAA2E736}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -243,6 +249,7 @@ Global
 		{D46804A3-98ED-4D66-874C-3961C213B2E4} = {F3CA7A48-1B99-4555-84CA-54FFFB3762EF}
 		{A9F9B461-E933-4BE5-AB48-6A64F91E2B4A} = {F3CA7A48-1B99-4555-84CA-54FFFB3762EF}
 		{6F2B8C41-3D7E-4A95-B0C8-2E9D17A4F583} = {F3CA7A48-1B99-4555-84CA-54FFFB3762EF}
+		{76B898D6-401F-4C23-8630-E1FBEAA2E736} = {F3CA7A48-1B99-4555-84CA-54FFFB3762EF}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {D41DB21F-26B4-4889-A4FD-B4E55A037165}

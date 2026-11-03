@@ -40,10 +40,12 @@ public sealed class MemberIndexSubtypeTests : IClassFixture<MechanismMethodGraph
     /// <summary>
     /// Every async state machine — the method's, the async lambda's (nested in <c>&lt;&gt;c</c>) and the async
     /// local function's, interesting and twin alike — is a direct subtype of the PLATFORM interface
-    /// <c>IAsyncStateMachine</c>, although they are Release-built structs.
+    /// <c>IAsyncStateMachine</c>, although they are Release-built structs. Since A2 S2 so are the AsyncIterator
+    /// mechanism's three: the <c>await foreach</c> consumer's struct <c>&lt;Consumes&gt;d__0</c>, and both async
+    /// iterators' state machines, which are classes even in Release (and are also below <c>IAsyncEnumerator`1</c>).
     /// </summary>
     [Fact]
-    public void DirectSubtypes_OfIAsyncStateMachine_AreAllSixStateMachines()
+    public void DirectSubtypes_OfIAsyncStateMachine_AreAllNineStateMachines()
     {
         Assert.Equal(
             [
@@ -53,8 +55,14 @@ public sealed class MemberIndexSubtypeTests : IClassFixture<MechanismMethodGraph
                 Fixture("Async.AsyncLocalCase.<<CallsAsyncLocalSafe>g__Read|1_0>d"),
                 Fixture("Async.AsyncProbes.<Probe>d__0"),
                 Fixture("Async.AsyncProbes.<ProbeSafe>d__1"),
+                Fixture("AsyncIterator.Consumers.<Consumes>d__0"),
+                Fixture("AsyncIterator.Sequences.<Env>d__0"),
+                Fixture("AsyncIterator.Sequences.<EnvSafe>d__1"),
             ],
             index.DirectSubtypes("System.Runtime.CompilerServices.IAsyncStateMachine"));
+        Assert.Equal(
+            [Fixture("AsyncIterator.Sequences.<Env>d__0"), Fixture("AsyncIterator.Sequences.<EnvSafe>d__1")],
+            index.DirectSubtypes("System.Collections.Generic.IAsyncEnumerator`1"));
     }
 
     /// <summary>

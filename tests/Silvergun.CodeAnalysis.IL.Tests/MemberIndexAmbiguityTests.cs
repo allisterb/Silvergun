@@ -130,8 +130,9 @@ public sealed class MemberIndexAmbiguityTests
         // One STATIC edge per (site, distinct candidate). A doubled definition is ONE candidate id, so most sites keep
         // one edge; only Overloads<int>.M(t:)/M(i:) (M(!0), M(System.Int32)) and, since S2, Outer4<string>.Mid.Inner<int>
         // .Innermost<bool>.M(t:)/M(s:) (M(!0), M(System.String)) have two genuinely different candidates, and each of
-        // those four sites exists once per copy: 4 sites x 2 copies x 1 extra candidate = 8 extra edges.
-        var staticEdges = graph.Edges.Where(e => e.Kind != MethodEdgeKind.Dispatch).ToArray();
+        // those four sites exists once per copy: 4 sites x 2 copies x 1 extra candidate = 8 extra edges. StateMachine
+        // edges (A2 S2) are not call sites either, so they are left out here and checked on their own below.
+        var staticEdges = graph.Edges.Where(e => e.Kind is not (MethodEdgeKind.Dispatch or MethodEdgeKind.StateMachine)).ToArray();
         Assert.Equal(
             sites.Sum(s => index.Resolve(s.Target) is { Kind: ResolutionKind.Ambiguous } a ? a.Candidates.Count : 1),
             staticEdges.Length);
@@ -151,6 +152,18 @@ public sealed class MemberIndexAmbiguityTests
         Assert.Equal(expectedDispatch.Length, graph.Coverage.DispatchEdges);
         Assert.Equal(sites.Count(s => s.DispatchTargets(index) is not null), graph.Coverage.DispatchSites);
         Assert.Equal(2, graph.Edges.Count(e => e.Kind == MethodEdgeKind.Dispatch && e.From == CallsThroughInterface && e.To == EnvProbeRun));
+
+        // A2 S2: state machines are found on the subtype map, not through Resolve, so ambiguity does not hide them
+        // either. Every StateMachine edge is StateMachineTargets' answer for its site (a newobj, call or callvirt; the
+        // caller itself excluded), and the doubled stub is linked once per copy.
+        var expectedStateMachine = sites
+            .Where(s => s.Kind is MethodEdgeKind.NewObj or MethodEdgeKind.Call or MethodEdgeKind.CallVirt)
+            .SelectMany(s => index.StateMachineTargets(s.Target, s.Kind == MethodEdgeKind.NewObj).Where(to => to != s.Caller.NodeId)
+                .Select(to => new MethodEdge(s.Caller.NodeId, to, MethodEdgeKind.StateMachine, s.Offset)))
+            .OrderBy(e => e.From, StringComparer.Ordinal).ThenBy(e => e.To, StringComparer.Ordinal).ThenBy(e => e.Offset)
+            .ToArray();
+        Assert.Equal(expectedStateMachine, graph.Edges.Where(e => e.Kind == MethodEdgeKind.StateMachine));
+        Assert.Equal(2, graph.Edges.Count(e => e.Kind == MethodEdgeKind.StateMachine && e.From == IteratorStub && e.To == IteratorMoveNext));
     }
 
     /// <summary>
@@ -192,5 +205,7 @@ public sealed class MemberIndexAmbiguityTests
     private const string HoldsDefinition = "Silvergun.CodeAnalysis.IL.Tests.Fixture.GenericBox`1.Holds(!0)";
     private const string CallsThroughInterface = "MechanismFixture.Interface.Dispatch.CallsThroughInterface()";
     private const string EnvProbeRun = "MechanismFixture.Interface.EnvProbe.Run()";
+    private const string IteratorStub = "MechanismFixture.Iterator.Sequences.Enum()";
+    private const string IteratorMoveNext = "MechanismFixture.Iterator.Sequences.<Enum>d__0.MoveNext()";
     #endregion
 }

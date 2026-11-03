@@ -84,6 +84,15 @@ public sealed class MechanismPresenceBaselineTests : IClassFixture<MechanismFixt
             // S1b (review C1), measured 2026-11-03: the inherited base method has the finding, the caller does not.
             ["InheritedImpl.CallsInherited"] = (true, false),
             ["InheritedImpl.CallsPlainInherited"] = (true, false),
+            // A2 S2 state-machine mechanisms, measured 2026-11-03: the MoveNext that calls the sink has the finding;
+            // the stub, the consumer and the twin driver, which reach it only through state-machine and dispatch
+            // edges, do not.
+            ["AsyncIterator.Stub"] = (true, false),
+            ["AsyncIterator.Consumer"] = (true, false),
+            ["AsyncIterator.ConsumerOfSafeSequence"] = (true, false),
+            ["Debug.AsyncMethod"] = (true, false),
+            ["Debug.AsyncLambda"] = (true, false),
+            ["Debug.IteratorStub"] = (true, false),
         };
 
     public static TheoryData<string> PresentRowsWithCapability() =>
@@ -148,13 +157,13 @@ public sealed class MechanismPresenceBaselineTests : IClassFixture<MechanismFixt
     [Fact]
     public void Baseline_DirectCallSitesAlone_SatisfyEveryPresentRowExceptThosePinnedHere()
     {
-        // Not a call graph: the test-side view of DIRECT call/callvirt/newobj/ldftn sites (MechanismCallSites, both
-        // assemblies, instantiations mapped to definitions, map-only classification). The rows it cannot satisfy are
-        // exactly the ones that need what A2 adds beyond plain edges - CHA fan-out, the state-machine edge, the
+        // Not a call graph: the test-side view of DIRECT call/callvirt/newobj/ldftn sites (MechanismCallSites, all
+        // three assemblies, instantiations mapped to definitions, map-only classification). The rows it cannot satisfy
+        // are exactly the ones that need what A2 adds beyond plain edges - CHA fan-out, the state-machine edge, the
         // TypeInitializer edge - or the reachability phase's extern classification. Measured.
         var needMore = MechanismGroundTruth.Paths
             .Where(p => p.Expect is Expectation.Present or Expectation.KnownImprecision)
-            .Where(p => !WaypointMatcher.Evaluate(p, fixture.CallSites.Edges, MapCapability).Holds)
+            .Where(p => !WaypointMatcher.Evaluate(p, fixture.GroundTruthCallSites.Edges, MapCapability).Holds)
             .Select(p => p.Id)
             .OrderBy(id => id, StringComparer.Ordinal);
 
@@ -164,6 +173,12 @@ public sealed class MechanismPresenceBaselineTests : IClassFixture<MechanismFixt
                 "Async.Lambda",                       // state-machine edge
                 "Async.LocalFunction",                // state-machine edge
                 "Async.Method",                       // state-machine edge
+                "AsyncIterator.Consumer",             // state-machine edges + CHA from IAsyncEnumerator`1.MoveNextAsync
+                "AsyncIterator.ConsumerOfSafeSequence", // state-machine edges + CHA from IAsyncEnumerator`1.MoveNextAsync
+                "AsyncIterator.Stub",                 // newobj async-iterator class => MoveNext edge
+                "Debug.AsyncLambda",                  // state-machine edge (Debug: newobj + Start<S>)
+                "Debug.AsyncMethod",                  // state-machine edge (Debug: newobj + Start<S>)
+                "Debug.IteratorStub",                 // newobj closure => MoveNext edge
                 "ExplicitImpl.CallsExplicit",         // CHA: explicit implementation name
                 "GenericInterface.ComparesThroughInterface", // CHA from IComparer<string>.Compare
                 "Generics.ConstrainedCall",           // CHA: constrained callvirt IBaz.Baz -> A.Baz
@@ -228,7 +243,7 @@ public sealed class MechanismPresenceBaselineTests : IClassFixture<MechanismFixt
     }
 
     private Capability? MapCapability(string nodeId) =>
-        fixture.CallSites.Targets.TryGetValue(nodeId, out var key) &&
+        fixture.GroundTruthCallSites.Targets.TryGetValue(nodeId, out var key) &&
         CapabilityMap.Default.Classify(key) is { Class: CapabilityClass.Capability, Capability: { } capability }
             ? capability
             : null;
@@ -236,7 +251,7 @@ public sealed class MechanismPresenceBaselineTests : IClassFixture<MechanismFixt
     private MechanismCallSites.OwnMethod Definition(string waypoint)
     {
         var pattern = new Regex(waypoint);
-        return fixture.CallSites.Definitions.Values.Single(d => pattern.IsMatch(d.NodeId));
+        return fixture.GroundTruthCallSites.Definitions.Values.Single(d => pattern.IsMatch(d.NodeId));
     }
 
     private static readonly string[] ExpectedFindings =
@@ -251,6 +266,12 @@ public sealed class MechanismPresenceBaselineTests : IClassFixture<MechanismFixt
         "EnvironmentProbe Call MechanismFixture.Async.AsyncLambdaCase.<>c.<<RunsAsyncLambda>b__0_0>d::MoveNext -> System.Environment.GetEnvironmentVariable",
         "EnvironmentProbe Call MechanismFixture.Async.AsyncLocalCase.<<CallsAsyncLocal>g__Read|0_0>d::MoveNext -> System.Environment.GetEnvironmentVariable",
         "EnvironmentProbe Call MechanismFixture.Async.AsyncProbes.<Probe>d__0::MoveNext -> System.Environment.GetEnvironmentVariable",
+        // A2 S2: the async iterator's MoveNext, and the Debug-built fixture's three state machines (one sink each,
+        // none on the twins).
+        "EnvironmentProbe Call MechanismFixture.AsyncIterator.Sequences.<Env>d__0::MoveNext -> System.Environment.GetEnvironmentVariable",
+        "EnvironmentProbe Call MechanismFixture.Debug.Async.AsyncLambdaCase.<>c.<<RunsAsyncLambda>b__0_0>d::MoveNext -> System.Environment.GetEnvironmentVariable",
+        "EnvironmentProbe Call MechanismFixture.Debug.Async.AsyncProbes.<Probe>d__0::MoveNext -> System.Environment.GetEnvironmentVariable",
+        "EnvironmentProbe Call MechanismFixture.Debug.Iterator.Sequences.<Enum>d__0::MoveNext -> System.Environment.GetEnvironmentVariable",
         "EnvironmentProbe Call MechanismFixture.DelegateField.Holder::ReadsEnv -> System.Environment.GetEnvironmentVariable",
         "EnvironmentProbe Call MechanismFixture.DelegateLocal.LocalDelegates::ReadsEnv -> System.Environment.GetEnvironmentVariable",
         "EnvironmentProbe Call MechanismFixture.Dependency.EnvReader::Read -> System.Environment.GetEnvironmentVariable",

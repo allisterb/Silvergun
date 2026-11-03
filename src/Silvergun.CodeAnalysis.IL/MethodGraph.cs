@@ -38,7 +38,11 @@ public enum MethodEdgeKind
     /// <summary>An <c>ldvirtftn</c> to its declared target.</summary>
     Ldvirtftn,
 
-    /// <summary>From an async/iterator stub to its compiler-generated <c>MoveNext</c> (phase A2).</summary>
+    /// <summary>
+    /// From a method that creates a state machine (<c>newobj</c>) or names one as a generic argument (an async stub's
+    /// <c>Start&lt;S&gt;</c>) to its <c>MoveNext</c>, which no instruction calls (<see cref="MemberIndex.StateMachineTargets"/>).
+    /// At the instruction's offset; not a call site.
+    /// </summary>
     StateMachine,
 
     /// <summary>From a method that touches a type to that type's static constructor (phase A2).</summary>
@@ -156,7 +160,9 @@ public sealed record GraphCoverage(
 /// A call graph over the methods of a <see cref="MemberIndex"/> (ADR 0020). Each call site's <b>static</b> target comes
 /// from Analysis.Net's bytecode instructions — the rung below three-address code, which needs no stack simulation —
 /// and the <c>Disassembler</c> is never run. A virtual site, or a static call to an interface member, also gets a
-/// <see cref="MethodEdgeKind.Dispatch"/> edge to every own override or implementation CHA finds. State-machine and type-initializer edges are added later in phase A2.
+/// <see cref="MethodEdgeKind.Dispatch"/> edge to every own override or implementation CHA finds, and a site that creates
+/// or names an own state machine a <see cref="MethodEdgeKind.StateMachine"/> edge to its <c>MoveNext</c>.
+/// Type-initializer edges are added later in phase A2.
 /// <para>
 /// Every collection is ordinal-sorted, so two builds over the same input are identical. Unresolved and ambiguous
 /// sites keep an edge to the reference's own node id as well as an opacity record, so no site is lost. Never throws.
@@ -277,9 +283,11 @@ public sealed class MethodGraph
             {
                 case MethodCallInstruction call:
                     AddCall(index, caller, offset, call.Method, call.Operation == MethodCallOperation.Virtual ? MethodEdgeKind.CallVirt : MethodEdgeKind.Call);
+                    AddStateMachines(index, caller, offset, call.Method, construction: false);
                     break;
                 case CreateObjectInstruction create:
                     AddCall(index, caller, offset, create.Constructor, MethodEdgeKind.NewObj);
+                    AddStateMachines(index, caller, offset, create.Constructor, construction: true);
                     break;
                 case LoadMethodAddressInstruction load:
                     AddCall(index, caller, offset, load.Method, load.Operation == LoadMethodAddressOperation.Virtual ? MethodEdgeKind.Ldvirtftn : MethodEdgeKind.Ldftn);
@@ -352,6 +360,20 @@ public sealed class MethodGraph
                     return;
                 edges.Add(new MethodEdge(caller, to, MethodEdgeKind.Dispatch, offset));
                 dispatchEdges++;
+            }
+        }
+
+        // The MoveNext of each state machine the instruction creates or names. Own methods only, all already nodes. A
+        // MoveNext naming its own state machine (AwaitUnsafeOnCompleted<TAwaiter, S>) adds no self-edge.
+        private void AddStateMachines(MemberIndex index, string caller, uint offset, IMethodReference target, bool construction)
+        {
+            if (truncatedBy is not null)
+                return;
+            foreach (var to in index.StateMachineTargets(target, construction).Where(to => to != caller))
+            {
+                if (!Room(edges.Count, budget.MaxEdges, "edges"))
+                    return;
+                edges.Add(new MethodEdge(caller, to, MethodEdgeKind.StateMachine, offset));
             }
         }
 

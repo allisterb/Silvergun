@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- The Debug-built twin of the Capslock-style mechanism fixtures, for the A2 state-machine edges
+         (docs/agent/tasks/cha-a2-dispatch-and-implicit-edges.md §3 and "S2 outcome"). The expected call paths
+         live as data in the test project's MechanismGroundTruth.cs (mechanism "Debug"), keyed on
+         CanonicalName.NodeId strings - so any edit here that renames a method, reorders lambdas or adds a
+         compiler-generated type can move a waypoint, and MechanismFixtureSanityTests will say which one.
+
+         Its own namespace root (MechanismFixture.Debug), so no node id collides with the Release fixture:
+         all three mechanism assemblies are indexed into ONE MemberIndex by MechanismGraphSource.
+
+         Optimize is forced OFF even in Release - the opposite of MechanismFixture, and the whole point of this
+         project: Debug-built async methods get CLASS state machines, and their stubs do `newobj S` as well as
+         `Start<S>(ref S)`, a shape the Release fixture (struct state machines, no newobj) never shows. Packages
+         are occasionally shipped Debug-built, so the graph must handle both.
+
+         net10.0 only, and NO PackageReference at all. The assembly is never loaded by the test host - it is
+         read from disk by path - and none of its sinks are ever executed. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Optimize>false</Optimize>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>false</IsTestProject>
+  </PropertyGroup>
+
+</Project>

@@ -13,8 +13,9 @@ using Xunit;
 /// Spec §1.5 test 1 — fixture sanity, plus the ground-truth table's own consistency. Catches a fixture that
 /// silently tests nothing: a waypoint naming no real node (a typo, or a compiler-generated name that moved), a sink
 /// that the built-in <see cref="CapabilityMap"/> does not classify as intended, a twin that is not actually benign,
-/// or a fixture built Debug-shaped. Everything here is measured on the BUILT fixture through
-/// <see cref="MechanismCallSites"/> (direct call sites only — no graph exists yet).
+/// or a fixture built Debug-shaped (or, for the Debug fixture, Release-shaped). Everything here is measured on the
+/// BUILT fixtures — all three, the Debug-built one included (<see cref="MechanismFixtureFixture.GroundTruthCallSites"/>)
+/// — through <see cref="MechanismCallSites"/> (direct call sites only, never the graph).
 /// </summary>
 public sealed class MechanismFixtureSanityTests : IClassFixture<MechanismFixtureFixture>
 {
@@ -109,11 +110,11 @@ public sealed class MechanismFixtureSanityTests : IClassFixture<MechanismFixture
             {
                 // A definition, so the waypoint names what the graph's nodes will be (ADR-0020 amendment 6) and
                 // never a call site's instantiated name. Exactly one: own waypoints are exact node ids.
-                var matches = fixture.CallSites.Definitions.Keys.Count(pattern.IsMatch);
+                var matches = fixture.GroundTruthCallSites.Definitions.Keys.Count(pattern.IsMatch);
                 if (matches != 1)
                     problems.Add($"{id}: own waypoint {waypoint} matches {matches} fixture definitions (expected exactly 1).");
             }
-            else if (!fixture.CallSites.Targets.Keys.Where(t => !fixture.CallSites.Definitions.ContainsKey(t)).Any(pattern.IsMatch))
+            else if (!fixture.GroundTruthCallSites.Targets.Keys.Where(t => !fixture.GroundTruthCallSites.Definitions.ContainsKey(t)).Any(pattern.IsMatch))
             {
                 problems.Add($"{id}: platform waypoint {waypoint} matches no platform call-site target.");
             }
@@ -121,7 +122,7 @@ public sealed class MechanismFixtureSanityTests : IClassFixture<MechanismFixture
 
         Assert.True(problems.Count == 0,
             string.Join(Environment.NewLine, problems) + Environment.NewLine + "Known node ids:" + Environment.NewLine +
-            string.Join(Environment.NewLine, fixture.CallSites.AllNodeIds));
+            string.Join(Environment.NewLine, fixture.GroundTruthCallSites.AllNodeIds));
     }
 
     [Fact]
@@ -137,7 +138,7 @@ public sealed class MechanismFixtureSanityTests : IClassFixture<MechanismFixture
             {
                 // An own sink is a bodyless extern whose capability the map cannot give (Opacity.PInvokeCapability).
                 // Prove the fixture still carries it: CapabilityAnalysis's metadata seam reports it on the declaration.
-                var own = fixture.CallSites.Definitions.Values.Single(d => sink.IsMatch(d.NodeId));
+                var own = fixture.GroundTruthCallSites.Definitions.Values.Single(d => sink.IsMatch(d.NodeId));
                 Assert.False(own.HasBody, $"{row.Id}: an own sink is expected to be a bodyless extern.");
                 Assert.Contains(fixture.Findings, f =>
                     f.Kind == ApiCallKind.NativeImport && f.Capability == row.Capability &&
@@ -145,7 +146,7 @@ public sealed class MechanismFixtureSanityTests : IClassFixture<MechanismFixture
                 continue;
             }
 
-            var targets = fixture.CallSites.Targets.Where(t => sink.IsMatch(t.Key)).ToArray();
+            var targets = fixture.GroundTruthCallSites.Targets.Where(t => sink.IsMatch(t.Key)).ToArray();
             Assert.NotEmpty(targets);
             foreach (var (nodeId, key) in targets)
                 Assert.True(
@@ -164,7 +165,7 @@ public sealed class MechanismFixtureSanityTests : IClassFixture<MechanismFixture
         foreach (var row in MechanismGroundTruth.Paths.Where(p => p.Expect == Expectation.Absent))
         {
             var start = StartOf(row);
-            var classified = Classified(fixture.CallSites.DirectlyReachable(start), row.Capability);
+            var classified = Classified(fixture.GroundTruthCallSites.DirectlyReachable(start), row.Capability);
             Assert.True(classified.Length == 0, $"{row.Id}: the twin directly reaches capability sinks: {string.Join(", ", classified)}");
         }
     }
@@ -181,7 +182,7 @@ public sealed class MechanismFixtureSanityTests : IClassFixture<MechanismFixture
 
         Assert.Equal(["ExpressionTree.CompilesSafeTree"], scoped.Select(r => r.Id));
         foreach (var row in scoped)
-            Assert.True(Classified(fixture.CallSites.DirectlyReachable(StartOf(row))).Length > 0,
+            Assert.True(Classified(fixture.GroundTruthCallSites.DirectlyReachable(StartOf(row))).Length > 0,
                 $"{row.Id}: the twin reaches no capability at all - make it an any-capability Absent (Capability = null).");
     }
 
@@ -191,7 +192,7 @@ public sealed class MechanismFixtureSanityTests : IClassFixture<MechanismFixture
         // The imprecision must come from CHA fan-out alone: over direct edges these starts are as clean as a twin.
         foreach (var row in MechanismGroundTruth.Paths.Where(p => p.Expect == Expectation.KnownImprecision))
         {
-            var classified = Classified(fixture.CallSites.DirectlyReachable(StartOf(row)));
+            var classified = Classified(fixture.GroundTruthCallSites.DirectlyReachable(StartOf(row)));
             Assert.True(classified.Length == 0, $"{row.Id}: reaches {string.Join(", ", classified)} without any dispatch.");
         }
     }
@@ -201,9 +202,9 @@ public sealed class MechanismFixtureSanityTests : IClassFixture<MechanismFixture
     {
         foreach (var row in MechanismGroundTruth.Paths.Where(p => p.Expect == Expectation.KnownGap))
         {
-            Assert.Null(WaypointMatcher.FindPath(fixture.CallSites.Edges, row.Waypoints));
+            Assert.Null(WaypointMatcher.FindPath(fixture.GroundTruthCallSites.Edges, row.Waypoints));
             var target = new Regex(row.Waypoints[1]);
-            Assert.DoesNotContain(fixture.CallSites.DirectlyReachable(StartOf(row)), target.IsMatch);
+            Assert.DoesNotContain(fixture.GroundTruthCallSites.DirectlyReachable(StartOf(row)), target.IsMatch);
         }
     }
 
@@ -226,18 +227,60 @@ public sealed class MechanismFixtureSanityTests : IClassFixture<MechanismFixture
         }
     }
 
+    /// <summary>
+    /// The Debug fixture's premise (A2 S2): it really was built without optimization — its async state machines are
+    /// CLASSES — and so every async stub (the method, and the lambda body) constructs its state machine with
+    /// <c>newobj</c> as well as starting it with <c>Start&lt;S&gt;</c>, a shape the Release fixture never shows.
+    /// </summary>
+    [Theory]
+    [InlineData("Debug.Async.AsyncProbes.Probe()", "Debug.Async.AsyncProbes.<Probe>d__0")]
+    [InlineData("Debug.Async.AsyncProbes.ProbeSafe()", "Debug.Async.AsyncProbes.<ProbeSafe>d__1")]
+    [InlineData("Debug.Async.AsyncLambdaCase.<>c.<RunsAsyncLambda>b__0_0()", "Debug.Async.AsyncLambdaCase.<>c.<<RunsAsyncLambda>b__0_0>d")]
+    [InlineData("Debug.Async.AsyncLambdaCase.<>c.<RunsAsyncLambdaSafe>b__1_0()", "Debug.Async.AsyncLambdaCase.<>c.<<RunsAsyncLambdaSafe>b__1_0>d")]
+    public void DebugFixture_IsDebugShaped_AsyncStubsConstructAClassStateMachine(string stub, string stateMachine)
+    {
+        var types = fixture.Debug.Module.GetAllTypes()
+            .ToDictionary(t => CanonicalName.NodeId(CciNames.Of(t)), t => t, StringComparer.Ordinal);
+        var edges = fixture.GroundTruthCallSites.Edges[Root(stub)];
+
+        Assert.True(types.TryGetValue(Root(stateMachine), out var type), $"No type {stateMachine} in the Debug fixture.");
+        Assert.False(type!.IsValueType, $"{stateMachine} is a struct: the Debug fixture was built Release-shaped (Optimize must be false).");
+        Assert.Contains($"{Root(stateMachine)}..ctor()", edges);
+        Assert.Contains(edges, e => e.StartsWith("System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.Start`1(", StringComparison.Ordinal));
+        Assert.DoesNotContain($"{Root(stateMachine)}.MoveNext()", edges);
+    }
+
+    /// <summary>
+    /// The AsyncIterator premise: the stub's only direct call site is the <c>newobj</c> of its state machine (a class,
+    /// as every async iterator's is), so only a StateMachine edge reaches <c>MoveNext</c>; and the consumer never names
+    /// either iterator — it holds only <c>IAsyncEnumerable&lt;string&gt;</c>.
+    /// </summary>
+    [Fact]
+    public void Fixture_AsyncIteratorStubOnlyConstructs_AndTheConsumerNeverNamesTheIterator()
+    {
+        var types = fixture.Fixture.Module.GetAllTypes()
+            .ToDictionary(t => CanonicalName.NodeId(CciNames.Of(t)), t => t, StringComparer.Ordinal);
+
+        Assert.Equal([Root("AsyncIterator.Sequences.<Env>d__0..ctor(System.Int32)")], fixture.GroundTruthCallSites.Edges[Root("AsyncIterator.Sequences.Env()")]);
+        Assert.False(types[Root("AsyncIterator.Sequences.<Env>d__0")].IsValueType);
+
+        var consumer = fixture.GroundTruthCallSites.DirectlyReachable(Root("AsyncIterator.Consumers.Consumes(System.Collections.Generic.IAsyncEnumerable`1<System.String>)"));
+        Assert.DoesNotContain(consumer, id => id.StartsWith(Root("AsyncIterator.Sequences."), StringComparison.Ordinal));
+        Assert.DoesNotContain(consumer, id => id.StartsWith(Root("AsyncIterator.Consumers.<Consumes>d__0.MoveNext"), StringComparison.Ordinal));
+    }
+
     [Fact]
     public void Fixture_TypeTriggersHaveNoCallSiteToTheInitializer()
     {
         // The StaticInit premise: reading a static field is not a call, so only A2's TypeInitializer edge can link it.
         foreach (var trigger in new[] { "TriggersInit()", "TriggersExplicitInit()", "TriggersSafeInit()" })
-            Assert.Empty(fixture.CallSites.Edges[$"MechanismFixture.StaticInit.Triggers.{trigger}"]);
+            Assert.Empty(fixture.GroundTruthCallSites.Edges[$"MechanismFixture.StaticInit.Triggers.{trigger}"]);
     }
 
     [Fact]
     public void Fixture_ModuleInitializersAreCalledOnlyFromTheModuleTypeInitializer()
     {
-        var callers = fixture.CallSites.Edges
+        var callers = fixture.GroundTruthCallSites.Edges
             .Where(e => e.Value.Contains("MechanismFixture.ModuleInit.Startup.Init()", StringComparer.Ordinal))
             .Select(e => e.Key);
 
@@ -264,23 +307,25 @@ public sealed class MechanismFixtureSanityTests : IClassFixture<MechanismFixture
             .Select(op => CanonicalName.NodeId(CciNames.Of((Microsoft.Cci.IMethodReference)op.Value)));
 
         Assert.Equal([tokenTarget], tokens);
-        Assert.DoesNotContain(tokenTarget, fixture.CallSites.Edges[method]);
-        Assert.Contains("System.Reflection.MethodBase.GetMethodFromHandle(System.RuntimeMethodHandle)", fixture.CallSites.Edges[method]);
+        Assert.DoesNotContain(tokenTarget, fixture.GroundTruthCallSites.Edges[method]);
+        Assert.Contains("System.Reflection.MethodBase.GetMethodFromHandle(System.RuntimeMethodHandle)", fixture.GroundTruthCallSites.Edges[method]);
         Assert.Contains(
             "System.Linq.Expressions.Expression.Call(System.Linq.Expressions.Expression,System.Reflection.MethodInfo,System.Linq.Expressions.Expression[])",
-            fixture.CallSites.Edges[method]);
+            fixture.GroundTruthCallSites.Edges[method]);
     }
 
+    private static string Root(string nodeIdWithoutRoot) => $"{MechanismGroundTruth.RootNamespace}.{nodeIdWithoutRoot}";
+
     private string StartOf(MechanismPath row) =>
-        fixture.CallSites.Definitions.Keys.Single(new Regex(row.Waypoints[0]).IsMatch);
+        fixture.GroundTruthCallSites.Definitions.Keys.Single(new Regex(row.Waypoints[0]).IsMatch);
 
     // Every reachable node the built-in map classifies as a capability (as `only`, when given), rendered for a
     // failure message.
     private string[] Classified(IEnumerable<string> nodes, Capability? only = null) =>
-        nodes.Where(n => fixture.CallSites.Targets.TryGetValue(n, out var key) &&
+        nodes.Where(n => fixture.GroundTruthCallSites.Targets.TryGetValue(n, out var key) &&
                          CapabilityMap.Default.Classify(key) is { Class: CapabilityClass.Capability } verdict &&
                          (only is null || verdict.Capability == only))
-             .Select(n => $"{n} ({CapabilityMap.Default.Classify(fixture.CallSites.Targets[n]).Capability})")
+             .Select(n => $"{n} ({CapabilityMap.Default.Classify(fixture.GroundTruthCallSites.Targets[n]).Capability})")
              .ToArray();
 
     private readonly MechanismFixtureFixture fixture;

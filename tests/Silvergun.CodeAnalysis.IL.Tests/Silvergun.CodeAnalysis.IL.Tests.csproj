@@ -77,6 +77,12 @@
          initializer and type initializers never run. Its own project so nothing in it moves a pinned
          method-count baseline elsewhere. -->
     <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.MechanismFixture\Silvergun.CodeAnalysis.IL.Tests.MechanismFixture.csproj" />
+    <!-- The Debug-built mechanism fixture (A2 S2, docs/agent/tasks/cha-a2-dispatch-and-implicit-edges.md §3):
+         Optimize forced OFF, so async state machines are CLASSES and their stubs `newobj` them. Same rules as the
+         Release fixture above - a plain reference that copies it here, located BY PATH (MechanismFixtureAssemblies)
+         and read as metadata, never loaded - and its own namespace root (MechanismFixture.Debug), so it shares one
+         MemberIndex with the Release fixture and its Dependency in MechanismGraphSource. -->
+    <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.MechanismFixture.Debug\Silvergun.CodeAnalysis.IL.Tests.MechanismFixture.Debug.csproj" />
     <!-- Name-shadowing fixture for the A1 member index (review 1, finding C2): it defines its OWN public
          System.Environment and System.IDisposable. A BUILD-ORDER dependency only: ReferenceOutputAssembly="false"
          keeps it off this project's compile and runtime reference set (its System.Environment would otherwise clash

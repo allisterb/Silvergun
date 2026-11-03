@@ -112,11 +112,30 @@ public sealed class MemberIndexNoResolutionInvariantTests : IClassFixture<Assemb
     }
 
     /// <summary>
+    /// A2 S2 (spec acceptance 4): the guard covers the state-machine code — <c>StateMachineTargets</c>, the precomputed
+    /// <c>StateMachines</c> walk down the subtype map, and the graph's <c>AddStateMachines</c> — and that code reads the
+    /// Model members a forbidden read would sit beside (<c>ContainingType</c> and <c>GenericArguments</c> of the
+    /// reference, <c>IsStatic</c> of the candidate <c>MoveNext</c>).
+    /// </summary>
+    [Fact]
+    public void Walk_CoversTheStateMachineCode()
+    {
+        foreach (var method in StateMachineMethods)
+            Assert.Contains(closure.Methods, m => m.StartsWith(method, StringComparison.Ordinal));
+
+        foreach (var member in new[] { "ContainingType", "GenericArguments", "IsStatic" })
+            Assert.Contains(closure.References, r => r.Member.StartsWith("Model.Types.", StringComparison.Ordinal) && Bare(r.Member) == member);
+    }
+
+    /// <summary>
     /// The guard can go red. A MUTANT library is emitted (<see cref="EmittedAssembly"/>; read as metadata only) with the
     /// root types' names: its <c>MemberIndex.DispatchTargets</c> reads <c>IMethodReference.ResolvedMethod</c> directly,
     /// and its <c>MemberIndex.OpenTypes</c> reaches <c>IBasicType.ResolvedType</c> only through a helper in a NON-root
-    /// type. The same walk that guards the real library names both — so a read like either, added to the real CHA code
-    /// (whose methods <see cref="Walk_CoversTheChaCode"/> shows are walked), turns <see cref="MemberIndexAndMethodGraph_NeverReferenceResolvedMethodResolvedTypeOrResolveReference"/> red.
+    /// type. Since A2 S2 it also has the state-machine shapes: <c>MemberIndex.StateMachineTargets</c> reads
+    /// <c>IBasicType.ResolvedType</c> directly, and <c>MemberIndex.StateMachines</c> reaches it only through a helper of
+    /// its own. The same walk that guards the real library names all of them — so a read like any of these, added to the
+    /// real CHA or state-machine code (whose methods <see cref="Walk_CoversTheChaCode"/> and
+    /// <see cref="Walk_CoversTheStateMachineCode"/> show are walked), turns <see cref="MemberIndexAndMethodGraph_NeverReferenceResolvedMethodResolvedTypeOrResolveReference"/> red.
     /// </summary>
     [Fact]
     public void Walk_OverAMutantThatResolves_FindsTheForbiddenReads()
@@ -134,11 +153,19 @@ public sealed class MemberIndexNoResolutionInvariantTests : IClassFixture<Assemb
         Assert.Contains(hits, h => h.StartsWith("Silvergun.CodeAnalysis.IL.Helpers.Peek(", StringComparison.Ordinal) && h.EndsWith("-> ResolvedType", StringComparison.Ordinal));
         Assert.Contains(mutantClosure.Methods, m => m.StartsWith("Silvergun.CodeAnalysis.IL.Helpers.Peek(", StringComparison.Ordinal));
         Assert.DoesNotContain(mutantClosure.Methods, m => m.StartsWith("Silvergun.CodeAnalysis.IL.Helpers.Unreached(", StringComparison.Ordinal));
+
+        // A2 S2: the state-machine shapes.
+        Assert.Contains(hits, h => h.StartsWith("Silvergun.CodeAnalysis.IL.MemberIndex.StateMachineTargets(", StringComparison.Ordinal) && h.EndsWith("-> ResolvedType", StringComparison.Ordinal));
+        Assert.Contains(hits, h => h.StartsWith("Silvergun.CodeAnalysis.IL.Helpers.PeekMachine(", StringComparison.Ordinal) && h.EndsWith("-> ResolvedType", StringComparison.Ordinal));
+        Assert.Contains(mutantClosure.Methods, m => m.StartsWith("Silvergun.CodeAnalysis.IL.Helpers.PeekMachine(", StringComparison.Ordinal));
+        Assert.Contains(mutantClosure.References, r => r.From.StartsWith("Silvergun.CodeAnalysis.IL.MemberIndex.StateMachines(", StringComparison.Ordinal) &&
+                                                       r.Member.StartsWith("Silvergun.CodeAnalysis.IL.Helpers.PeekMachine(", StringComparison.Ordinal));
     }
 
     // MemberIndex.DispatchTargets(IMethodReference) => _ = reference.ResolvedMethod; MemberIndex.OpenTypes(IBasicType)
     // => Helpers.Peek(type); Helpers.Peek(IBasicType) => _ = type.ResolvedType; Helpers.Unreached(IBasicType) likewise,
-    // but nothing calls it (the walk must not start outside the roots).
+    // but nothing calls it (the walk must not start outside the roots). A2 S2: MemberIndex.StateMachineTargets(IBasicType)
+    // => _ = type.ResolvedType; MemberIndex.StateMachines(IBasicType) => Helpers.PeekMachine(type), which reads it.
     private static void DefineMutant(System.Reflection.Emit.ModuleBuilder module)
     {
         const System.Reflection.MethodAttributes Static = System.Reflection.MethodAttributes.Public | System.Reflection.MethodAttributes.Static;
@@ -158,6 +185,7 @@ public sealed class MemberIndexNoResolutionInvariantTests : IClassFixture<Assemb
         }
         var peek = Reads("Peek");
         Reads("Unreached");
+        var peekMachine = Reads("PeekMachine");
 
         var index = module.DefineType("Silvergun.CodeAnalysis.IL.MemberIndex", System.Reflection.TypeAttributes.Public | System.Reflection.TypeAttributes.Class);
         var dispatch = index.DefineMethod("DispatchTargets", Static, typeof(void), [typeof(Model.Types.IMethodReference)]).GetILGenerator();
@@ -169,6 +197,15 @@ public sealed class MemberIndexNoResolutionInvariantTests : IClassFixture<Assemb
         open.Emit(System.Reflection.Emit.OpCodes.Ldarg_0);
         open.Emit(System.Reflection.Emit.OpCodes.Call, peek);
         open.Emit(System.Reflection.Emit.OpCodes.Ret);
+        var targets = index.DefineMethod("StateMachineTargets", Static, typeof(void), [typeof(Model.Types.IBasicType)]).GetILGenerator();
+        targets.Emit(System.Reflection.Emit.OpCodes.Ldarg_0);
+        targets.Emit(System.Reflection.Emit.OpCodes.Callvirt, resolvedType);
+        targets.Emit(System.Reflection.Emit.OpCodes.Pop);
+        targets.Emit(System.Reflection.Emit.OpCodes.Ret);
+        var machines = index.DefineMethod("StateMachines", Static, typeof(void), [typeof(Model.Types.IBasicType)]).GetILGenerator();
+        machines.Emit(System.Reflection.Emit.OpCodes.Ldarg_0);
+        machines.Emit(System.Reflection.Emit.OpCodes.Call, peekMachine);
+        machines.Emit(System.Reflection.Emit.OpCodes.Ret);
 
         helpers.CreateType();
         index.CreateType();
@@ -278,6 +315,14 @@ public sealed class MemberIndexNoResolutionInvariantTests : IClassFixture<Assemb
         "Silvergun.CodeAnalysis.IL.MemberIndex.DispatchWork.Charge(",
         "Silvergun.CodeAnalysis.IL.MemberIndex.DispatchWork.ChargeOnce(",
         "Silvergun.CodeAnalysis.IL.MemberIndex.DispatchWork.Add(",
+    ];
+
+    /// <summary>The A2 S2 (state-machine edge) methods the walk must reach, by node-id prefix.</summary>
+    private static readonly string[] StateMachineMethods =
+    [
+        "Silvergun.CodeAnalysis.IL.MemberIndex.StateMachineTargets(",
+        "Silvergun.CodeAnalysis.IL.MemberIndex.StateMachines(",
+        "Silvergun.CodeAnalysis.IL.MethodGraph.Builder.AddStateMachines(",
     ];
 
     /// <summary>

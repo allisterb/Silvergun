@@ -103,7 +103,9 @@ public sealed record IndexCoverage(int AssembliesUnreadable, int TypesSkipped, i
 /// </para>
 /// <para>
 /// <see cref="DispatchTargets"/> is class-hierarchy analysis (phase A2): the own overrides and implementations a
-/// virtual call may run, matched by name and shape over the subtype map.
+/// virtual call may run, matched by name and shape over the subtype map. <see cref="StateMachineTargets"/> is the
+/// <c>MoveNext</c> of an own state machine (an async method's, an iterator's, or a hand-written enumerator's), which
+/// the code that creates it never calls.
 /// </para>
 /// </summary>
 public sealed class MemberIndex
@@ -144,6 +146,7 @@ public sealed class MemberIndex
             t => (IReadOnlyList<string>)t.Value.SelectMany(d => d.Supertypes).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)
                 .Concat(implicitSupertypes.GetValueOrDefault(t.Key) ?? []).Distinct(StringComparer.Ordinal).ToArray(),
             StringComparer.Ordinal);
+        stateMachines = StateMachines(subtypes, byImplementedShape);
     }
     #endregion
 
@@ -354,6 +357,38 @@ public sealed class MemberIndex
             // Abandoned part-way: nothing is memoized, so a build with more work can still answer it.
             return null;
         }
+    }
+
+    /// <summary>
+    /// The node ids of the <c>MoveNext</c> methods of the own state machines that <paramref name="reference"/> names
+    /// (A2 spec §3): the constructor's declaring type when <paramref name="construction"/> (the <c>newobj</c> of an
+    /// iterator, a Debug-built async method or an async iterator), otherwise the generic arguments of a generic method
+    /// instance (<c>AsyncTaskMethodBuilder.Start&lt;S&gt;(ref S)</c> in every async stub,
+    /// <c>AsyncIteratorMethodBuilder.MoveNext&lt;S&gt;(ref S)</c> in <c>MoveNextAsync</c>).
+    /// <para>
+    /// A state machine is an own type below <c>System.Runtime.CompilerServices.IAsyncStateMachine</c>,
+    /// <c>System.Collections.IEnumerator</c> (or <c>IEnumerator&lt;T&gt;</c>) or
+    /// <c>System.Collections.Generic.IAsyncEnumerator&lt;T&gt;</c> in the subtype map — a platform one or an own type of
+    /// that name, compiler-generated or hand-written — never one found by name mangling, which async lambdas and local
+    /// functions do differently. Its <c>MoveNext</c> is each instance method it declares named as that interface's
+    /// <c>MoveNext</c> (or <c>MoveNextAsync</c>), or ending in it as an explicit implementation does, with no parameters,
+    /// whether or not it is virtual (over-approximate). One it inherits is not, and is reached by
+    /// <see cref="DispatchTargets"/> from the code that runs the enumerator. Ordinal-sorted. Never throws.
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<string> StateMachineTargets(IMethodReference? reference, bool construction)
+    {
+        if (reference is null || stateMachines.Count == 0)
+            return [];
+        IBasicType[] named = construction
+            ? Guard(() => reference.ContainingType, null) is { } type ? [type] : []
+            : Guard(() => reference.GenericArguments.OfType<IBasicType>().ToArray(), []);
+        // Keys made distinct first: one generic argument list can name the same state machine many times, and each key's
+        // methods are its own (disjoint from every other key's), so the lookups then cost no more than the edges.
+        var keys = named.SelectMany(t => scope.Of(t).Keys).Distinct(StringComparer.Ordinal).ToArray();
+        return keys is [var only]
+            ? stateMachines.GetValueOrDefault(only) ?? []
+            : keys.SelectMany(k => stateMachines.GetValueOrDefault(k) ?? []).Order(StringComparer.Ordinal).ToArray();
     }
 
     /// <summary>
@@ -696,6 +731,38 @@ public sealed class MemberIndex
         return height;
     }
 
+    // See StateMachineTargets. Per own type below a state-machine interface, the methods it declares that implement that
+    // interface's MoveNext. Breadth-first down the subtype map from every key of each root (the bare id, and a Qualified
+    // one when an own type shadows it), each type once per root, so linear in subtype links.
+    private static IReadOnlyDictionary<string, IReadOnlyList<string>> StateMachines(
+        IReadOnlyDictionary<string, IReadOnlyList<string>> subtypes,
+        IReadOnlyDictionary<string, IReadOnlyList<IndexedMethod>> byImplementedShape)
+    {
+        var found = new List<(string Type, string MoveNext)>();
+        foreach (var (root, moveNext) in stateMachineRoots)
+        {
+            var declared = (byImplementedShape.GetValueOrDefault(ImplementedShape(moveNext, 0, 0)) ?? [])
+                .Where(m => !m.Definition.IsStatic)
+                .ToLookup(m => m.DeclaringTypeId, m => m.NodeId, StringComparer.Ordinal);
+            var qualified = $"]{root}";
+            var seen = subtypes.Keys.Where(k => k == root || (k.StartsWith('[') && k.EndsWith(qualified, StringComparison.Ordinal)))
+                .ToHashSet(StringComparer.Ordinal);
+            var queue = new Queue<string>(seen);
+            while (queue.TryDequeue(out var type))
+                foreach (var sub in subtypes.GetValueOrDefault(type) ?? [])
+                {
+                    if (!seen.Add(sub))
+                        continue;
+                    queue.Enqueue(sub);
+                    found.AddRange(declared[sub].Select(m => (sub, m)));
+                }
+        }
+        return found.GroupBy(f => f.Type, StringComparer.Ordinal).ToDictionary(
+            g => g.Key,
+            g => (IReadOnlyList<string>)g.Select(f => f.MoveNext).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(),
+            StringComparer.Ordinal);
+    }
+
     // The DispatchWork units for hashing or scanning text once: one per UnitLength characters, at least one.
     private static long Units(string text) => 1 + text.Length / UnitLength;
 
@@ -814,6 +881,20 @@ public sealed class MemberIndex
 
     // DispatchTargets per (declared type keys, implemented name, arity, parameter types, static), with its cost.
     private readonly ConcurrentDictionary<string, DispatchAnswer> dispatched = new(StringComparer.Ordinal);
+
+    // Per own state-machine type id, its MoveNext node ids (StateMachineTargets).
+    private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> stateMachines;
+
+    // The state-machine interfaces and the method of each that runs the body. IEnumerator<T> is listed beside
+    // IEnumerator because the subtype map holds only links own types declare, and a hand-written InterfaceImpl may name
+    // the generic one alone (implicitSupertypes links them only for an upward walk).
+    private static readonly (string Root, string MoveNext)[] stateMachineRoots =
+    [
+        ("System.Runtime.CompilerServices.IAsyncStateMachine", "MoveNext"),
+        ("System.Collections.IEnumerator", "MoveNext"),
+        ("System.Collections.Generic.IEnumerator`1", "MoveNext"),
+        ("System.Collections.Generic.IAsyncEnumerator`1", "MoveNextAsync"),
+    ];
 
     // Platform bases an open-ness walk stops at: every own type's chain may end in one without hiding a supertype
     // (implicitSupertypes links each to System.Object).

@@ -4,8 +4,9 @@ using System;
 using System.IO;
 
 /// <summary>
-/// Locates the two mechanism-fixture assemblies (<c>Silvergun.CodeAnalysis.IL.Tests.MechanismFixture</c> and its
-/// <c>.Dependency</c>) next to this test assembly, where the plain <c>ProjectReference</c> copies them.
+/// Locates the mechanism-fixture assemblies (<c>Silvergun.CodeAnalysis.IL.Tests.MechanismFixture</c>, its
+/// <c>.Dependency</c>, and since A2 S2 the Debug-built <c>.Debug</c>) next to this test assembly, where the plain
+/// <c>ProjectReference</c> copies them.
 /// <para>
 /// Deliberately by <b>path</b>, never via <c>typeof(...)</c>: naming a fixture type would load the assembly into
 /// the test host, and the fixture has a <c>[ModuleInitializer]</c> and type initializers whose bodies are capability
@@ -21,6 +22,12 @@ public static class MechanismFixtureAssemblies
 
     /// <summary>Full path of <c>Silvergun.CodeAnalysis.IL.Tests.MechanismFixture.Dependency.dll</c>.</summary>
     public static string Dependency => Locate(DependencyName);
+
+    /// <summary>
+    /// Full path of <c>Silvergun.CodeAnalysis.IL.Tests.MechanismFixture.Debug.dll</c>: the Debug-built (Optimize off)
+    /// state-machine shapes, namespace root <c>MechanismFixture.Debug</c>.
+    /// </summary>
+    public static string DebugFixture => Locate(DebugFixtureName);
     #endregion
 
     #region Methods
@@ -38,5 +45,6 @@ public static class MechanismFixtureAssemblies
     #region Fields
     public const string FixtureName = "Silvergun.CodeAnalysis.IL.Tests.MechanismFixture";
     public const string DependencyName = "Silvergun.CodeAnalysis.IL.Tests.MechanismFixture.Dependency";
+    public const string DebugFixtureName = "Silvergun.CodeAnalysis.IL.Tests.MechanismFixture.Debug";
     #endregion
 }

@@ -25,8 +25,9 @@ public enum Expectation
 
 /// <summary>
 /// The call-graph phase from which a row is checked. Ordered: a row is active when <c>ActiveFrom &lt;= CurrentPhase</c>.
-/// <see cref="A2Dispatch"/> is phase A2's first slice (S1: CHA fan-out, <c>MethodEdgeKind.Dispatch</c>); <see cref="A2"/>
-/// is the whole phase, reached once the state-machine and type-initializer edges land too
+/// <see cref="A2Dispatch"/> is phase A2's first slice (S1: CHA fan-out, <c>MethodEdgeKind.Dispatch</c>);
+/// <see cref="A2StateMachine"/> its second (S2: <c>MethodEdgeKind.StateMachine</c>, a stub to its state machine's
+/// <c>MoveNext</c>); <see cref="A2"/> is the whole phase, reached once the type-initializer edges land too
 /// (docs/agent/tasks/cha-a2-dispatch-and-implicit-edges.md).
 /// </summary>
 public enum Phase
@@ -34,6 +35,7 @@ public enum Phase
     Baseline,
     A1,
     A2Dispatch,
+    A2StateMachine,
     A2,
     A2Multi,
     Reachability,
@@ -60,7 +62,8 @@ public sealed record MechanismPath(
 public sealed record MechanismOpacity(string Id, string Mechanism, string Site, OpacityKind Kind, Phase ActiveFrom, string Note);
 
 /// <summary>
-/// The ground truth for the mechanism fixtures (<c>tests/Silvergun.CodeAnalysis.IL.Tests.MechanismFixture</c>):
+/// The ground truth for the mechanism fixtures (<c>tests/Silvergun.CodeAnalysis.IL.Tests.MechanismFixture</c>, its
+/// <c>.Dependency</c>, and since A2 S2 the Debug-built <c>.Debug</c>, namespace root <c>MechanismFixture.Debug</c>):
 /// data, not prose. Every node id below was read from the BUILT fixture, not guessed — and
 /// <c>MechanismFixtureSanityTests</c> fails if any waypoint stops naming a real node.
 /// <para>
@@ -78,10 +81,12 @@ public static class MechanismGroundTruth
     /// <see cref="Phase.A1"/> the static call-site targets (both fixture assemblies in one <see cref="MemberIndex"/>)
     /// satisfied every row but the A2 and Reachability ones. Phase A2 ratchets in slices: <see cref="Phase.A2Dispatch"/>
     /// (S1, CHA fan-out) activated the seven CHA rows and the S1 dispatch mechanisms (ObjectVirtual, ExplicitImpl,
-    /// GenericInterface, StaticAbstract, OpenHierarchy); bumping this to <see cref="Phase.A2"/> once the
-    /// state-machine and type-initializer edges land is the red-to-green moment of the rest of the phase.
+    /// GenericInterface, StaticAbstract, OpenHierarchy); <see cref="Phase.A2StateMachine"/> (S2, state-machine edges)
+    /// activated the four state-machine rows pending since A1 (Async.Method, Async.Lambda, Async.LocalFunction,
+    /// Iterator.Stub) and the S2 mechanisms (AsyncIterator, Debug); bumping this to <see cref="Phase.A2"/> once the
+    /// type-initializer edges land is the red-to-green moment of the rest of the phase.
     /// </summary>
-    public static Phase CurrentPhase => Phase.A2Dispatch;
+    public static Phase CurrentPhase => Phase.A2StateMachine;
 
     /// <summary>The path rows active at <see cref="CurrentPhase"/>.</summary>
     public static IReadOnlyList<MechanismPath> ActivePaths => Paths.Where(p => p.ActiveFrom <= CurrentPhase).ToArray();
@@ -304,21 +309,21 @@ public static class MechanismGroundTruth
         // ---- Async -------------------------------------------------------------------------------------------
         new("Async.Method", "Async",
             [Own("Async.AsyncProbes.Probe()"), Own("Async.AsyncProbes.<Probe>d__0.MoveNext()"), GetEnv],
-            Env, Expectation.Present, Phase.A2,
+            Env, Expectation.Present, Phase.A2StateMachine,
             "The stub only calls AsyncTaskMethodBuilder`1.Start`1(!!0&) on a STRUCT state machine (Release). A2's state-machine edge: stub -> MoveNext (ADR-0020 amendment 1)."),
         new("Async.MethodSafe", "Async", [Own("Async.AsyncProbes.ProbeSafe()")], null, Expectation.Absent, Phase.A1,
             "Twin async method."),
         new("Async.Lambda", "Async",
             [Own("Async.AsyncLambdaCase.RunsAsyncLambda()"), Own("Async.AsyncLambdaCase.<>c.<RunsAsyncLambda>b__0_0()"),
              Own("Async.AsyncLambdaCase.<>c.<<RunsAsyncLambda>b__0_0>d.MoveNext()"), GetEnv],
-            Env, Expectation.Present, Phase.A2,
+            Env, Expectation.Present, Phase.A2StateMachine,
             "Async lambda passed to Task.Run: ldftn to the lambda, then the lambda's own state machine <<RunsAsyncLambda>b__0_0>d (nested in <>c, no __N suffix)."),
         new("Async.LambdaSafe", "Async", [Own("Async.AsyncLambdaCase.RunsAsyncLambdaSafe()")], null, Expectation.Absent, Phase.A1,
             "Twin async lambda."),
         new("Async.LocalFunction", "Async",
             [Own("Async.AsyncLocalCase.CallsAsyncLocal()"), Own("Async.AsyncLocalCase.<CallsAsyncLocal>g__Read|0_0()"),
              Own("Async.AsyncLocalCase.<<CallsAsyncLocal>g__Read|0_0>d.MoveNext()"), GetEnv],
-            Env, Expectation.Present, Phase.A2,
+            Env, Expectation.Present, Phase.A2StateMachine,
             "Async local function: plain call to <CallsAsyncLocal>g__Read|0_0, whose state machine is <<CallsAsyncLocal>g__Read|0_0>d. A name heuristic would miss this mangling."),
         new("Async.LocalFunctionSafe", "Async", [Own("Async.AsyncLocalCase.CallsAsyncLocalSafe()")], null, Expectation.Absent, Phase.A1,
             "Twin async local function."),
@@ -326,7 +331,7 @@ public static class MechanismGroundTruth
         // ---- Iterator ----------------------------------------------------------------------------------------
         new("Iterator.Stub", "Iterator",
             [Own("Iterator.Sequences.Enum()"), Own("Iterator.Sequences.<Enum>d__0.MoveNext()"), GetEnv],
-            Env, Expectation.Present, Phase.A2,
+            Env, Expectation.Present, Phase.A2StateMachine,
             "The stub only does newobj <Enum>d__0(System.Int32); A2: newobj of an IEnumerator closure type => edge to its MoveNext."),
         new("Iterator.StubSafe", "Iterator", [Own("Iterator.Sequences.EnumSafe()")], null, Expectation.Absent, Phase.A1,
             "Twin iterator stub: newobj <EnumSafe>d__1, whose MoveNext is benign."),
@@ -468,6 +473,51 @@ public static class MechanismGroundTruth
         new("InheritedImpl.CallsSafeInherited", "InheritedImpl", [Own("InheritedImpl.Callers.CallsSafeInherited()")], null,
             Expectation.Absent, Phase.A2Dispatch,
             "Twin: SafeInheritor inherits a benign SafeBase.Run for ISafeInheritedProbe; EnvBase.Run is inherited only below IInheritedProbe, so it is not reached."),
+
+        // ---- A2 S2 state-machine mechanisms (cha-a2-dispatch-and-implicit-edges.md §3, §8) -------------------
+        // Tagged A2StateMachine, the phase they are about: the Absent rows hold vacuously without StateMachine edges.
+
+        // ---- AsyncIterator -----------------------------------------------------------------------------------
+        new("AsyncIterator.Stub", "AsyncIterator",
+            [Own("AsyncIterator.Sequences.Env()"), Own("AsyncIterator.Sequences.<Env>d__0.MoveNext()"), GetEnv],
+            Env, Expectation.Present, Phase.A2StateMachine,
+            "`async IAsyncEnumerable<string>`: the stub only does newobj <Env>d__0(System.Int32), a CLASS below both IAsyncStateMachine and IAsyncEnumerator`1, so it gets StateMachine edges to MoveNext and to the explicit MoveNextAsync."),
+        new("AsyncIterator.StubSafe", "AsyncIterator", [Own("AsyncIterator.Sequences.EnvSafe()")], null, Expectation.Absent, Phase.A2StateMachine,
+            "Twin async-iterator stub: newobj <EnvSafe>d__1, whose MoveNext and MoveNextAsync are benign."),
+        new("AsyncIterator.Consumer", "AsyncIterator",
+            [Own("AsyncIterator.Consumers.Consumes(System.Collections.Generic.IAsyncEnumerable`1<System.String>)"),
+             Own("AsyncIterator.Consumers.<Consumes>d__0.MoveNext()"),
+             Own("AsyncIterator.Sequences.<Env>d__0.System.Collections.Generic.IAsyncEnumerator<System.String>.MoveNextAsync()"),
+             Own("AsyncIterator.Sequences.<Env>d__0.MoveNext()"), GetEnv],
+            Env, Expectation.Present, Phase.A2StateMachine,
+            "`await foreach` over an IAsyncEnumerable<string> parameter: the consumer's own state machine (StateMachine edge from Start<S>), whose callvirt IAsyncEnumerator`1.MoveNextAsync fans out by CHA to the explicit MoveNextAsync, " +
+            "whose AsyncIteratorMethodBuilder.MoveNext<S> is a StateMachine edge to <Env>d__0.MoveNext. Needs both edge kinds."),
+        new("AsyncIterator.ConsumerOfSafeSequence", "AsyncIterator",
+            [Own("AsyncIterator.Consumers.ConsumesEnvSafe()"), Own("AsyncIterator.Consumers.Consumes(System.Collections.Generic.IAsyncEnumerable`1<System.String>)"),
+             Own("AsyncIterator.Sequences.<Env>d__0.MoveNext()"), GetEnv],
+            Env, Expectation.KnownImprecision, Phase.A2StateMachine,
+            "Twin DRIVER, as Iterator.ConsumerOfSafeSequence: hands the shared consumer only EnvSafe(), but the consumer's MoveNextAsync fans out by CHA to every own async iterator, the interesting one included. ideal: Absent."),
+
+        // ---- Debug (MechanismFixture.Debug: Optimize off, class state machines) ------------------------------
+        new("Debug.AsyncMethod", "Debug",
+            [Own("Debug.Async.AsyncProbes.Probe()"), Own("Debug.Async.AsyncProbes.<Probe>d__0.MoveNext()"), GetEnv],
+            Env, Expectation.Present, Phase.A2StateMachine,
+            "Debug-built: <Probe>d__0 is a CLASS, and the stub does newobj <Probe>d__0..ctor() as well as Start<S>(ref S) - two StateMachine edges, at two offsets, to the one MoveNext."),
+        new("Debug.AsyncMethodSafe", "Debug", [Own("Debug.Async.AsyncProbes.ProbeSafe()")], null, Expectation.Absent, Phase.A2StateMachine,
+            "Twin Debug-built async method."),
+        new("Debug.AsyncLambda", "Debug",
+            [Own("Debug.Async.AsyncLambdaCase.RunsAsyncLambda()"), Own("Debug.Async.AsyncLambdaCase.<>c.<RunsAsyncLambda>b__0_0()"),
+             Own("Debug.Async.AsyncLambdaCase.<>c.<<RunsAsyncLambda>b__0_0>d.MoveNext()"), GetEnv],
+            Env, Expectation.Present, Phase.A2StateMachine,
+            "Debug-built async lambda: ldftn to the lambda (still cached in <>c), whose body does newobj and Start<S> of its CLASS state machine <<RunsAsyncLambda>b__0_0>d."),
+        new("Debug.AsyncLambdaSafe", "Debug", [Own("Debug.Async.AsyncLambdaCase.RunsAsyncLambdaSafe()")], null, Expectation.Absent, Phase.A2StateMachine,
+            "Twin Debug-built async lambda."),
+        new("Debug.IteratorStub", "Debug",
+            [Own("Debug.Iterator.Sequences.Enum()"), Own("Debug.Iterator.Sequences.<Enum>d__0.MoveNext()"), GetEnv],
+            Env, Expectation.Present, Phase.A2StateMachine,
+            "Debug-built iterator: the stub only does newobj <Enum>d__0(System.Int32), as in Release."),
+        new("Debug.IteratorStubSafe", "Debug", [Own("Debug.Iterator.Sequences.EnumSafe()")], null, Expectation.Absent, Phase.A2StateMachine,
+            "Twin Debug-built iterator stub: newobj <EnumSafe>d__1, whose MoveNext is benign."),
     ];
 
     /// <summary>Every opacity row.</summary>
@@ -479,7 +529,8 @@ public static class MechanismGroundTruth
 
     /// <summary>
     /// The mechanisms of the spec's §1.3 catalogue, in its order, then ExpressionTree (added with S1 from review 1's
-    /// suggestions, spec §2.5), then the A2 S1 dispatch mechanisms (cha-a2-dispatch-and-implicit-edges.md §8).
+    /// suggestions, spec §2.5), then the A2 S1 dispatch mechanisms and the A2 S2 state-machine mechanisms
+    /// (cha-a2-dispatch-and-implicit-edges.md §8).
     /// </summary>
     public static IReadOnlyList<string> Mechanisms { get; } =
     [
@@ -487,6 +538,7 @@ public static class MechanismGroundTruth
         "StaticInit", "ModuleInit", "Lambda", "PlatformCallback", "LocalFunction", "Generics", "Async", "Iterator",
         "Opacity", "Safe", "ExpressionTree",
         "ObjectVirtual", "ExplicitImpl", "GenericInterface", "StaticAbstract", "OpenHierarchy", "InheritedImpl",
+        "AsyncIterator", "Debug",
     ];
     #endregion
 
@@ -502,7 +554,7 @@ public static class MechanismGroundTruth
     #endregion
 
     #region Fields
-    /// <summary>The root namespace of both mechanism-fixture assemblies.</summary>
+    /// <summary>The root namespace of every mechanism-fixture assembly (the Debug-built one under <c>MechanismFixture.Debug</c>).</summary>
     public const string RootNamespace = "MechanismFixture";
 
     // A property, not a static readonly field: Paths' initializer runs first in textual order and would see null.

@@ -184,7 +184,8 @@ public sealed class MethodGraphAcceptanceTests : IClassFixture<MechanismMethodGr
     // ---- the graph against an independent walk -----------------------------------------------------------------
 
     /// <summary>
-    /// The STATIC edges (every kind but <see cref="MethodEdgeKind.Dispatch"/>): one per call-site instruction to the
+    /// The STATIC edges (every kind but <see cref="MethodEdgeKind.Dispatch"/> and <see cref="MethodEdgeKind.StateMachine"/>,
+    /// neither of which is a call site — A2 spec acceptance 3): one per call-site instruction to the
     /// node <see cref="MemberIndex.Resolve"/> names — or, for an <see cref="ResolutionKind.Ambiguous"/> site, one edge
     /// to EVERY candidate (S1: over-approximate, never pick one and drop the rest) — each with the instruction's kind
     /// and IL offset; the whole edge sequence, compared element by element.
@@ -193,6 +194,12 @@ public sealed class MethodGraphAcceptanceTests : IClassFixture<MechanismMethodGr
     /// each node <see cref="MemberIndex.DispatchTargets"/> names for it — virtual for <c>callvirt</c>/<c>ldvirtftn</c>,
     /// not for <c>call</c>/<c>newobj</c>/<c>ldftn</c> — and there is no Dispatch edge anywhere else; that sequence is
     /// compared element by element too. Non-vacuous: the fixture's CHA rows' dispatch edges are among them.
+    /// </para>
+    /// <para>
+    /// Since A2 S2 a site that creates (<c>newobj</c>) or names as a method generic argument (<c>call</c>/<c>callvirt</c>)
+    /// an own state machine ALSO has one <see cref="MethodEdgeKind.StateMachine"/> edge, at its own offset, to each node
+    /// <see cref="MemberIndex.StateMachineTargets"/> names for it except the caller itself; never at an <c>ldftn</c>
+    /// or <c>ldvirtftn</c>, and nowhere else. Compared element by element as well.
     /// </para>
     /// </summary>
     [Fact]
@@ -209,9 +216,20 @@ public sealed class MethodGraphAcceptanceTests : IClassFixture<MechanismMethodGr
                 .Select(to => new MethodEdge(s.Caller.NodeId, to, MethodEdgeKind.Dispatch, s.Offset)))
             .OrderBy(e => e.From, StringComparer.Ordinal).ThenBy(e => e.To, StringComparer.Ordinal).ThenBy(e => e.Offset)
             .ToArray();
+        var expectedStateMachine = graph.Sites
+            .Where(s => s.Kind is MethodEdgeKind.NewObj or MethodEdgeKind.Call or MethodEdgeKind.CallVirt)
+            .SelectMany(s => graph.Index.StateMachineTargets(s.Target, s.Kind == MethodEdgeKind.NewObj)
+                .Where(to => to != s.Caller.NodeId)
+                .Select(to => new MethodEdge(s.Caller.NodeId, to, MethodEdgeKind.StateMachine, s.Offset)))
+            .OrderBy(e => e.From, StringComparer.Ordinal).ThenBy(e => e.To, StringComparer.Ordinal).ThenBy(e => e.Offset)
+            .ToArray();
 
-        Assert.Equal(expected, graph.Graph.Edges.Where(e => e.Kind != MethodEdgeKind.Dispatch));
+        Assert.Equal(expected, graph.Graph.Edges.Where(e => e.Kind is not (MethodEdgeKind.Dispatch or MethodEdgeKind.StateMachine)));
         Assert.Equal(expectedDispatch, graph.Graph.Edges.Where(e => e.Kind == MethodEdgeKind.Dispatch));
+        Assert.Equal(expectedStateMachine, graph.Graph.Edges.Where(e => e.Kind == MethodEdgeKind.StateMachine));
+        Assert.NotEmpty(expectedStateMachine);
+        Assert.DoesNotContain(graph.Sites, s => s.Kind is MethodEdgeKind.Ldftn or MethodEdgeKind.Ldvirtftn &&
+            graph.Graph.Edges.Any(e => e.Kind == MethodEdgeKind.StateMachine && e.From == s.Caller.NodeId && e.Offset == s.Offset));
 
         // Non-vacuous: interface, virtual, platform-declared (IEnumerator.MoveNext) and static-abstract fan-out.
         Assert.Contains(new MethodEdge(Fixture("Interface.Dispatch.CallsThroughInterface()"), Fixture("Interface.EnvProbe.Run()"), MethodEdgeKind.Dispatch,
@@ -259,8 +277,11 @@ public sealed class MethodGraphAcceptanceTests : IClassFixture<MechanismMethodGr
     /// can tell apart — each with two candidate edges, so the graph has exactly four more STATIC edges than call sites.
     /// The <see cref="MethodEdgeKind.Dispatch"/> edges (A2 S1) are not call sites: <see cref="GraphCoverage.DispatchEdges"/>
     /// counts them, and <see cref="GraphCoverage.DispatchSites"/> counts the sites <see cref="MemberIndex.DispatchTargets"/>
-    /// answers for (an empty answer included). The member index itself skipped nothing (W1: <see cref="IndexCoverage"/>
-    /// all zero — no unresolved supertype either — surfaced unchanged as <see cref="GraphCoverage.Index"/>).
+    /// answers for (an empty answer included). Nor are the <see cref="MethodEdgeKind.StateMachine"/> edges (A2 S2,
+    /// acceptance 3): they are in neither <see cref="GraphCoverage.CallSites"/> nor <see cref="GraphCoverage.Resolutions"/>,
+    /// which stay exactly the call-site counts while the graph has state-machine edges. The member index itself skipped
+    /// nothing (W1: <see cref="IndexCoverage"/> all zero — no unresolved supertype either — surfaced unchanged as
+    /// <see cref="GraphCoverage.Index"/>).
     /// </summary>
     [Fact]
     public void Coverage_IsInternallyConsistent_WithTheCallSitesAndTheEdges()
@@ -282,7 +303,8 @@ public sealed class MethodGraphAcceptanceTests : IClassFixture<MechanismMethodGr
         Assert.Equal(graph.Sites.Count + calli, coverage.CallSites);
         Assert.Equal(calli, graph.Graph.Opacities.Count(o => o.Kind == OpacityKind.IndirectCall));
         Assert.Equal(4, counts.Ambiguous);
-        Assert.Equal(resolved + counts.Ambiguous, graph.Graph.Edges.Count(e => e.Kind != MethodEdgeKind.Dispatch));   // each ambiguous site: 2 candidates = 1 extra edge
+        Assert.Equal(resolved + counts.Ambiguous, graph.Graph.Edges.Count(e => e.Kind is not (MethodEdgeKind.Dispatch or MethodEdgeKind.StateMachine)));   // each ambiguous site: 2 candidates = 1 extra edge
+        Assert.True(graph.Graph.Edges.Count(e => e.Kind == MethodEdgeKind.StateMachine) > 0);   // ...and none of these is counted above
         Assert.Equal(own, counts.Exact + counts.Substituted + counts.Ambiguous);
         Assert.Equal(graph.Sites.Count - own, counts.External);
         Assert.Equal(0, counts.Unresolved);
@@ -305,14 +327,16 @@ public sealed class MethodGraphAcceptanceTests : IClassFixture<MechanismMethodGr
     /// Since A2 S1 a dispatching site also carries <see cref="MethodEdgeKind.Dispatch"/> edges beside its static ones:
     /// never a site of its own (every Dispatch edge sits at an instruction that also has its static edge), and only at
     /// a <c>callvirt</c>, an <c>ldvirtftn</c> or a <c>call</c> (the static rule) — never at a <c>newobj</c> or an
-    /// <c>ldftn</c> in this fixture.
+    /// <c>ldftn</c> in this fixture. Since A2 S2 the same holds for <see cref="MethodEdgeKind.StateMachine"/> edges,
+    /// at a <c>newobj</c>, a <c>call</c> or a <c>callvirt</c> only — never at an <c>ldftn</c> or <c>ldvirtftn</c>.
     /// </para>
     /// </summary>
     [Fact]
     public void EdgeKinds_MatchTheInstructionKinds()
     {
-        var staticEdges = graph.Graph.Edges.Where(e => e.Kind != MethodEdgeKind.Dispatch).ToArray();
+        var staticEdges = graph.Graph.Edges.Where(e => e.Kind is not (MethodEdgeKind.Dispatch or MethodEdgeKind.StateMachine)).ToArray();
         var dispatchEdges = graph.Graph.Edges.Where(e => e.Kind == MethodEdgeKind.Dispatch).ToArray();
+        var stateMachineEdges = graph.Graph.Edges.Where(e => e.Kind == MethodEdgeKind.StateMachine).ToArray();
 
         Assert.Equal(
             graph.Sites.GroupBy(s => s.Kind).OrderBy(g => g.Key).Select(g => (g.Key, g.Count())),
@@ -327,8 +351,78 @@ public sealed class MethodGraphAcceptanceTests : IClassFixture<MechanismMethodGr
         Assert.Contains(dispatchEdges, e => staticKindAt[(e.From, e.Offset)] == MethodEdgeKind.CallVirt);
         Assert.Contains(dispatchEdges, e => staticKindAt[(e.From, e.Offset)] == MethodEdgeKind.Call);   // StaticAbstract's T.Make()
 
-        // State-machine and type-initializer edges are later A2 slices: declared, never populated yet.
-        Assert.DoesNotContain(graph.Graph.Edges, e => e.Kind is MethodEdgeKind.StateMachine or MethodEdgeKind.TypeInitializer);
+        Assert.NotEmpty(stateMachineEdges);
+        Assert.All(stateMachineEdges, e => Assert.True(
+            staticKindAt.TryGetValue((e.From, e.Offset), out var kind) && kind is MethodEdgeKind.NewObj or MethodEdgeKind.Call or MethodEdgeKind.CallVirt,
+            $"{e}: no static edge of a state-machine-naming kind at this site"));
+        Assert.Contains(stateMachineEdges, e => staticKindAt[(e.From, e.Offset)] == MethodEdgeKind.NewObj);   // iterators
+        Assert.Contains(stateMachineEdges, e => staticKindAt[(e.From, e.Offset)] == MethodEdgeKind.Call);     // Start<S>
+
+        // Type-initializer edges are a later A2 slice (S3): declared, never populated yet.
+        Assert.DoesNotContain(graph.Graph.Edges, e => e.Kind == MethodEdgeKind.TypeInitializer);
+    }
+
+    /// <summary>
+    /// Every <see cref="MethodEdgeKind.StateMachine"/> edge, checked against properties read from the graph, the index and
+    /// the IL rather than from <see cref="MemberIndex.StateMachineTargets"/>: it sits at a <c>newobj</c> or
+    /// <c>call</c>/<c>callvirt</c> site of its own source; it leads to an own bodied method, not the source itself, that is
+    /// an instance <c>MoveNext</c> or <c>MoveNextAsync</c> (by its implemented name) with no parameters, declared by an
+    /// own type below <c>IAsyncStateMachine</c>, <c>IEnumerator</c>/<c>IEnumerator`1</c> or <c>IAsyncEnumerator`1</c>;
+    /// and that type is the constructor's declaring type at a <c>newobj</c>, or one of the generic method's arguments at a
+    /// call. Non-vacuous over every fixture shape: an iterator stub, a Release async stub, an async-iterator stub (to
+    /// MoveNext AND MoveNextAsync), and MoveNextAsync to MoveNext.
+    /// </summary>
+    [Fact]
+    public void StateMachineEdges_LeadFromANewobjOrACallNamingTheType_ToItsOwnMoveNext()
+    {
+        var sitesAt = graph.Sites.GroupBy(s => (s.Caller.NodeId, s.Offset)).ToDictionary(g => g.Key, g => Assert.Single(g));
+        var methods = graph.Index.Methods.ToLookup(m => m.NodeId, StringComparer.Ordinal);
+        string[] roots = ["System.Runtime.CompilerServices.IAsyncStateMachine", "System.Collections.IEnumerator", "System.Collections.Generic.IEnumerator`1", "System.Collections.Generic.IAsyncEnumerator`1"];
+        var stateMachines = graph.Graph.Edges.Where(e => e.Kind == MethodEdgeKind.StateMachine).ToArray();
+
+        foreach (var edge in stateMachines)
+        {
+            var site = sitesAt[(edge.From, edge.Offset)];
+            Assert.True(site.Kind is MethodEdgeKind.NewObj or MethodEdgeKind.Call or MethodEdgeKind.CallVirt, $"{edge}: from a {site.Kind} site");
+            Assert.NotEqual(edge.From, edge.To);
+            var target = Assert.Single(methods[edge.To]);
+            Assert.Equal(MethodNodeKind.OwnWithBody, graph.Graph.Node(edge.To)?.Kind);
+            Assert.False(target.Definition.IsStatic, $"{edge}: static target");
+            Assert.Empty(target.Identity.ParameterTypes);
+            var name = target.Definition.Name;
+            Assert.True(name is "MoveNext" || name.EndsWith(".MoveNextAsync", StringComparison.Ordinal) || name.EndsWith(".MoveNext", StringComparison.Ordinal),
+                $"{edge}: {name} is not a MoveNext");
+            Assert.True(Below(target.DeclaringTypeId, roots), $"{edge}: {target.DeclaringTypeId} is below no state-machine root");
+
+            var named = site.Kind == MethodEdgeKind.NewObj
+                ? [CanonicalName.NodeId(ModelNames.Of(site.Target).DeclaringType)]
+                : site.Target.GenericArguments.OfType<Model.Types.IBasicType>().Select(t => ModelNames.TypeName(t)).ToArray();
+            Assert.True(named.Any(n => n == target.DeclaringTypeId || n.StartsWith(target.DeclaringTypeId + "<", StringComparison.Ordinal)),
+                $"{edge}: the site names [{string.Join(", ", named)}], not {target.DeclaringTypeId}");
+        }
+
+        Assert.Contains(new MethodEdge(Fixture("Iterator.Sequences.Enum()"), Fixture("Iterator.Sequences.<Enum>d__0.MoveNext()"), MethodEdgeKind.StateMachine,
+            Assert.Single(graph.SitesIn(Fixture("Iterator.Sequences.Enum()"), Fixture("Iterator.Sequences.<Enum>d__0..ctor(System.Int32)"))).Offset), stateMachines);
+        Assert.Contains(stateMachines, e => e.From == Fixture("Async.AsyncProbes.Probe()") && e.To == Fixture("Async.AsyncProbes.<Probe>d__0.MoveNext()"));
+        Assert.Contains(stateMachines, e => e.From == Fixture("AsyncIterator.Sequences.Env()") && e.To == Fixture("AsyncIterator.Sequences.<Env>d__0.MoveNext()"));
+        Assert.Contains(stateMachines, e => e.From == Fixture("AsyncIterator.Sequences.Env()") && e.To == Fixture(EnvMoveNextAsync));
+        Assert.Contains(stateMachines, e => e.From == Fixture(EnvMoveNextAsync) && e.To == Fixture("AsyncIterator.Sequences.<Env>d__0.MoveNext()"));
+    }
+
+    // Whether an own type id reaches one of roots by its supertypes (bounded: the fixture's hierarchies are shallow).
+    private bool Below(string typeId, string[] roots)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var queue = new Queue<string>([typeId]);
+        while (queue.TryDequeue(out var type) && seen.Count < 256)
+            foreach (var super in graph.Index.Types(type).SelectMany(t => t.Supertypes))
+            {
+                if (roots.Contains(super))
+                    return true;
+                if (seen.Add(super))
+                    queue.Enqueue(super);
+            }
+        return false;
     }
 
     /// <summary>
@@ -364,10 +458,13 @@ public sealed class MethodGraphAcceptanceTests : IClassFixture<MechanismMethodGr
         var ambiguousSites = graph.Graph.Opacities.Where(o => o.Kind == OpacityKind.Ambiguous).Select(o => (o.Site, o.Offset)).ToHashSet();
         var checkedAmbiguous = new List<string>();
         var dispatchChecked = 0;
+        var stateMachinesChecked = 0;
         foreach (var caller in ownWithBody)
         {
-            // The static edges only: Dispatch edges (A2 S1) are CHA's addition, not a call-site target CCI names.
-            var edgesByOffset = graph.Graph.Successors(caller).Where(e => e.Kind != MethodEdgeKind.Dispatch).GroupBy(e => e.Offset).ToDictionary(g => g.Key, g => g.ToArray());
+            // The static edges only: Dispatch edges (A2 S1) are CHA's addition, and StateMachine edges (A2 S2) lead to a
+            // MoveNext no instruction calls - neither is a call-site target CCI names.
+            var edgesByOffset = graph.Graph.Successors(caller).Where(e => e.Kind is not (MethodEdgeKind.Dispatch or MethodEdgeKind.StateMachine))
+                .GroupBy(e => e.Offset).ToDictionary(g => g.Key, g => g.ToArray());
             var cciSites = sites.Sites.Where(s => s.Caller == caller).ToArray();
 
             var offsetsInGraph = edgesByOffset.Keys.Order().ToArray();
@@ -381,6 +478,12 @@ public sealed class MethodGraphAcceptanceTests : IClassFixture<MechanismMethodGr
                 dispatchChecked++;
                 if (!offsetsInCci.Contains(dispatch.Offset))
                     problems.Add($"{caller} @IL_{dispatch.Offset:x4}: Dispatch edge to {dispatch.To} at no CCI call site");
+            }
+            foreach (var stateMachine in graph.Graph.Successors(caller).Where(e => e.Kind == MethodEdgeKind.StateMachine))
+            {
+                stateMachinesChecked++;
+                if (!offsetsInCci.Contains(stateMachine.Offset) || !sites.Definitions.ContainsKey(stateMachine.To))
+                    problems.Add($"{caller} @IL_{stateMachine.Offset:x4}: StateMachine edge to {stateMachine.To} at no CCI call site, or to no CCI definition");
             }
 
             foreach (var site in cciSites)
@@ -420,6 +523,8 @@ public sealed class MethodGraphAcceptanceTests : IClassFixture<MechanismMethodGr
         Assert.Equal(2, checkedAmbiguous.Count(at => at.StartsWith(Fixture("Resolution.NestedCallers.CallsInnermost"), StringComparison.Ordinal)));
         Assert.Equal(graph.Graph.Coverage.DispatchEdges, dispatchChecked);
         Assert.True(dispatchChecked > 0);
+        Assert.Equal(graph.Graph.Edges.Count(e => e.Kind == MethodEdgeKind.StateMachine), stateMachinesChecked);
+        Assert.True(stateMachinesChecked > 0);
     }
 
     [Fact]
@@ -523,6 +628,7 @@ public sealed class MethodGraphAcceptanceTests : IClassFixture<MechanismMethodGr
 
     #region Fields
     private const string ModuleTypeInitializer = "<Module>..cctor()";
+    private const string EnvMoveNextAsync = "AsyncIterator.Sequences.<Env>d__0.System.Collections.Generic.IAsyncEnumerator<System.String>.MoveNextAsync()";
 
     /// <summary>The definitions the wrong-definition sites of <c>MechanismFixture.Resolution</c> really name (CCI's answer).</summary>
     private static readonly string[] WrongDefinitionShapes =
