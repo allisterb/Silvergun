@@ -49,7 +49,10 @@ public sealed class TypeForwarders
     #region Methods
     /// <summary>
     /// Reads the forwarders of the assembly file at <paramref name="path"/>. Never throws: a missing, unreadable or
-    /// malformed file, or a forwarded name that is not valid UTF-8, is <see cref="Unreadable"/>, never <see cref="None"/>.
+    /// malformed file, a forwarded name that is not valid UTF-8, an ExportedType table of more than 65,536 rows, or a
+    /// forwarded name of more than 1,024 bytes, or distinct forwarded names that total more than 4 MiB, is
+    /// <see cref="Unreadable"/>, never <see cref="None"/>. The work and what is kept are bounded by the table and the
+    /// bounds, never by how often rows repeat one long string.
     /// </summary>
     public static TypeForwarders Read(string? path)
     {
@@ -63,6 +66,8 @@ public sealed class TypeForwarders
                 return Unreadable;
             // Raw rows: no WinRT projection, which CCI does not apply either.
             var metadata = pe.GetMetadataReader(MetadataReaderOptions.None, strictUtf8);
+            if (metadata.GetTableRowCount(TableIndex.ExportedType) > MaxRows)
+                return Unreadable;
             var rows = metadata.ExportedTypes
                 .Select(metadata.GetExportedType)
                 .Where(e => e.Implementation.Kind is HandleKind.AssemblyReference or HandleKind.AssemblyFile)
@@ -71,12 +76,33 @@ public sealed class TypeForwarders
                         ? metadata.GetAssemblyFile((AssemblyFileHandle)e.Implementation).Name
                         : metadata.GetAssemblyReference((AssemblyReferenceHandle)e.Implementation).Name))
                 .ToArray();
-            var unterminated = UnterminatedFrom(pe, metadata);
+            // The heap offset from which a string runs to the end of the #Strings heap with no NUL: CCI's string reader
+            // drops the last byte of such a string, so it would decode differently there than here. Only strings a kept
+            // row uses matter (review 6 W-C: junk padding after the last terminator must not cost an assembly that
+            // forwards nothing). SRM's heap size leaves out trailing NUL padding only, so a heap that ends in a
+            // terminator yields its size.
+            var heap = pe.GetMetadata().GetContent(metadata.GetHeapMetadataOffset(HeapIndex.String), metadata.GetHeapSize(HeapIndex.String));
+            var unterminated = heap.LastIndexOf((byte)0) + 1;
             // A nil handle is the empty string at offset 0, which runs unterminated only in a heap with no NUL at all.
             if (rows.Any(r => new[] { r.Namespace, r.Name, r.Target }.Any(h => (!h.IsNil || unterminated == 0) && MetadataTokens.GetHeapOffset(h) >= unterminated)))
                 return Unreadable;
+            // Every string a kept row uses is at most MaxNameBytes long, found by a bounded scan for its terminator
+            // before anything is decoded, and the distinct ones total at most MaxDecodedBytes; each is decoded once
+            // (review A1-TF). Rows sharing one long string, or pointing into many offsets of one, would otherwise
+            // decode and keep rows × length characters.
+            int Length(StringHandle handle)
+            {
+                var offset = MetadataTokens.GetHeapOffset(handle);
+                var end = heap.IndexOf(0, offset, Math.Min(MaxNameBytes + 1, heap.Length - offset));
+                return end < 0 ? -1 : end - offset;
+            }
+            var lengths = rows.SelectMany(r => new[] { r.Namespace, r.Name, r.Target }).Distinct().Select(Length).ToArray();
+            if (lengths.Any(l => l < 0) || lengths.Sum(l => (long)l) > MaxDecodedBytes)
+                return Unreadable;
+            var strings = new Dictionary<StringHandle, string>();
+            string Decode(StringHandle handle) => strings.TryGetValue(handle, out var text) ? text : strings[handle] = metadata.GetString(handle);
             var decoded = rows
-                .Select(r => (r.IsModule, Row: ((string?)metadata.GetString(r.Namespace), (string?)metadata.GetString(r.Name), (string?)metadata.GetString(r.Target))))
+                .Select(r => (r.IsModule, Row: ((string?)Decode(r.Namespace), (string?)Decode(r.Name), (string?)Decode(r.Target))))
                 .ToArray();
             return Of(decoded.Where(r => !r.IsModule).Select(r => r.Row), decoded.Where(r => r.IsModule).Select(r => r.Row));
         }
@@ -135,16 +161,6 @@ public sealed class TypeForwarders
         return (space.TrimStart('.'), tick < 0 ? type : type[..tick]);
     }
 
-    // The heap offset from which a string runs to the end of the #Strings heap with no NUL: CCI's string reader drops
-    // the last byte of such a string, so it would decode differently there than here. Only strings a kept row uses
-    // matter (review 6 W-C: junk padding after the last terminator must not cost an assembly that forwards nothing).
-    // SRM's heap size leaves out trailing NUL padding only, so a heap that ends in a terminator yields its size.
-    private static int UnterminatedFrom(PEReader pe, MetadataReader metadata)
-    {
-        var size = metadata.GetHeapSize(HeapIndex.String);
-        return pe.GetMetadata().GetContent(metadata.GetHeapMetadataOffset(HeapIndex.String), size).LastIndexOf((byte)0) + 1;
-    }
-
     // File and assembly names compare case-insensitively, as everywhere in the index; the ordinal-least spelling is
     // kept, so the result does not depend on row order.
     private static string[] Canonical(IEnumerable<string> names) =>
@@ -155,6 +171,13 @@ public sealed class TypeForwarders
     // Throws on invalid UTF-8 instead of substituting U+FFFD, which would make a name CCI decodes leniently compare
     // unequal (review 5 C-F); Read turns the throw into Unreadable.
     private static readonly MetadataStringDecoder strictUtf8 = new(new UTF8Encoding(false, true));
+
+    // Bounds on what Read decodes and keeps (review A1-TF), far above any real facade's row count or name length; past
+    // either bound the table is Unreadable, never guessed.
+    private const int MaxRows = 65_536;
+    private const int MaxNameBytes = 1_024;
+    // netstandard.dll, the largest table among 11,493 platform and pack assemblies (review A1-TF), forwards 2,458 types.
+    private const int MaxDecodedBytes = 4 * 1024 * 1024;
 
     private readonly IReadOnlyDictionary<(string Namespace, string Name), Exports>? exports;
     #endregion

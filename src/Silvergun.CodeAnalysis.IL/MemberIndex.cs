@@ -133,8 +133,12 @@ public sealed class MemberIndex
         this.open = open;
         Coverage = coverage;
         assemblySet = new HashSet<string>(assemblies, StringComparer.OrdinalIgnoreCase);
+        canonicalAssemblies = assemblies.ToDictionary(a => a, a => a, StringComparer.OrdinalIgnoreCase);
         byNodeId = Group(methods, m => m.NodeId);
-        byShape = Group(methods, m => Shape(m.DeclaringTypeId, m.Definition.Name, m.Identity.GenericArity, m.Identity.ParameterTypes.Count));
+        // Per assembly, so a lookup costs what it finds, never a scan of other assemblies' same-named definitions; and
+        // each definition's return type rendered once here, not per reference (review A1-W2r5).
+        byShape = Group(methods, m => Key([AssemblyKey(m.Assembly), Shape(m.DeclaringTypeId, m.Definition.Name, m.Identity.GenericArity, m.Identity.ParameterTypes.Count)]));
+        byReturn = Group(methods, m => Key([AssemblyKey(m.Assembly), m.NodeId, ModelNames.ReturnType(m.Definition, [])]));
         byImplementedShape = Group(methods, m => ImplementedShape(ImplementedName(m.Definition.Name), m.Identity.GenericArity, m.Identity.ParameterTypes.Count));
         // By reference: Model's MethodDefinition has no value equality worth trusting. Build removes duplicate assembly
         // instances, and the first entry wins anyway, so a definition reachable twice cannot throw here.
@@ -274,9 +278,10 @@ public sealed class MemberIndex
     /// a generic type instantiation is matched by substituting the instantiation's arguments into each candidate's
     /// parameters and comparing the rendered signatures exactly, return type included; anything left over is
     /// <see cref="ResolutionKind.Ambiguous"/> rather than guessed, and so is a match on a signature that renders
-    /// truncated or clamped. A reference whose type the declaring assembly forwards is followed to the forward's target;
-    /// if the type is also defined along the way, both are kept as <see cref="ResolutionKind.Ambiguous"/>. Results are
-    /// memoized. Never throws.
+    /// truncated or clamped, and an instantiation whose declaring type has more than 64 same-shaped definitions, which
+    /// are kept as candidates without being compared. A reference whose type the declaring assembly forwards is
+    /// followed to the forward's target; if the type is also defined along the way, both are kept as
+    /// <see cref="ResolutionKind.Ambiguous"/>. Results are memoized. Never throws.
     /// </summary>
     public MethodResolution Resolve(IMethodReference? reference)
     {
@@ -631,36 +636,50 @@ public sealed class MemberIndex
     // signature that rendered truncated (<unknown>) or with a clamped array rank, so that a text match proves nothing
     // (CCI's reference truncates at its real depth, a candidate at another) - nothing is excluded: every same-shaped
     // candidate is kept, and even a lone one is Ambiguous.
+    // A non-generic site is one lookup by node id and return type, both precomputed per definition. A substituted one
+    // renders each same-shaped candidate, so past MaxComparedCandidates it is Ambiguous without comparing: N same-shaped
+    // definitions against M distinct instantiations would otherwise render N×M signatures (review A1-W2r5). Whenever
+    // nothing is compared, the answer is the whole shape bucket, whose candidate ids are computed once per bucket.
     private MethodResolution ResolveOwn(string assembly, string nodeId, string key, MethodIdentity target, string returnType, IReadOnlyList<string>? typeArguments)
     {
         var truncated = target.ParameterTypes.Any(IsTruncated) || IsTruncated(returnType);
-        var cannotCheck = typeArguments switch
+        var unreadable = typeArguments switch
         {
             null => "the instantiation's type arguments could not be recovered",
             { Count: > 0 } when truncated => "the instantiated signature could not be read in full",
             { Count: 0 } when truncated => "the signature could not be read in full",
             _ => null,
         };
-        var sameShape = typeArguments is { Count: 0 } && cannotCheck is null
-            ? []
-            : InAssembly(byShape, Shape(CanonicalName.NodeId(target.DeclaringType), target.MethodName, target.GenericArity, target.ParameterTypes.Count), assembly);
-        var matches = cannotCheck is not null || typeArguments is null ? sameShape
-            : typeArguments.Count == 0
-                ? InAssembly(byNodeId, CanonicalName.NodeId(target), assembly)
-                    .Where(m => ModelNames.ReturnType(m.Definition, []) == returnType).ToArray()
+        var shapeKey = Key([AssemblyKey(assembly), Shape(CanonicalName.NodeId(target.DeclaringType), target.MethodName, target.GenericArity, target.ParameterTypes.Count)]);
+        var sameShape = typeArguments is { Count: 0 } && unreadable is null ? [] : byShape.GetValueOrDefault(shapeKey) ?? [];
+        var cannotCheck = unreadable
+            ?? (typeArguments is { Count: > 0 } && sameShape.Count > MaxComparedCandidates
+                ? $"more than {MaxComparedCandidates} definitions have this shape, too many to compare"
+                : null);
+        if (cannotCheck is not null)
+            return sameShape.Count == 0
+                ? new(ResolutionKind.Unresolved, nodeId, key, assembly, null, [], $"no indexed definition has this shape; {cannotCheck}")
+                : new(ResolutionKind.Ambiguous, nodeId, key, assembly, null,
+                    shapeCandidates.GetOrAdd(shapeKey, _ => sameShape.Select(m => m.NodeId).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray()),
+                    cannotCheck);
+
+        IReadOnlyList<IndexedMethod> matches = typeArguments!.Count == 0
+            ? byReturn.GetValueOrDefault(Key([AssemblyKey(assembly), CanonicalName.NodeId(target), returnType])) ?? []
             : sameShape.Where(m => ModelNames.ParameterTypes(m.Definition, typeArguments).SequenceEqual(target.ParameterTypes, StringComparer.Ordinal)
                 && ModelNames.ReturnType(m.Definition, typeArguments) == returnType).ToArray();
 
-        return (matches.Length, cannotCheck) switch
+        return matches.Count switch
         {
-            (0, null) => new(ResolutionKind.Unresolved, nodeId, key, assembly, null, [], "no indexed definition matches"),
-            (0, _) => new(ResolutionKind.Unresolved, nodeId, key, assembly, null, [], $"no indexed definition has this shape; {cannotCheck}"),
-            (1, null) => Own(typeArguments is { Count: 0 } ? ResolutionKind.Exact : ResolutionKind.Substituted, key, matches[0]),
+            0 => new(ResolutionKind.Unresolved, nodeId, key, assembly, null, [], "no indexed definition matches"),
+            1 => Own(typeArguments.Count == 0 ? ResolutionKind.Exact : ResolutionKind.Substituted, key, matches[0]),
             _ => new(ResolutionKind.Ambiguous, nodeId, key, assembly, null,
                 matches.Select(m => m.NodeId).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(),
-                cannotCheck ?? (typeArguments is { Count: 0 } ? "several definitions share this node id" : "several definitions match the instantiated signature")),
+                typeArguments.Count == 0 ? "several definitions share this node id" : "several definitions match the instantiated signature"),
         };
     }
+
+    // The canonical spelling of an assembly name (ownership is case-insensitive), for keys.
+    private string AssemblyKey(string assembly) => canonicalAssemblies.GetValueOrDefault(assembly) ?? assembly;
 
     // A supertype is keyed where the CLR lands it (TypeScope). A struct's base, System.ValueType, is implicit in Model;
     // it is what makes a struct's ToString an override of Object's.
@@ -891,11 +910,6 @@ public sealed class MemberIndex
     private static MethodResolution Own(ResolutionKind kind, string key, IndexedMethod method) =>
         new(kind, method.NodeId, key, method.Assembly, method.Definition, [method.NodeId], null);
 
-    private static IndexedMethod[] InAssembly(IReadOnlyDictionary<string, IReadOnlyList<IndexedMethod>> lookup, string key, string assembly) =>
-        lookup.TryGetValue(key, out var found)
-            ? found.Where(m => string.Equals(m.Assembly, assembly, StringComparison.OrdinalIgnoreCase)).ToArray()
-            : [];
-
     private static string Shape(string typeNodeId, string? name, int arity, int parameters) =>
         Key([typeNodeId, name ?? CanonicalName.UnknownPart, arity.ToString(CultureInfo.InvariantCulture), parameters.ToString(CultureInfo.InvariantCulture)]);
 
@@ -929,7 +943,13 @@ public sealed class MemberIndex
     private readonly IReadOnlyDictionary<string, IReadOnlyList<IndexedType>> types;
     private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> subtypes;
     private readonly IReadOnlyDictionary<string, IReadOnlyList<IndexedMethod>> byNodeId;
+    // Per (canonical assembly, shape) and per (canonical assembly, node id, unsubstituted return type).
     private readonly IReadOnlyDictionary<string, IReadOnlyList<IndexedMethod>> byShape;
+    private readonly IReadOnlyDictionary<string, IReadOnlyList<IndexedMethod>> byReturn;
+    private readonly IReadOnlyDictionary<string, string> canonicalAssemblies;
+
+    // Per byShape key, the distinct, sorted node ids of a whole bucket: the answer whenever nothing can be compared.
+    private readonly ConcurrentDictionary<string, IReadOnlyList<string>> shapeCandidates = new(StringComparer.Ordinal);
     private readonly IReadOnlyDictionary<MethodDefinition, IndexedMethod> ownMethods;
     private readonly IReadOnlyDictionary<string, IReadOnlyList<IndexedMethod>> byImplementedShape;
     private readonly HashSet<string> assemblySet;
@@ -1004,6 +1024,8 @@ public sealed class MemberIndex
     private static readonly string clampedRank = CanonicalName.ArrayOf("T", int.MaxValue)[1..];
 
     private const int MaxBaseDepth = 256;
+    // Same-shaped candidates a substituted reference is compared against before it is Ambiguous unchecked.
+    private const int MaxComparedCandidates = 64;
     private const int MaxHierarchyWalk = 4096;
     private const int UnitLength = 64;
     #endregion

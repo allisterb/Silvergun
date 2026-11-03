@@ -156,6 +156,25 @@ public sealed class MemberIndexNoResolutionInvariantTests : IClassFixture<Assemb
     }
 
     /// <summary>
+    /// The A1 hardening (A1-W2r5): the reworked <c>ResolveOwn</c> (one <c>byReturn</c> lookup for a non-generic site, the
+    /// 64-candidate cap and the shared <c>shapeCandidates</c> for a substituted one) and the per-assembly
+    /// <c>AssemblyKey</c> it keys every bucket with are walked, and <c>Resolve</c> reaches them. Both are methods of a root
+    /// type, so a resolving read added to either turns the guard red.
+    /// </summary>
+    [Fact]
+    public void Walk_CoversTheA1HardenedResolution()
+    {
+        foreach (var method in new[] { "Silvergun.CodeAnalysis.IL.MemberIndex.ResolveOwn(", "Silvergun.CodeAnalysis.IL.MemberIndex.AssemblyKey(" })
+            Assert.Contains(closure.Methods, m => m.StartsWith(method, StringComparison.Ordinal));
+        Assert.Contains(closure.References, r => r.From.StartsWith("Silvergun.CodeAnalysis.IL.MemberIndex.ResolveOwn(", StringComparison.Ordinal) &&
+                                                 r.Member.StartsWith("Silvergun.CodeAnalysis.IL.MemberIndex.AssemblyKey(", StringComparison.Ordinal));
+        // The substituted comparison runs in a lambda of ResolveOwn (the compiler's <ResolveOwn>b__ closure method).
+        Assert.Contains(closure.References, r => r.From.StartsWith("Silvergun.CodeAnalysis.IL.MemberIndex.", StringComparison.Ordinal) &&
+                                                 r.From.Contains("<ResolveOwn>", StringComparison.Ordinal) &&
+                                                 r.Member.StartsWith("Silvergun.CodeAnalysis.IL.ModelNames.ParameterTypes(", StringComparison.Ordinal));
+    }
+
+    /// <summary>
     /// The guard can go red. A MUTANT library is emitted (<see cref="EmittedAssembly"/>; read as metadata only) with the
     /// root types' names: its <c>MemberIndex.DispatchTargets</c> reads <c>IMethodReference.ResolvedMethod</c> directly,
     /// and its <c>MemberIndex.OpenTypes</c> reaches <c>IBasicType.ResolvedType</c> only through a helper in a NON-root
