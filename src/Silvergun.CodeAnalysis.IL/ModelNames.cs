@@ -23,8 +23,10 @@ using Model.Types;
 /// the by-ref-ness only in <see cref="IMethodParameterReference.Kind"/>, so a non-<see cref="MethodParameterKind.In"/>
 /// pointer parameter is unwrapped and rendered <c>T&amp;</c>, matching CCI's by-ref flag.</description></item>
 /// <item><description>A type's <c>GenericParameterCount</c> is already cumulative over its nesting chain, so
-/// arity is read from the innermost type only and never summed; its <c>GenericArguments</c> are cumulative in
-/// the same way and so are taken as-is in signature position.</description></item>
+/// arity is read from the innermost type only and never summed. Its <c>GenericArguments</c> are cumulative only
+/// over links that are themselves instantiated; node ids take them as-is in signature position (CciNames
+/// reproduces the same accumulation), and only <see cref="TypeArguments"/> walks outward to recover the
+/// rest.</description></item>
 /// </list>
 /// Never throws: a null, unresolvable or malformed piece degrades to <see cref="CanonicalName.UnknownPart"/>,
 /// and every walk is depth-limited so a hostile, deeply nested or cyclic reference cannot overflow the stack —
@@ -46,7 +48,7 @@ public static class ModelNames
                 Guard(() => Of(method.ContainingType), TypeIdentity.Unknown),
                 Guard(() => method.Name, null) ?? CanonicalName.UnknownPart,
                 Guard(() => MethodArity(method), 0),
-                Guard(() => ParameterNames(method), []));
+                Guard(() => ParameterNames(method, []), []));
 
     /// <summary>
     /// The identity of <paramref name="type"/>: containing namespace of the outermost type, the outer-to-inner
@@ -61,7 +63,32 @@ public static class ModelNames
     /// <see cref="CanonicalName.NodeId(TypeIdentity)"/>. By-ref is not visible on a type here — see
     /// <see cref="Of(IMethodReference)"/>, which recovers it from the parameter kind.
     /// </summary>
-    public static string TypeName(IType? type) => Guard(() => TypeName(type, 0), CanonicalName.UnknownPart);
+    public static string TypeName(IType? type) => Guard(() => TypeName(type, 0, []), CanonicalName.UnknownPart);
+
+    /// <summary>
+    /// The rendered parameter types of <paramref name="method"/> with every <em>type</em> generic parameter
+    /// <c>!n</c> replaced by <paramref name="typeArguments"/>[n] — what a call site through the instantiation
+    /// <c>Declaring&lt;typeArguments&gt;</c> names. Method generic parameters (<c>!!n</c>) and positions beyond the
+    /// supplied arguments are left positional, and so is everything inside a function pointer type: CCI's
+    /// specialization (<c>TypeHelper.SpecializeTypeReference</c>) has no function-pointer case, so a site keeps the
+    /// definition's <c>!n</c> there. With no arguments this is exactly the
+    /// <see cref="MethodIdentity.ParameterTypes"/> of <see cref="Of(IMethodReference)"/>.
+    /// </summary>
+    public static IReadOnlyList<string> ParameterTypes(IMethodReference? method, IReadOnlyList<string> typeArguments) =>
+        method is null ? [] : Guard(() => ParameterNames(method, typeArguments), []);
+
+    /// <summary>
+    /// The rendered generic arguments of <paramref name="type"/>, cumulative over its nesting chain in signature
+    /// position — one per type generic parameter <c>!n</c> of the definition; empty for a definition or a
+    /// non-generic chain. Unlike the node-id rendering, this walks the chain outward: CCIProvider prepends a
+    /// containing type's arguments only when that link is itself instantiated, so <c>Outer&lt;int&gt;.Inner.Innermost&lt;bool&gt;</c>
+    /// carries only <c>[bool]</c> and <c>Outer&lt;int&gt;.Nested</c> none, while the instantiated outer link is
+    /// still reachable through <see cref="IBasicType.ContainingType"/>. <c>null</c> when the arguments cannot be
+    /// recovered (an unreadable type or argument, the depth bound, a chain that does not add up): the caller must
+    /// then not treat the reference as a definition, nor guess an argument.
+    /// </summary>
+    public static IReadOnlyList<string>? TypeArguments(IBasicType? type) =>
+        type is null ? null : Guard(() => Readable(CumulativeArguments(type, 0)), null);
 
     // Walks the nesting chain outward, accumulating names (outer -> inner), and takes the namespace from the
     // outermost type. Arity comes from the innermost type, which already counts the whole chain. Hitting the
@@ -95,41 +122,79 @@ public static class ModelNames
     private static int MethodArity(IMethodReference method) =>
         method.GenericParameterCount > 0 ? method.GenericParameterCount : method.GenericArguments?.Count ?? 0;
 
-    // Rendered parameter types in declaration order; one unreadable parameter degrades on its own.
-    private static IReadOnlyList<string> ParameterNames(IMethodReference method) =>
-        method.Parameters.Select(p => Guard(() => ParameterName(p, 0), CanonicalName.UnknownPart)).ToArray();
+    // Rendered parameter types in declaration order; one unreadable parameter degrades on its own. `substitution`
+    // replaces type generic parameter !n by its n-th element (empty: render positionally).
+    private static IReadOnlyList<string> ParameterNames(IMethodReference method, IReadOnlyList<string> substitution) =>
+        method.Parameters.Select(p => Guard(() => ParameterName(p, 0, substitution), CanonicalName.UnknownPart)).ToArray();
 
     // CCIProvider erases by-ref into a PointerType and keeps the distinction only in the parameter kind.
-    private static string ParameterName(IMethodParameterReference parameter, int depth) =>
+    private static string ParameterName(IMethodParameterReference parameter, int depth, IReadOnlyList<string> substitution) =>
         parameter.Kind != MethodParameterKind.In && parameter.Type is PointerType byRef
-            ? CanonicalName.ByRefTo(TypeName(byRef.TargetType, depth + 1))
-            : TypeName(parameter.Type, depth + 1);
+            ? CanonicalName.ByRefTo(TypeName(byRef.TargetType, depth + 1, substitution))
+            : TypeName(parameter.Type, depth + 1, substitution);
 
     // Case order mirrors CCIProvider.TypeExtractor.ExtractType so both layers classify a reference the same way.
-    private static string TypeName(IType? type, int depth) =>
+    private static string TypeName(IType? type, int depth, IReadOnlyList<string> substitution) =>
         type is null || depth > MaxDepth ? CanonicalName.UnknownPart
         : type switch
         {
-            ArrayType array => CanonicalName.ArrayOf(TypeName(array.ElementsType, depth + 1), (int)array.Rank),
-            PointerType pointer => CanonicalName.PointerTo(TypeName(pointer.TargetType, depth + 1)),
+            ArrayType array => CanonicalName.ArrayOf(TypeName(array.ElementsType, depth + 1, substitution), (int)array.Rank),
+            PointerType pointer => CanonicalName.PointerTo(TypeName(pointer.TargetType, depth + 1, substitution)),
             IGenericParameterReference parameter => parameter.Kind == GenericParameterKind.Method
                 ? CanonicalName.MethodGenericParameter(parameter.Index)
-                : CanonicalName.TypeGenericParameter(parameter.Index),
+                : parameter.Index < substitution.Count
+                    ? substitution[parameter.Index]
+                    : CanonicalName.TypeGenericParameter(parameter.Index),
+            // Never substituted inside: CCI does not specialize function pointer types (see ParameterTypes).
             FunctionPointerType pointer => CanonicalName.FunctionPointer(
-                TypeName(pointer.ReturnType, depth + 1),
-                pointer.Parameters.Select(p => ParameterName(p, depth + 1))),
-            IBasicType basic => CanonicalName.GenericInstance(CanonicalName.NodeId(Of(basic)), GenericArguments(basic, depth)),
+                TypeName(pointer.ReturnType, depth + 1, []),
+                pointer.Parameters.Select(p => ParameterName(p, depth + 1, []))),
+            IBasicType basic => CanonicalName.GenericInstance(CanonicalName.NodeId(Of(basic)), GenericArguments(basic, depth, substitution)),
             _ => CanonicalName.UnknownPart,
         };
 
     // Generic arguments are kept in signature position (they are what makes a node id unique). Model's list is
-    // already cumulative over the nesting chain — CCIProvider.TypeExtractor.ExtractGenericType prepends the
-    // containing type's arguments — so it is taken as-is and never walked outward; CciNames reproduces exactly
-    // this accumulation on the other side.
-    private static IReadOnlyList<string> GenericArguments(IBasicType type, int depth) =>
+    // cumulative only over instantiated links - CCIProvider.TypeExtractor.ExtractGenericType prepends the
+    // containing type's arguments, which a non-instantiated link does not carry. For node ids it is taken as-is,
+    // never walked outward, because CciNames reproduces exactly this accumulation on the other side; recovering
+    // the full list for substitution is CumulativeArguments' job.
+    private static IReadOnlyList<string> GenericArguments(IBasicType type, int depth, IReadOnlyList<string> substitution) =>
         type.GenericArguments is not { Count: > 0 } arguments
             ? []
-            : [.. arguments.Select(argument => TypeName(argument, depth + 1))];
+            : [.. arguments.Select(argument => TypeName(argument, depth + 1, substitution))];
+
+    // A link's Model arguments are its container's Model arguments plus its own, and a container's Model list is
+    // itself only a suffix of its full list whenever a link further out was not instantiated. So the arguments a
+    // link carries are a suffix of its full list, and the missing prefix is the FRONT of the container's full list.
+    // A chain with no instantiated link at all is a definition: empty. Anything that does not add up is null
+    // (unknown) - never padded, never guessed.
+    private static IReadOnlyList<string>? CumulativeArguments(IBasicType type, int depth)
+    {
+        var own = GenericArguments(type, depth, []);
+        var missing = type.GenericParameterCount - own.Count;
+        if (missing == 0)
+            return own;
+        if (missing < 0)
+            return null;
+        if (type.ContainingType is null)
+            return own.Count == 0 ? [] : null;
+        if (depth >= MaxDepth)
+            return null;
+
+        var outer = CumulativeArguments(type.ContainingType, depth + 1);
+        return outer switch
+        {
+            null => null,
+            [] when own.Count == 0 => [],
+            _ when outer.Count >= missing => [.. outer.Take(missing), .. own],
+            _ => null,
+        };
+    }
+
+    // An argument that rendered <unknown> anywhere would be substituted as a guess and could exclude the true
+    // candidate, so the whole list is unknown instead.
+    private static IReadOnlyList<string>? Readable(IReadOnlyList<string>? arguments) =>
+        arguments?.Any(a => a.Contains(CanonicalName.UnknownPart, StringComparison.Ordinal)) == true ? null : arguments;
 
     // Upholds the never-throws contract: Model resolves lazily against a host, so any read can fault on a
     // corrupt or hostile module. Failures are silent by design - this runs per call site, and logging would flood.

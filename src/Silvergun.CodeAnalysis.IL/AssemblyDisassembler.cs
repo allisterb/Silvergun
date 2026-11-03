@@ -29,12 +29,13 @@ using Backend.Transformations;
 public sealed class AssemblyDisassembler : Runtime, IDisposable
 {
     #region Constructors
-    private AssemblyDisassembler(Model.Host host, Loader loader, Model.Assembly assembly, string assemblyPath)
+    private AssemblyDisassembler(Model.Host host, Loader loader, Model.Assembly assembly, string assemblyPath, TypeForwarders forwarders)
     {
         Host = host;
         this.loader = loader;
         Assembly = assembly;
         AssemblyPath = assemblyPath;
+        Forwarders = forwarders;
     }
     #endregion
 
@@ -48,6 +49,12 @@ public sealed class AssemblyDisassembler : Runtime, IDisposable
     /// <summary>Absolute path of the loaded assembly file.</summary>
     public string AssemblyPath { get; }
 
+    /// <summary>
+    /// The assembly's type forwarders, read from the file at load time: <c>Model</c> does not carry them, and the CLR
+    /// follows them (see <see cref="TypeForwarders"/>).
+    /// </summary>
+    public TypeForwarders Forwarders { get; }
+
     /// <summary>All type definitions in the assembly's root namespace, recursively.</summary>
     public IEnumerable<ITypeDefinition> Types => Assembly.RootNamespace.GetAllTypes();
 
@@ -59,7 +66,7 @@ public sealed class AssemblyDisassembler : Runtime, IDisposable
     #region Methods
     /// <summary>
     /// Validates the file exists, creates a <see cref="Model.Host"/>, resolves the platform types,
-    /// creates a <see cref="Loader"/>, and loads the assembly. Never throws: any failure (bad path,
+    /// creates a <see cref="Loader"/>, and loads the assembly and its <see cref="Forwarders"/>. Never throws: any failure (bad path,
     /// not a managed PE, CCI failure) is returned as a failure <see cref="Result{T}"/>.
     /// </summary>
     public static Result<AssemblyDisassembler> Create(string assemblyPath)
@@ -73,6 +80,7 @@ public sealed class AssemblyDisassembler : Runtime, IDisposable
         try
         {
             fullPath = Path.GetFullPath(assemblyPath);
+            var forwarders = TypeForwarders.Read(fullPath);
             // Serialize host creation through LoadAssembly: Analysis.Net mutates non-concurrent
             // static state during the load (CCIProvider.TypeExtractor.attributesCache and the shared
             // Model.Types.PlatformTypes instances), so concurrent loads corrupt those collections.
@@ -83,7 +91,7 @@ public sealed class AssemblyDisassembler : Runtime, IDisposable
                 loader = new Loader(host);
                 var assembly = loader.LoadAssembly(fullPath);
                 op.Complete();
-                return Result.Success(new AssemblyDisassembler(host, loader, assembly, fullPath));
+                return Result.Success(new AssemblyDisassembler(host, loader, assembly, fullPath, forwarders));
             }
         }
         catch (Exception ex)

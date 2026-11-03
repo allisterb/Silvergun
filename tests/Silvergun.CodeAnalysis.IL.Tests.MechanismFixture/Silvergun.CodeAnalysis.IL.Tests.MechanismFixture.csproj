@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Capslock-style recall fixtures for the CHA call graph (ADR-0020), one namespace per ANALYSIS MECHANISM
+         (docs/agent/tasks/capslock-mechanism-fixtures-and-a1.md §1.2/§1.3). The expected call paths live as
+         data in the test project's MechanismGroundTruth.cs, keyed on CanonicalName.NodeId strings - so any
+         edit here that renames a method, reorders lambdas or adds a compiler-generated type can move a
+         waypoint, and MechanismFixtureSanityTests will say which one.
+
+         net10.0 only: no netfx reference-assemblies package, and `dynamic` (Microsoft.CSharp) and
+         [ModuleInitializer] come from the framework itself - so this project has NO PackageReference at all.
+
+         Optimize is forced on even in Debug: shipped packages are Release-built, and the shapes the graph must
+         handle are Release's - async state machines are STRUCTS and non-capturing lambdas are cached in <>c -
+         not Debug's class state machines.
+
+         AllowUnsafeBlocks: Opacity uses a `delegate*` function pointer, the only way to get a genuine `calli`.
+
+         Deliberately its own project (like VoidReturnFixture), so nothing here perturbs any pinned
+         method-count baseline elsewhere. The assembly is never loaded by the test host - it is read from disk
+         by path - and none of its sinks are ever executed. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Optimize>true</Optimize>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>false</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.MechanismFixture.Dependency\Silvergun.CodeAnalysis.IL.Tests.MechanismFixture.Dependency.csproj" />
+  </ItemGroup>
+
+</Project>

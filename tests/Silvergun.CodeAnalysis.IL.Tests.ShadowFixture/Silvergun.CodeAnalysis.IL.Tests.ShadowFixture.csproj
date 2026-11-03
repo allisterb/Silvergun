@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Name-shadowing fixture for the A1 member index (docs/agent/tasks/capslock-mechanism-fixtures-and-a1.md §2.5,
+         review finding C2). ONE assembly that defines its own System.Environment.GetEnvironmentVariable(string) and
+         its own System.IDisposable - benign, same names as the platform's - AND calls/implements the real platform
+         ones. Node ids are not assembly-qualified, so this is exactly the shape in which an external sink could merge
+         into a same-named own node and be walked through the benign body instead of being classified.
+
+         Its own project, never folded into MechanismFixture: an own System.Environment there would re-key every
+         ground-truth sink in MechanismGroundTruth.cs.
+
+         How the platform type stays reachable from source that shadows it: the System.Runtime reference is given
+         the extern alias `platform` (and keeps `global`) by the target below - MSBuild metadata only, NO
+         PackageReference. In source, System.Environment binds to the own type (CS0436, suppressed here on purpose)
+         and platform::System.Environment to System.Runtime's.
+
+         The assembly is located BY PATH and read as metadata; it is never loaded, and its methods are inert. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Optimize>true</Optimize>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>false</IsTestProject>
+    <!-- CS0436: "the type in source conflicts with the imported type" - the whole point of this fixture. -->
+    <NoWarn>$(NoWarn);CS0436</NoWarn>
+  </PropertyGroup>
+
+  <Target Name="AliasThePlatformRuntime" AfterTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <ReferencePath Condition="'%(Filename)' == 'System.Runtime'">
+        <Aliases>global,platform</Aliases>
+      </ReferencePath>
+    </ItemGroup>
+  </Target>
+
+</Project>

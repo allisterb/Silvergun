@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- The second assembly of the Capslock-style mechanism fixtures
+         (docs/agent/tasks/capslock-mechanism-fixtures-and-a1.md §1.2). It exists ONLY so the CrossAssembly
+         mechanism has a call path that leaves MechanismFixture: MechanismFixture references it, nothing else
+         does. Same settings as MechanismFixture - see the comments there. No PackageReference of any kind. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Optimize>true</Optimize>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>false</IsTestProject>
+  </PropertyGroup>
+
+</Project>

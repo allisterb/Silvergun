@@ -69,6 +69,21 @@
          the real 10,000 cap) now that the cap itself is injectable — see IndicatorCapPayloads.cs for why it is
          still kept as its own (now tiny) assembly rather than folded into the shared fixture. -->
     <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.IndicatorCapFixture\Silvergun.CodeAnalysis.IL.Tests.IndicatorCapFixture.csproj" />
+    <!-- Capslock-style recall fixtures for the CHA call graph, one namespace per analysis mechanism
+         (docs/agent/tasks/capslock-mechanism-fixtures-and-a1.md; ground truth in MechanismGroundTruth.cs).
+         net10.0-only and Release-shaped, so a single plain reference suffices; it brings
+         ...MechanismFixture.Dependency (the CrossAssembly far side) along transitively. Both assemblies are
+         located BY PATH next to this test assembly and read as metadata - never loaded, so the fixture's module
+         initializer and type initializers never run. Its own project so nothing in it moves a pinned
+         method-count baseline elsewhere. -->
+    <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.MechanismFixture\Silvergun.CodeAnalysis.IL.Tests.MechanismFixture.csproj" />
+    <!-- Name-shadowing fixture for the A1 member index (review 1, finding C2): it defines its OWN public
+         System.Environment and System.IDisposable. A BUILD-ORDER dependency only: ReferenceOutputAssembly="false"
+         keeps it off this project's compile and runtime reference set (its System.Environment would otherwise clash
+         with the platform's here) and out of this project's output directory. ShadowFixtureAssembly locates the DLL
+         by path in the fixture project's own bin/<configuration>/net10.0 and it is read as metadata, never loaded. -->
+    <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.ShadowFixture\Silvergun.CodeAnalysis.IL.Tests.ShadowFixture.csproj"
+                      ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>
