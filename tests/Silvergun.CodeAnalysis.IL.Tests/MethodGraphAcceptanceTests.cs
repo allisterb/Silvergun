@@ -184,8 +184,10 @@ public sealed class MethodGraphAcceptanceTests : IClassFixture<MechanismMethodGr
     // ---- the graph against an independent walk -----------------------------------------------------------------
 
     /// <summary>
-    /// The STATIC edges (every kind but <see cref="MethodEdgeKind.Dispatch"/> and <see cref="MethodEdgeKind.StateMachine"/>,
-    /// neither of which is a call site — A2 spec acceptance 3): one per call-site instruction to the
+    /// The STATIC edges (the call-site kinds <c>Call</c>, <c>CallVirt</c>, <c>NewObj</c>, <c>Ldftn</c>, <c>Ldvirtftn</c> —
+    /// not <see cref="MethodEdgeKind.Dispatch"/>, <see cref="MethodEdgeKind.StateMachine"/>,
+    /// <see cref="MethodEdgeKind.TypeInitializer"/> or <see cref="MethodEdgeKind.LoadToken"/>, none of which is a call
+    /// site — A2 spec acceptance 3; S3's two are checked by their own tests below): one per call-site instruction to the
     /// node <see cref="MemberIndex.Resolve"/> names — or, for an <see cref="ResolutionKind.Ambiguous"/> site, one edge
     /// to EVERY candidate (S1: over-approximate, never pick one and drop the rest) — each with the instruction's kind
     /// and IL offset; the whole edge sequence, compared element by element.
@@ -224,7 +226,7 @@ public sealed class MethodGraphAcceptanceTests : IClassFixture<MechanismMethodGr
             .OrderBy(e => e.From, StringComparer.Ordinal).ThenBy(e => e.To, StringComparer.Ordinal).ThenBy(e => e.Offset)
             .ToArray();
 
-        Assert.Equal(expected, graph.Graph.Edges.Where(e => e.Kind is not (MethodEdgeKind.Dispatch or MethodEdgeKind.StateMachine)));
+        Assert.Equal(expected, graph.Graph.Edges.Where(IsCallSiteEdge));
         Assert.Equal(expectedDispatch, graph.Graph.Edges.Where(e => e.Kind == MethodEdgeKind.Dispatch));
         Assert.Equal(expectedStateMachine, graph.Graph.Edges.Where(e => e.Kind == MethodEdgeKind.StateMachine));
         Assert.NotEmpty(expectedStateMachine);
@@ -279,7 +281,11 @@ public sealed class MethodGraphAcceptanceTests : IClassFixture<MechanismMethodGr
     /// counts them, and <see cref="GraphCoverage.DispatchSites"/> counts the sites <see cref="MemberIndex.DispatchTargets"/>
     /// answers for (an empty answer included). Nor are the <see cref="MethodEdgeKind.StateMachine"/> edges (A2 S2,
     /// acceptance 3): they are in neither <see cref="GraphCoverage.CallSites"/> nor <see cref="GraphCoverage.Resolutions"/>,
-    /// which stay exactly the call-site counts while the graph has state-machine edges. The member index itself skipped
+    /// which stay exactly the call-site counts while the graph has state-machine edges — and since A2 S3 the same holds
+    /// for the <see cref="MethodEdgeKind.TypeInitializer"/> and <see cref="MethodEdgeKind.LoadToken"/> edges; the
+    /// <c>ldtoken</c>s of methods are counted in <see cref="GraphCoverage.TokenSites"/> instead (the two expression
+    /// trees'), the Release fixture's module initializer in <see cref="GraphCoverage.ModuleInitializers"/>, and no
+    /// fixture has a renamed implementation or unreadable module metadata. The member index itself skipped
     /// nothing (W1: <see cref="IndexCoverage"/> all zero — no unresolved supertype either — surfaced unchanged as
     /// <see cref="GraphCoverage.Index"/>).
     /// </summary>
@@ -303,8 +309,16 @@ public sealed class MethodGraphAcceptanceTests : IClassFixture<MechanismMethodGr
         Assert.Equal(graph.Sites.Count + calli, coverage.CallSites);
         Assert.Equal(calli, graph.Graph.Opacities.Count(o => o.Kind == OpacityKind.IndirectCall));
         Assert.Equal(4, counts.Ambiguous);
-        Assert.Equal(resolved + counts.Ambiguous, graph.Graph.Edges.Count(e => e.Kind is not (MethodEdgeKind.Dispatch or MethodEdgeKind.StateMachine)));   // each ambiguous site: 2 candidates = 1 extra edge
-        Assert.True(graph.Graph.Edges.Count(e => e.Kind == MethodEdgeKind.StateMachine) > 0);   // ...and none of these is counted above
+        Assert.Equal(resolved + counts.Ambiguous, graph.Graph.Edges.Count(IsCallSiteEdge));   // each ambiguous site: 2 candidates = 1 extra edge
+        // ...and none of these is counted above.
+        Assert.True(graph.Graph.Edges.Count(e => e.Kind == MethodEdgeKind.StateMachine) > 0);
+        Assert.True(graph.Graph.Edges.Count(e => e.Kind == MethodEdgeKind.TypeInitializer) > 0);
+        Assert.Equal(TokenInstructions().Length, coverage.TokenSites);
+        Assert.Equal(2, coverage.TokenSites);
+        Assert.Equal(coverage.TokenSites, graph.Graph.Edges.Count(e => e.Kind == MethodEdgeKind.LoadToken));   // no token here is Ambiguous
+        Assert.Equal(1, coverage.ModuleInitializers);
+        Assert.Equal(0, coverage.RenamedImplementations);
+        Assert.Equal(0, coverage.ModulesUnreadable);
         Assert.Equal(own, counts.Exact + counts.Substituted + counts.Ambiguous);
         Assert.Equal(graph.Sites.Count - own, counts.External);
         Assert.Equal(0, counts.Unresolved);
@@ -334,7 +348,7 @@ public sealed class MethodGraphAcceptanceTests : IClassFixture<MechanismMethodGr
     [Fact]
     public void EdgeKinds_MatchTheInstructionKinds()
     {
-        var staticEdges = graph.Graph.Edges.Where(e => e.Kind is not (MethodEdgeKind.Dispatch or MethodEdgeKind.StateMachine)).ToArray();
+        var staticEdges = graph.Graph.Edges.Where(IsCallSiteEdge).ToArray();
         var dispatchEdges = graph.Graph.Edges.Where(e => e.Kind == MethodEdgeKind.Dispatch).ToArray();
         var stateMachineEdges = graph.Graph.Edges.Where(e => e.Kind == MethodEdgeKind.StateMachine).ToArray();
 
@@ -358,9 +372,134 @@ public sealed class MethodGraphAcceptanceTests : IClassFixture<MechanismMethodGr
         Assert.Contains(stateMachineEdges, e => staticKindAt[(e.From, e.Offset)] == MethodEdgeKind.NewObj);   // iterators
         Assert.Contains(stateMachineEdges, e => staticKindAt[(e.From, e.Offset)] == MethodEdgeKind.Call);     // Start<S>
 
-        // Type-initializer edges are a later A2 slice (S3): declared, never populated yet.
-        Assert.DoesNotContain(graph.Graph.Edges, e => e.Kind == MethodEdgeKind.TypeInitializer);
+        // A2 S3: TypeInitializer and LoadToken edges are not call sites either. A TypeInitializer edge may sit at a
+        // field access, which has no static edge at all; a LoadToken edge always sits where no call-site edge is.
+        Assert.Contains(graph.Graph.Edges, e => e.Kind == MethodEdgeKind.TypeInitializer && staticKindAt.TryGetValue((e.From, e.Offset), out var kind) && kind == MethodEdgeKind.NewObj);
+        Assert.Contains(graph.Graph.Edges, e => e.Kind == MethodEdgeKind.TypeInitializer && !staticKindAt.ContainsKey((e.From, e.Offset)));
+        Assert.All(graph.Graph.Edges.Where(e => e.Kind == MethodEdgeKind.LoadToken), e => Assert.False(staticKindAt.ContainsKey((e.From, e.Offset)), $"{e}"));
     }
+
+    /// <summary>
+    /// The <see cref="MethodEdgeKind.TypeInitializer"/> edges (A2 S3, §4), against an independent walk of the same bytecode:
+    /// one per triggering instruction and target, at its offset — a <c>call</c>/<c>callvirt</c>, <c>newobj</c> or
+    /// <c>ldftn</c>/<c>ldvirtftn</c> of a static method or a constructor, or a load, store or address of a static field —
+    /// to each <c>.cctor</c> <see cref="MemberIndex.TypeInitializerTargets(Model.Types.IMethodReference)"/> names, the
+    /// caller itself excluded; and since S3 review W3, the callee's edge of every walked instance method of an own value
+    /// type, at offset 0, to each <c>.cctor</c> <see cref="MemberIndex.InstanceInitializerTargets"/> names; nothing
+    /// anywhere else. Compared element by element.
+    /// </summary>
+    [Fact]
+    public void TypeInitializerEdges_AreOnePerStaticMemberAccessAndStaticConstructor()
+    {
+        var expected = graph.Index.Methods.Where(m => m.Definition.HasBody)
+            .SelectMany(m => graph.Index.InstanceInitializerTargets(m).Where(to => to != m.NodeId).Select(to => new MethodEdge(m.NodeId, to, MethodEdgeKind.TypeInitializer, 0))
+                .Concat(m.Definition.Body.Instructions.OfType<Model.Bytecode.Instruction>().SelectMany(i => (i switch
+                {
+                    Model.Bytecode.MethodCallInstruction call => graph.Index.TypeInitializerTargets(call.Method),
+                    Model.Bytecode.CreateObjectInstruction create => graph.Index.TypeInitializerTargets(create.Constructor),
+                    Model.Bytecode.LoadMethodAddressInstruction load => graph.Index.TypeInitializerTargets(load.Method),
+                    Model.Bytecode.LoadFieldInstruction field => graph.Index.TypeInitializerTargets(field.Field),
+                    Model.Bytecode.StoreFieldInstruction field => graph.Index.TypeInitializerTargets(field.Field),
+                    _ => [],
+                }).Where(to => to != m.NodeId).Select(to => new MethodEdge(m.NodeId, to, MethodEdgeKind.TypeInitializer, i.Offset)))))
+            .OrderBy(e => e.From, StringComparer.Ordinal).ThenBy(e => e.To, StringComparer.Ordinal).ThenBy(e => e.Offset)
+            .ToArray();
+
+        Assert.Equal(expected, graph.Graph.Edges.Where(e => e.Kind == MethodEdgeKind.TypeInitializer));
+        Assert.Contains(new MethodEdge(Fixture("StaticInit.Triggers.TriggersInit()"), Fixture("StaticInit.FieldInit..cctor()"), MethodEdgeKind.TypeInitializer, 0), expected);
+        Assert.Contains(new MethodEdge(Fixture("StaticInit.Creators.CreatesExplicitInit()"), Fixture("StaticInit.Constructed..cctor()"), MethodEdgeKind.TypeInitializer, 0), expected);
+        Assert.Contains(new MethodEdge(Fixture("StaticInit.ValueInit.M()"), Fixture("StaticInit.ValueInit..cctor()"), MethodEdgeKind.TypeInitializer, 0), expected);
+    }
+
+    /// <summary>
+    /// Every <see cref="MethodEdgeKind.TypeInitializer"/> edge, checked against the IL and the index rather than
+    /// <see cref="MemberIndex.TypeInitializerTargets(Model.Types.IMethodReference)"/>: it leads to an own bodied static
+    /// <c>.cctor()</c> other than its source; and the instruction at its offset is a call, <c>newobj</c> or <c>ldftn</c> of
+    /// a static method or a constructor, or a field load/store of a static field, whose declaring type is the
+    /// <c>.cctor</c>'s (generic arguments aside) — or, since S3 review W3, the source is an instance method of an own
+    /// struct and the edge sits at offset 0 and leads to that struct's own <c>.cctor</c>. Non-vacuous over field loads,
+    /// <c>newobj</c> and the value-type rule, and no edge leaves an instance field access or an instance method call.
+    /// </summary>
+    [Fact]
+    public void TypeInitializerEdges_LeadFromAStaticMemberAccess_ToItsTypesStaticConstructor()
+    {
+        var bodies = graph.Index.Methods.Where(m => m.Definition.HasBody).ToDictionary(m => m.NodeId, m => m.Definition.Body.Instructions.OfType<Model.Bytecode.Instruction>().ToArray(), StringComparer.Ordinal);
+        var methods = graph.Index.Methods.ToLookup(m => m.NodeId, StringComparer.Ordinal);
+        var edges = graph.Graph.Edges.Where(e => e.Kind == MethodEdgeKind.TypeInitializer).ToArray();
+        var triggers = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var edge in edges)
+        {
+            Assert.NotEqual(edge.From, edge.To);
+            var target = Assert.Single(methods[edge.To]);
+            Assert.True(target.Definition.IsStatic && target.Definition.Name == ".cctor" && target.Definition.HasBody, $"{edge}: not a static constructor");
+            // S3 review W3: the callee's edge - an instance method of an own struct, at offset 0, to its own type's .cctor.
+            var source = Assert.Single(methods[edge.From]);
+            if (edge.Offset == 0 && !source.Definition.IsStatic && source.DeclaringTypeId == target.DeclaringTypeId &&
+                graph.Index.Types(source.DeclaringTypeId).Any(t => t.Definition is Model.Types.StructDefinition))
+            {
+                triggers.Add("value-type instance method");
+                continue;
+            }
+            var instruction = Assert.Single(bodies[edge.From], i => i.Offset == edge.Offset);
+            var (trigger, declaring) = instruction switch
+            {
+                Model.Bytecode.MethodCallInstruction { Method: var m } when m.IsStatic || m.Name == ".ctor" => ("call", m.ContainingType),
+                Model.Bytecode.CreateObjectInstruction { Constructor: var c } => ("newobj", c.ContainingType),
+                Model.Bytecode.LoadMethodAddressInstruction { Method: var m } when m.IsStatic || m.Name == ".ctor" => ("ldftn", m.ContainingType),
+                Model.Bytecode.LoadFieldInstruction { Field: { IsStatic: true } f } => ("load", f.ContainingType),
+                Model.Bytecode.StoreFieldInstruction { Field: { IsStatic: true } f } => ("store", f.ContainingType),
+                _ => (null, null),
+            };
+            Assert.True(trigger is not null, $"{edge}: {instruction} is no trigger");
+            triggers.Add(trigger!);
+            var type = ModelNames.TypeName(declaring!);
+            Assert.True(type == target.DeclaringTypeId || type.StartsWith(target.DeclaringTypeId + "<", StringComparison.Ordinal), $"{edge}: the member's type is {type}");
+        }
+
+        Assert.Contains("load", triggers);
+        Assert.Contains("newobj", triggers);
+        Assert.Contains("value-type instance method", triggers);
+        Assert.DoesNotContain(edges, e => bodies[e.From].Single(i => i.Offset == e.Offset) is Model.Bytecode.LoadFieldInstruction { Field.IsStatic: false });
+    }
+
+    /// <summary>
+    /// The <see cref="MethodEdgeKind.LoadToken"/> edges (A2 S3, §5), against an independent walk: one per <c>ldtoken</c> of
+    /// a METHOD, at its offset, to the node <see cref="MemberIndex.Resolve"/> names (every candidate, if Ambiguous) —
+    /// here the two expression trees', to the platform sinks as External leaves. An <c>ldtoken</c> of a type or a field
+    /// (<c>typeof(...)</c>) adds no edge, and no <c>ldtoken</c> is fanned out by Dispatch.
+    /// </summary>
+    [Fact]
+    public void LoadTokenEdges_AreOnePerMethodToken_ToTheResolvedNode_AndOtherTokensAddNothing()
+    {
+        var expected = TokenInstructions()
+            .SelectMany(t => graph.Index.Resolve(t.Token) is { Kind: ResolutionKind.Ambiguous } ambiguous
+                ? ambiguous.Candidates.Select(c => new MethodEdge(t.Caller, c, MethodEdgeKind.LoadToken, t.Offset))
+                : [new MethodEdge(t.Caller, graph.Index.Resolve(t.Token).NodeId, MethodEdgeKind.LoadToken, t.Offset)])
+            .OrderBy(e => e.From, StringComparer.Ordinal).ThenBy(e => e.To, StringComparer.Ordinal).ThenBy(e => e.Offset)
+            .ToArray();
+        var otherTokens = graph.Index.Methods.Where(m => m.Definition.HasBody)
+            .SelectMany(m => m.Definition.Body.Instructions.OfType<Model.Bytecode.LoadTokenInstruction>()
+                .Where(i => i.Token is not Model.Types.IMethodReference).Select(i => (m.NodeId, i.Offset)))
+            .ToArray();
+
+        Assert.Equal(expected, graph.Graph.Edges.Where(e => e.Kind == MethodEdgeKind.LoadToken));
+        Assert.Equal(
+            [new MethodEdge(Fixture("ExpressionTree.Trees.CompilesEnvTree()"), "System.Environment.GetEnvironmentVariable(System.String)", MethodEdgeKind.LoadToken, 1),
+             new MethodEdge(Fixture("ExpressionTree.Trees.CompilesSafeTree()"), "System.String.Concat(System.String,System.String)", MethodEdgeKind.LoadToken, 1)],
+            expected);
+        Assert.Equal(MethodNodeKind.External, graph.Graph.Node("System.Environment.GetEnvironmentVariable(System.String)")?.Kind);
+        Assert.NotEmpty(otherTokens);
+        Assert.DoesNotContain(graph.Graph.Edges, e => otherTokens.Contains((e.From, e.Offset)));
+        Assert.DoesNotContain(graph.Graph.Edges, e => e.Kind == MethodEdgeKind.Dispatch && expected.Any(t => t.From == e.From && t.Offset == e.Offset));
+    }
+
+    // Every ldtoken of a method in the indexed bodies, read from Model independently of the graph.
+    private (string Caller, uint Offset, Model.Types.IMethodReference Token)[] TokenInstructions() =>
+        [.. graph.Index.Methods.Where(m => m.Definition.HasBody)
+            .SelectMany(m => m.Definition.Body.Instructions.OfType<Model.Bytecode.LoadTokenInstruction>()
+                .Where(i => i.Token is Model.Types.IMethodReference)
+                .Select(i => (m.NodeId, i.Offset, (Model.Types.IMethodReference)i.Token)))];
 
     /// <summary>
     /// Every <see cref="MethodEdgeKind.StateMachine"/> edge, checked against properties read from the graph, the index and
@@ -459,11 +598,22 @@ public sealed class MethodGraphAcceptanceTests : IClassFixture<MechanismMethodGr
         var checkedAmbiguous = new List<string>();
         var dispatchChecked = 0;
         var stateMachinesChecked = 0;
+        var typeInitializersChecked = 0;
+        var tokensChecked = 0;
+        // Every ldtoken of a method, from raw CCI: (caller, offset, the token's node id).
+        var cciTokens = new[] { cci.Fixture, cci.Dependency }
+            .SelectMany(a => a.Module.GetAllTypes().SelectMany(t => t.Methods))
+            .SelectMany(m => (AssemblyAnalyzer.TryReadBody(m).Body?.Operations ?? [])
+                .Where(op => op.OperationCode == Microsoft.Cci.OperationCode.Ldtoken && op.Value is Microsoft.Cci.IMethodReference)
+                .Select(op => (CanonicalName.NodeId(CciNames.Of(m)), op.Offset, CanonicalName.NodeId(CciNames.Of((Microsoft.Cci.IMethodReference)op.Value)))))
+            .ToHashSet();
         foreach (var caller in ownWithBody)
         {
             // The static edges only: Dispatch edges (A2 S1) are CHA's addition, and StateMachine edges (A2 S2) lead to a
             // MoveNext no instruction calls - neither is a call-site target CCI names.
-            var edgesByOffset = graph.Graph.Successors(caller).Where(e => e.Kind is not (MethodEdgeKind.Dispatch or MethodEdgeKind.StateMachine))
+            // Since A2 S3 TypeInitializer edges (implied by a member access) and LoadToken edges (an ldtoken) are not
+            // call-site targets either; both are checked against CCI separately below.
+            var edgesByOffset = graph.Graph.Successors(caller).Where(IsCallSiteEdge)
                 .GroupBy(e => e.Offset).ToDictionary(g => g.Key, g => g.ToArray());
             var cciSites = sites.Sites.Where(s => s.Caller == caller).ToArray();
 
@@ -484,6 +634,18 @@ public sealed class MethodGraphAcceptanceTests : IClassFixture<MechanismMethodGr
                 stateMachinesChecked++;
                 if (!offsetsInCci.Contains(stateMachine.Offset) || !sites.Definitions.ContainsKey(stateMachine.To))
                     problems.Add($"{caller} @IL_{stateMachine.Offset:x4}: StateMachine edge to {stateMachine.To} at no CCI call site, or to no CCI definition");
+            }
+            foreach (var initializer in graph.Graph.Successors(caller).Where(e => e.Kind == MethodEdgeKind.TypeInitializer))
+            {
+                typeInitializersChecked++;
+                if (!sites.Definitions.ContainsKey(initializer.To) || !initializer.To.EndsWith("..cctor()", StringComparison.Ordinal))
+                    problems.Add($"{caller} @IL_{initializer.Offset:x4}: TypeInitializer edge to {initializer.To}, which is no CCI static constructor");
+            }
+            foreach (var token in graph.Graph.Successors(caller).Where(e => e.Kind == MethodEdgeKind.LoadToken))
+            {
+                tokensChecked++;
+                if (!cciTokens.Contains((caller, token.Offset, token.To)))
+                    problems.Add($"{caller} @IL_{token.Offset:x4}: LoadToken edge to {token.To}, which CCI's ldtoken there does not name");
             }
 
             foreach (var site in cciSites)
@@ -525,6 +687,10 @@ public sealed class MethodGraphAcceptanceTests : IClassFixture<MechanismMethodGr
         Assert.True(dispatchChecked > 0);
         Assert.Equal(graph.Graph.Edges.Count(e => e.Kind == MethodEdgeKind.StateMachine), stateMachinesChecked);
         Assert.True(stateMachinesChecked > 0);
+        Assert.Equal(graph.Graph.Edges.Count(e => e.Kind == MethodEdgeKind.TypeInitializer), typeInitializersChecked);
+        Assert.True(typeInitializersChecked > 0);
+        Assert.Equal(cciTokens.Count, tokensChecked);
+        Assert.Equal(2, tokensChecked);
     }
 
     [Fact]
@@ -554,21 +720,32 @@ public sealed class MethodGraphAcceptanceTests : IClassFixture<MechanismMethodGr
     /// offsets. The only other opacities are the four honestly <see cref="OpacityKind.Ambiguous"/> sites — the
     /// <c>Overloads&lt;int&gt;.M</c> pair (S1) and the <c>Outer4&lt;string&gt;.Mid.Inner&lt;int&gt;.Innermost&lt;bool&gt;.M</c>
     /// pair (S2, C-A); no <see cref="OpacityKind.NameShadowed"/> (the fixture shadows no platform name), and no
-    /// <see cref="OpacityKind.Unresolved"/> (the S2 nested-generic sites all resolve).
+    /// <see cref="OpacityKind.Unresolved"/> (the S2 nested-generic sites all resolve). Since A2 S3 there is also one
+    /// per-assembly module record (spec §6): the Release fixture's <c>&lt;Module&gt;</c> has a static constructor (its one
+    /// method), so one <see cref="OpacityKind.ModuleInitializerInvisible"/> sited at
+    /// <c>[Silvergun.CodeAnalysis.IL.Tests.MechanismFixture]&lt;Module&gt;</c>, offset 0, naming the method count; the
+    /// Dependency has no module initializer and neither has a renamed implementation, so they add none.
     /// </summary>
     [Fact]
-    public void Opacities_AreExactlyTheTwoCalliSites_AndTheFourHonestlyAmbiguousSites()
+    public void Opacities_AreExactlyTheTwoCalliSites_TheFourHonestlyAmbiguousSites_AndTheModuleInitializer()
     {
+        var module = MemberIndex.Qualified(MechanismFixtureAssemblies.FixtureName, "<Module>");
         Assert.Equal(
             [(Fixture("Opacity.Pointers.CallsThroughPointer()"), OpacityKind.IndirectCall),
              (Fixture("Opacity.Pointers.CallsThroughPointerSafe()"), OpacityKind.IndirectCall),
              (Fixture("Resolution.NestedCallers.CallsInnermostGeneric()"), OpacityKind.Ambiguous),
              (Fixture("Resolution.NestedCallers.CallsInnermostString()"), OpacityKind.Ambiguous),
              (Fixture("Resolution.WrongDefinitionCallers.CallsGenericOverload()"), OpacityKind.Ambiguous),
-             (Fixture("Resolution.WrongDefinitionCallers.CallsIntOverload()"), OpacityKind.Ambiguous)],
+             (Fixture("Resolution.WrongDefinitionCallers.CallsIntOverload()"), OpacityKind.Ambiguous),
+             (module, OpacityKind.ModuleInitializerInvisible)],
             graph.Graph.Opacities.Select(o => (o.Site, o.Kind)));
+        Assert.Equal(
+            new GraphOpacity(module, 0, OpacityKind.ModuleInitializerInvisible,
+                "<Module> has a module initializer, which runs when the assembly loads, and 1 method; the model loads none of them"),
+            graph.Graph.Opacities[^1]);
+        Assert.Null(graph.Graph.Node(module));
 
-        foreach (var opacity in graph.Graph.Opacities)
+        foreach (var opacity in graph.Graph.Opacities.Where(o => o.Site != module))
         {
             var body = graph.Index.Methods.Single(m => m.NodeId == opacity.Site).Definition.Body.Instructions;
             if (opacity.Kind == OpacityKind.IndirectCall)
@@ -624,6 +801,10 @@ public sealed class MethodGraphAcceptanceTests : IClassFixture<MechanismMethodGr
     }
 
     private static string Fixture(string nodeIdWithoutRoot) => $"{MechanismGroundTruth.RootNamespace}.{nodeIdWithoutRoot}";
+
+    // A call-site instruction's own edge: not Dispatch, StateMachine, TypeInitializer or LoadToken (A2 acceptance 3).
+    private static bool IsCallSiteEdge(MethodEdge edge) =>
+        edge.Kind is MethodEdgeKind.Call or MethodEdgeKind.CallVirt or MethodEdgeKind.NewObj or MethodEdgeKind.Ldftn or MethodEdgeKind.Ldvirtftn;
     #endregion
 
     #region Fields

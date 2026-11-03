@@ -38,6 +38,74 @@ namespace MechanismFixture.StaticInit
         // Twin.
         public static string TriggersSafeInit() => SafeFieldInit.Value;
     }
+
+    // A2 S3 (cha-a2-dispatch-and-implicit-edges.md §8): an instantiable class with an explicit static constructor,
+    // reached only by `newobj` of its instance constructor - no static member of it is ever named outside it.
+    public sealed class Constructed
+    {
+        static Constructed()
+        {
+            Captured = Environment.GetEnvironmentVariable(Names.Variable);
+        }
+
+        internal static string Captured;
+    }
+
+    // Twin: same shape, benign static constructor.
+    public sealed class SafeConstructed
+    {
+        static SafeConstructed()
+        {
+            Captured = string.Concat(Names.Variable, Names.Suffix);
+        }
+
+        internal static string Captured;
+    }
+
+    public static class Creators
+    {
+        // Only CONSTRUCTS: newobj Constructed::.ctor(), whose static constructor the runtime runs first.
+        public static object CreatesExplicitInit() => new Constructed();
+
+        // Twin.
+        public static object CreatesSafeInit() => new SafeConstructed();
+    }
+
+    // A2 S3 review W3: a STRUCT with an explicit static constructor (so not beforefieldinit). Calling an instance method
+    // of it runs the static constructor first (ECMA-335 II.10.5.3.1), though no static member is named and nothing is
+    // constructed: `default(ValueInit).M()` is initobj + call ValueInit::M().
+    public struct ValueInit
+    {
+        static ValueInit()
+        {
+            Captured = Environment.GetEnvironmentVariable(Names.Variable);
+        }
+
+        internal static string Captured;
+
+        public int M() => 1;
+    }
+
+    // Twin: same shape, benign static constructor.
+    public struct SafeValueInit
+    {
+        static SafeValueInit()
+        {
+            Captured = string.Concat(Names.Variable, Names.Suffix);
+        }
+
+        internal static string Captured;
+
+        public int M() => 2;
+    }
+
+    public static class ValueCallers
+    {
+        public static int CallsValueMember() => default(ValueInit).M();
+
+        // Twin.
+        public static int CallsSafeValueMember() => default(SafeValueInit).M();
+    }
 }
 
 // Mechanism: a module initializer - runs when the assembly is loaded, with no caller in IL other than the

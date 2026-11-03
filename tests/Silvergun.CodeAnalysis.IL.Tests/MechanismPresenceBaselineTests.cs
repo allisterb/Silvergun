@@ -93,6 +93,14 @@ public sealed class MechanismPresenceBaselineTests : IClassFixture<MechanismFixt
             ["Debug.AsyncMethod"] = (true, false),
             ["Debug.AsyncLambda"] = (true, false),
             ["Debug.IteratorStub"] = (true, false),
+            // A2 S3, measured 2026-11-03. The newobj row is like the trigger rows: Constructed..cctor has the finding,
+            // CreatesExplicitInit does not. DISAGREES with "the direct caller has the capability": CompilesEnvTree's
+            // only reference to the sink is an ldtoken, which the scanner, unlike the A2 graph, does not treat as a use
+            // (it reports DynamicCodeLoading for the Compile call there, not EnvironmentProbe).
+            ["StaticInit.CreatesExplicitInit"] = (true, false),
+            // S3 review W3, measured 2026-11-03: ValueInit..cctor (the penultimate waypoint) has the finding.
+            ["StaticInit.CallsValueMember"] = (true, false),
+            ["ExpressionTree.CompilesEnvTree"] = (false, false),
         };
 
     public static TheoryData<string> PresentRowsWithCapability() =>
@@ -129,13 +137,14 @@ public sealed class MechanismPresenceBaselineTests : IClassFixture<MechanismFixt
     }
 
     [Fact]
-    public void Baseline_DirectCallers_CarryTheCapability_ExceptThePInvokeCaller()
+    public void Baseline_DirectCallers_CarryTheCapability_ExceptThePInvokeCallerAndTheTokenUser()
     {
         // The spec's "the method that calls the sink directly has the capability" - holds for every row except the
-        // P/Invoke one, whose capability the scanner attributes to the extern declaration instead.
-        var exceptions = Measured.Where(m => !m.Value.DirectCaller).Select(m => m.Key);
+        // P/Invoke one, whose capability the scanner attributes to the extern declaration instead, and (since A2 S3
+        // promoted it to Present) ExpressionTree.CompilesEnvTree, which only ldtokens the sink: the scanner sees no use.
+        var exceptions = Measured.Where(m => !m.Value.DirectCaller).Select(m => m.Key).Order(StringComparer.Ordinal);
 
-        Assert.Equal(["Opacity.PInvokeCapability"], exceptions);
+        Assert.Equal(["ExpressionTree.CompilesEnvTree", "Opacity.PInvokeCapability"], exceptions);
     }
 
     /// <summary>
@@ -180,6 +189,7 @@ public sealed class MechanismPresenceBaselineTests : IClassFixture<MechanismFixt
                 "Debug.AsyncMethod",                  // state-machine edge (Debug: newobj + Start<S>)
                 "Debug.IteratorStub",                 // newobj closure => MoveNext edge
                 "ExplicitImpl.CallsExplicit",         // CHA: explicit implementation name
+                "ExpressionTree.CompilesEnvTree",     // LoadToken edge (ldtoken is not a call site)
                 "GenericInterface.ComparesThroughInterface", // CHA from IComparer<string>.Compare
                 "Generics.ConstrainedCall",           // CHA: constrained callvirt IBaz.Baz -> A.Baz
                 "InheritedImpl.CallsInherited",       // CHA: interface slot filled by an inherited method (C1)
@@ -195,6 +205,8 @@ public sealed class MechanismPresenceBaselineTests : IClassFixture<MechanismFixt
                 "OpenHierarchy.FlushesEnvStream",     // CHA open-type rule from System.IO.Stream.Flush (D2)
                 "OpenHierarchy.FlushesSafeStream",    // CHA open-type rule from System.IO.Stream.Flush (D2)
                 "StaticAbstract.BuildsEnv",           // CHA static rule: constrained. call IFactory.Make
+                "StaticInit.CallsValueMember",        // TypeInitializer edge (a value type's instance method)
+                "StaticInit.CreatesExplicitInit",     // TypeInitializer edge (from newobj)
                 "StaticInit.TriggersExplicitInit",    // TypeInitializer edge
                 "StaticInit.TriggersInit",            // TypeInitializer edge
                 "TypeTest.CallsMaybeTouch",           // CHA
@@ -258,7 +270,8 @@ public sealed class MechanismPresenceBaselineTests : IClassFixture<MechanismFixt
     [
         // S1's ExpressionTree pair: both bodies callvirt Expression`1.Compile (DynamicCodeLoading). There is NO
         // EnvironmentProbe finding for CompilesEnvTree - its only reference to the sink is an ldtoken, which the
-        // scanner, like the A1 graph, does not treat as a call (row ExpressionTree.CompilesEnvTree, KnownGap).
+        // scanner, like the A1 graph, does not treat as a call (row ExpressionTree.CompilesEnvTree: KnownGap until A2
+        // S3's LoadToken edge, Present since - in the graph, not here).
         "DynamicCodeLoading Call MechanismFixture.ExpressionTree.Trees::CompilesEnvTree -> System.Linq.Expressions.Expression<System.Func<System.String>>.Compile",
         "DynamicCodeLoading Call MechanismFixture.ExpressionTree.Trees::CompilesSafeTree -> System.Linq.Expressions.Expression<System.Func<System.String>>.Compile",
         "DynamicCodeLoading Call MechanismFixture.Opacity.Dynamic::CallsDynamic -> Microsoft.CSharp.RuntimeBinder.Binder.InvokeMember",
@@ -302,8 +315,12 @@ public sealed class MechanismPresenceBaselineTests : IClassFixture<MechanismFixt
         "EnvironmentProbe Call MechanismFixture.Opacity.Targets::ReadsEnv -> System.Environment.GetEnvironmentVariable",
         "EnvironmentProbe Call MechanismFixture.PlatformCallback.EnvComparer::Compare -> System.Environment.GetEnvironmentVariable",
         "EnvironmentProbe Call MechanismFixture.PlatformCallback.EnvToString::ToString -> System.Environment.GetEnvironmentVariable",
+        // A2 S3's newobj case: the explicit static constructor of the type CreatesExplicitInit constructs.
+        "EnvironmentProbe Call MechanismFixture.StaticInit.Constructed::.cctor -> System.Environment.GetEnvironmentVariable",
         "EnvironmentProbe Call MechanismFixture.StaticInit.ExplicitInit::.cctor -> System.Environment.GetEnvironmentVariable",
         "EnvironmentProbe Call MechanismFixture.StaticInit.FieldInit::.cctor -> System.Environment.GetEnvironmentVariable",
+        // S3 review W3: the value type's static constructor.
+        "EnvironmentProbe Call MechanismFixture.StaticInit.ValueInit::.cctor -> System.Environment.GetEnvironmentVariable",
         "EnvironmentProbe Call MechanismFixture.Transitive.Chain::Inner -> System.Environment.GetEnvironmentVariable",
         "EnvironmentProbe Call MechanismFixture.Virtual.EnvWorker::Run -> System.Environment.GetEnvironmentVariable",
         "FileSystem Call MechanismFixture.TypeTest.FileToucher::Touch -> System.IO.File.ReadAllText",

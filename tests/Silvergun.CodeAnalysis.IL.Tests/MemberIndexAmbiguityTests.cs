@@ -131,8 +131,10 @@ public sealed class MemberIndexAmbiguityTests
         // one edge; only Overloads<int>.M(t:)/M(i:) (M(!0), M(System.Int32)) and, since S2, Outer4<string>.Mid.Inner<int>
         // .Innermost<bool>.M(t:)/M(s:) (M(!0), M(System.String)) have two genuinely different candidates, and each of
         // those four sites exists once per copy: 4 sites x 2 copies x 1 extra candidate = 8 extra edges. StateMachine
-        // edges (A2 S2) are not call sites either, so they are left out here and checked on their own below.
-        var staticEdges = graph.Edges.Where(e => e.Kind is not (MethodEdgeKind.Dispatch or MethodEdgeKind.StateMachine)).ToArray();
+        // edges (A2 S2) are not call sites either, nor are TypeInitializer and LoadToken edges (A2 S3), so they are left
+        // out here and checked on their own below.
+        var staticEdges = graph.Edges.Where(e => e.Kind is MethodEdgeKind.Call or MethodEdgeKind.CallVirt or MethodEdgeKind.NewObj
+            or MethodEdgeKind.Ldftn or MethodEdgeKind.Ldvirtftn).ToArray();
         Assert.Equal(
             sites.Sum(s => index.Resolve(s.Target) is { Kind: ResolutionKind.Ambiguous } a ? a.Candidates.Count : 1),
             staticEdges.Length);
@@ -164,6 +166,15 @@ public sealed class MemberIndexAmbiguityTests
             .ToArray();
         Assert.Equal(expectedStateMachine, graph.Edges.Where(e => e.Kind == MethodEdgeKind.StateMachine));
         Assert.Equal(2, graph.Edges.Count(e => e.Kind == MethodEdgeKind.StateMachine && e.From == IteratorStub && e.To == IteratorMoveNext));
+
+        // A2 S3: static constructors are found by declaring-type id, not through Resolve, so ambiguity hides none: both
+        // copies of TriggersInit reach the one FieldInit..cctor node, and both copies of CompilesEnvTree have their
+        // LoadToken edge to the (unambiguous, external) sink. The module record is one per assembly NAME.
+        Assert.Equal(2, graph.Edges.Count(e => e.Kind == MethodEdgeKind.TypeInitializer && e.From == TriggersInit && e.To == FieldInitCctor));
+        Assert.Equal(2, graph.Edges.Count(e => e.Kind == MethodEdgeKind.LoadToken && e.From == CompilesEnvTree));
+        Assert.Equal(4, graph.Coverage.TokenSites);
+        Assert.Equal(1, graph.Coverage.ModuleInitializers);
+        Assert.Single(graph.Opacities, o => o.Kind == OpacityKind.ModuleInitializerInvisible);
     }
 
     /// <summary>
@@ -207,5 +218,8 @@ public sealed class MemberIndexAmbiguityTests
     private const string EnvProbeRun = "MechanismFixture.Interface.EnvProbe.Run()";
     private const string IteratorStub = "MechanismFixture.Iterator.Sequences.Enum()";
     private const string IteratorMoveNext = "MechanismFixture.Iterator.Sequences.<Enum>d__0.MoveNext()";
+    private const string TriggersInit = "MechanismFixture.StaticInit.Triggers.TriggersInit()";
+    private const string FieldInitCctor = "MechanismFixture.StaticInit.FieldInit..cctor()";
+    private const string CompilesEnvTree = "MechanismFixture.ExpressionTree.Trees.CompilesEnvTree()";
     #endregion
 }

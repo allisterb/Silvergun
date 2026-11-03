@@ -113,18 +113,46 @@ public sealed class MemberIndexNoResolutionInvariantTests : IClassFixture<Assemb
 
     /// <summary>
     /// A2 S2 (spec acceptance 4): the guard covers the state-machine code — <c>StateMachineTargets</c>, the precomputed
-    /// <c>StateMachines</c> walk down the subtype map, and the graph's <c>AddStateMachines</c> — and that code reads the
-    /// Model members a forbidden read would sit beside (<c>ContainingType</c> and <c>GenericArguments</c> of the
-    /// reference, <c>IsStatic</c> of the candidate <c>MoveNext</c>).
+    /// <c>StateMachines</c> walk down the subtype map, and the graph's <c>AddImplied&lt;T&gt;</c> (S3's name for S2's
+    /// <c>AddStateMachines</c>, which the state-machine and type-initializer edges now share; generic since S3 review N5,
+    /// taking a STATIC lambda per call) — and that code reads the Model members a forbidden read would sit beside
+    /// (<c>ContainingType</c> and <c>GenericArguments</c> of the reference, <c>IsStatic</c> of the candidate
+    /// <c>MoveNext</c>). The static lambdas that ask the index are walked too: one in the builder's lambda class
+    /// references <c>StateMachineTargets</c>.
     /// </summary>
     [Fact]
     public void Walk_CoversTheStateMachineCode()
     {
         foreach (var method in StateMachineMethods)
             Assert.Contains(closure.Methods, m => m.StartsWith(method, StringComparison.Ordinal));
+        Assert.Contains(closure.References, r => r.From.StartsWith(BuilderLambdas, StringComparison.Ordinal) &&
+                                                 r.Member.StartsWith("Silvergun.CodeAnalysis.IL.MemberIndex.StateMachineTargets(", StringComparison.Ordinal));
 
         foreach (var member in new[] { "ContainingType", "GenericArguments", "IsStatic" })
             Assert.Contains(closure.References, r => r.Member.StartsWith("Model.Types.", StringComparison.Ordinal) && Bare(r.Member) == member);
+    }
+
+    /// <summary>
+    /// A2 S3 (spec acceptance 4): the guard covers the type-initializer, <c>ldtoken</c> and module code — both
+    /// <c>TypeInitializerTargets</c> overloads, S3 review W3's <c>InstanceInitializerTargets</c>, the shared <c>Lookup</c>,
+    /// <c>Module</c>, and the graph's <c>AddImplied&lt;T&gt;</c>, <c>AddToken</c>, <c>AddResolved</c> and <c>AddModule</c>
+    /// — and reaches <see cref="ModuleMetadata"/>'s own code through them, and the builder's static lambdas that ask
+    /// <c>TypeInitializerTargets</c> and <c>InstanceInitializerTargets</c>. That code reads the Model members a forbidden
+    /// read would sit beside: a field reference's <c>IsStatic</c> and <c>ContainingType</c>, a method reference's
+    /// <c>Name</c>, and <c>LoadTokenInstruction.Token</c>.
+    /// </summary>
+    [Fact]
+    public void Walk_CoversTheTypeInitializerTokenAndModuleCode()
+    {
+        foreach (var method in S3Methods)
+            Assert.Contains(closure.Methods, m => m.StartsWith(method, StringComparison.Ordinal));
+        foreach (var asked in new[] { "TypeInitializerTargets(", "InstanceInitializerTargets(" })
+            Assert.Contains(closure.References, r => r.From.StartsWith(BuilderLambdas, StringComparison.Ordinal) &&
+                                                     r.Member.StartsWith("Silvergun.CodeAnalysis.IL.MemberIndex." + asked, StringComparison.Ordinal));
+
+        Assert.Contains(closure.References, r => r.Member.StartsWith("Model.Types.IFieldReference.", StringComparison.Ordinal) && Bare(r.Member) == "IsStatic");
+        Assert.Contains(closure.References, r => r.Member.StartsWith("Model.Types.", StringComparison.Ordinal) && Bare(r.Member) == "Name");
+        Assert.Contains(closure.References, r => r.Member.StartsWith("Model.Bytecode.LoadTokenInstruction.", StringComparison.Ordinal) && Bare(r.Member) == "Token");
     }
 
     /// <summary>
@@ -133,9 +161,13 @@ public sealed class MemberIndexNoResolutionInvariantTests : IClassFixture<Assemb
     /// and its <c>MemberIndex.OpenTypes</c> reaches <c>IBasicType.ResolvedType</c> only through a helper in a NON-root
     /// type. Since A2 S2 it also has the state-machine shapes: <c>MemberIndex.StateMachineTargets</c> reads
     /// <c>IBasicType.ResolvedType</c> directly, and <c>MemberIndex.StateMachines</c> reaches it only through a helper of
-    /// its own. The same walk that guards the real library names all of them — so a read like any of these, added to the
-    /// real CHA or state-machine code (whose methods <see cref="Walk_CoversTheChaCode"/> and
-    /// <see cref="Walk_CoversTheStateMachineCode"/> show are walked), turns <see cref="MemberIndexAndMethodGraph_NeverReferenceResolvedMethodResolvedTypeOrResolveReference"/> red.
+    /// its own. Since A2 S3 it has the type-initializer, token and module shapes too: <c>MemberIndex.TypeInitializerTargets</c>
+    /// in two overloads (one reading <c>ResolvedType</c>, one <c>ResolvedMethod</c>), <c>MemberIndex.Lookup</c> through a
+    /// helper of its own, and a nested <c>MethodGraph.Builder</c> whose <c>AddToken</c> reads <c>ResolvedMethod</c> and
+    /// whose <c>AddModule</c> goes through another helper. The same walk that guards the real library names all of them —
+    /// so a read like any of these, added to the real CHA, state-machine, type-initializer, token or module code (whose
+    /// methods <see cref="Walk_CoversTheChaCode"/>, <see cref="Walk_CoversTheStateMachineCode"/> and
+    /// <see cref="Walk_CoversTheTypeInitializerTokenAndModuleCode"/> show are walked), turns <see cref="MemberIndexAndMethodGraph_NeverReferenceResolvedMethodResolvedTypeOrResolveReference"/> red.
     /// </summary>
     [Fact]
     public void Walk_OverAMutantThatResolves_FindsTheForbiddenReads()
@@ -160,12 +192,33 @@ public sealed class MemberIndexNoResolutionInvariantTests : IClassFixture<Assemb
         Assert.Contains(mutantClosure.Methods, m => m.StartsWith("Silvergun.CodeAnalysis.IL.Helpers.PeekMachine(", StringComparison.Ordinal));
         Assert.Contains(mutantClosure.References, r => r.From.StartsWith("Silvergun.CodeAnalysis.IL.MemberIndex.StateMachines(", StringComparison.Ordinal) &&
                                                        r.Member.StartsWith("Silvergun.CodeAnalysis.IL.Helpers.PeekMachine(", StringComparison.Ordinal));
+
+        // A2 S3: the type-initializer, token and module shapes.
+        Assert.Contains(hits, h => h.StartsWith("Silvergun.CodeAnalysis.IL.MemberIndex.TypeInitializerTargets(Model.Types.IBasicType)", StringComparison.Ordinal) && h.EndsWith("-> ResolvedType", StringComparison.Ordinal));
+        Assert.Contains(hits, h => h.StartsWith("Silvergun.CodeAnalysis.IL.MemberIndex.TypeInitializerTargets(Model.Types.IMethodReference)", StringComparison.Ordinal) && h.EndsWith("-> ResolvedMethod", StringComparison.Ordinal));
+        Assert.Contains(hits, h => h.StartsWith("Silvergun.CodeAnalysis.IL.Helpers.PeekLookup(", StringComparison.Ordinal) && h.EndsWith("-> ResolvedType", StringComparison.Ordinal));
+        Assert.Contains(mutantClosure.References, r => r.From.StartsWith("Silvergun.CodeAnalysis.IL.MemberIndex.Lookup(", StringComparison.Ordinal) &&
+                                                       r.Member.StartsWith("Silvergun.CodeAnalysis.IL.Helpers.PeekLookup(", StringComparison.Ordinal));
+        Assert.Contains(hits, h => h.StartsWith("Silvergun.CodeAnalysis.IL.MethodGraph.Builder.AddToken(", StringComparison.Ordinal) && h.EndsWith("-> ResolvedMethod", StringComparison.Ordinal));
+        Assert.Contains(hits, h => h.StartsWith("Silvergun.CodeAnalysis.IL.Helpers.PeekModule(", StringComparison.Ordinal) && h.EndsWith("-> ResolvedType", StringComparison.Ordinal));
+        Assert.Contains(mutantClosure.References, r => r.From.StartsWith("Silvergun.CodeAnalysis.IL.MethodGraph.Builder.AddModule(", StringComparison.Ordinal) &&
+                                                       r.Member.StartsWith("Silvergun.CodeAnalysis.IL.Helpers.PeekModule(", StringComparison.Ordinal));
+
+        // S3 review: InstanceInitializerTargets (W3), and a resolving read inside one of the builder's static lambdas (N5).
+        Assert.Contains(hits, h => h.StartsWith("Silvergun.CodeAnalysis.IL.MemberIndex.InstanceInitializerTargets(", StringComparison.Ordinal) && h.EndsWith("-> ResolvedType", StringComparison.Ordinal));
+        Assert.Contains(hits, h => h.StartsWith(BuilderLambdas + "<Visit>b__0_0(", StringComparison.Ordinal) && h.EndsWith("-> ResolvedMethod", StringComparison.Ordinal));
     }
 
     // MemberIndex.DispatchTargets(IMethodReference) => _ = reference.ResolvedMethod; MemberIndex.OpenTypes(IBasicType)
     // => Helpers.Peek(type); Helpers.Peek(IBasicType) => _ = type.ResolvedType; Helpers.Unreached(IBasicType) likewise,
     // but nothing calls it (the walk must not start outside the roots). A2 S2: MemberIndex.StateMachineTargets(IBasicType)
-    // => _ = type.ResolvedType; MemberIndex.StateMachines(IBasicType) => Helpers.PeekMachine(type), which reads it.
+    // => _ = type.ResolvedType; MemberIndex.StateMachines(IBasicType) => Helpers.PeekMachine(type), which reads it. A2 S3:
+    // MemberIndex.TypeInitializerTargets(IBasicType) => _ = type.ResolvedType; TypeInitializerTargets(IMethodReference) =>
+    // _ = method.ResolvedMethod; MemberIndex.Lookup(IBasicType) => Helpers.PeekLookup(type); and the nested
+    // MethodGraph.Builder's AddToken(IMethodReference) => _ = method.ResolvedMethod, AddModule(IBasicType) =>
+    // Helpers.PeekModule(type), each Peek reading ResolvedType. S3 review: MemberIndex.InstanceInitializerTargets(IBasicType)
+    // => _ = type.ResolvedType; and a lambda class MethodGraph.Builder.<>c whose <Visit>b__0_0(IMethodReference) reads
+    // method.ResolvedMethod, the shape of the builder's static lambdas.
     private static void DefineMutant(System.Reflection.Emit.ModuleBuilder module)
     {
         const System.Reflection.MethodAttributes Static = System.Reflection.MethodAttributes.Public | System.Reflection.MethodAttributes.Static;
@@ -186,6 +239,8 @@ public sealed class MemberIndexNoResolutionInvariantTests : IClassFixture<Assemb
         var peek = Reads("Peek");
         Reads("Unreached");
         var peekMachine = Reads("PeekMachine");
+        var peekLookup = Reads("PeekLookup");
+        var peekModule = Reads("PeekModule");
 
         var index = module.DefineType("Silvergun.CodeAnalysis.IL.MemberIndex", System.Reflection.TypeAttributes.Public | System.Reflection.TypeAttributes.Class);
         var dispatch = index.DefineMethod("DispatchTargets", Static, typeof(void), [typeof(Model.Types.IMethodReference)]).GetILGenerator();
@@ -207,8 +262,38 @@ public sealed class MemberIndexNoResolutionInvariantTests : IClassFixture<Assemb
         machines.Emit(System.Reflection.Emit.OpCodes.Call, peekMachine);
         machines.Emit(System.Reflection.Emit.OpCodes.Ret);
 
+        // A2 S3. One body per shape: read `resolving` on the argument directly, or call a helper that does.
+        void Reads2(System.Reflection.Emit.TypeBuilder owner, string name, Type parameter, System.Reflection.MethodInfo through, bool call)
+        {
+            var il = owner.DefineMethod(name, Static, typeof(void), [parameter]).GetILGenerator();
+            il.Emit(System.Reflection.Emit.OpCodes.Ldarg_0);
+            if (call)
+            {
+                il.Emit(System.Reflection.Emit.OpCodes.Call, through);
+            }
+            else
+            {
+                il.Emit(System.Reflection.Emit.OpCodes.Callvirt, through);
+                il.Emit(System.Reflection.Emit.OpCodes.Pop);
+            }
+            il.Emit(System.Reflection.Emit.OpCodes.Ret);
+        }
+        Reads2(index, "TypeInitializerTargets", typeof(Model.Types.IBasicType), resolvedType, call: false);
+        Reads2(index, "TypeInitializerTargets", typeof(Model.Types.IMethodReference), resolvedMethod, call: false);
+        Reads2(index, "Lookup", typeof(Model.Types.IBasicType), peekLookup, call: true);
+        var graph = module.DefineType("Silvergun.CodeAnalysis.IL.MethodGraph", System.Reflection.TypeAttributes.Public | System.Reflection.TypeAttributes.Class);
+        var builder = graph.DefineNestedType("Builder", System.Reflection.TypeAttributes.NestedPrivate | System.Reflection.TypeAttributes.Class);
+        Reads2(builder, "AddToken", typeof(Model.Types.IMethodReference), resolvedMethod, call: false);
+        Reads2(builder, "AddModule", typeof(Model.Types.IBasicType), peekModule, call: true);
+        Reads2(index, "InstanceInitializerTargets", typeof(Model.Types.IBasicType), resolvedType, call: false);
+        var lambdas = builder.DefineNestedType("<>c", System.Reflection.TypeAttributes.NestedPrivate | System.Reflection.TypeAttributes.Class);
+        Reads2(lambdas, "<Visit>b__0_0", typeof(Model.Types.IMethodReference), resolvedMethod, call: false);
+
         helpers.CreateType();
         index.CreateType();
+        graph.CreateType();
+        builder.CreateType();
+        lambdas.CreateType();
     }
 
     public void Dispose() => library.Dispose();
@@ -322,7 +407,25 @@ public sealed class MemberIndexNoResolutionInvariantTests : IClassFixture<Assemb
     [
         "Silvergun.CodeAnalysis.IL.MemberIndex.StateMachineTargets(",
         "Silvergun.CodeAnalysis.IL.MemberIndex.StateMachines(",
-        "Silvergun.CodeAnalysis.IL.MethodGraph.Builder.AddStateMachines(",
+        "Silvergun.CodeAnalysis.IL.MethodGraph.Builder.AddImplied`1(",
+    ];
+
+    /// <summary>The compiler's class for the graph builder's (static) lambdas, by node-id prefix.</summary>
+    private const string BuilderLambdas = "Silvergun.CodeAnalysis.IL.MethodGraph.Builder.<>c.";
+
+    /// <summary>The A2 S3 (type-initializer, ldtoken and module) methods the walk must reach, by node-id prefix.</summary>
+    private static readonly string[] S3Methods =
+    [
+        "Silvergun.CodeAnalysis.IL.MemberIndex.TypeInitializerTargets(Model.Types.IFieldReference)",
+        "Silvergun.CodeAnalysis.IL.MemberIndex.TypeInitializerTargets(Model.Types.IMethodReference)",
+        "Silvergun.CodeAnalysis.IL.MemberIndex.InstanceInitializerTargets(",
+        "Silvergun.CodeAnalysis.IL.MemberIndex.Lookup(",
+        "Silvergun.CodeAnalysis.IL.MemberIndex.Module(",
+        "Silvergun.CodeAnalysis.IL.MethodGraph.Builder.AddImplied`1(",
+        "Silvergun.CodeAnalysis.IL.MethodGraph.Builder.AddToken(",
+        "Silvergun.CodeAnalysis.IL.MethodGraph.Builder.AddResolved(",
+        "Silvergun.CodeAnalysis.IL.MethodGraph.Builder.AddModule(",
+        "Silvergun.CodeAnalysis.IL.ModuleMetadata.Merge(",
     ];
 
     /// <summary>

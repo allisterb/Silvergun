@@ -33,10 +33,15 @@ public sealed class MemberIndexCoverageTests : IClassFixture<MechanismMethodGrap
     #region Methods
     // ---- W3 -----------------------------------------------------------------------------------------------------
 
+    /// <summary>
+    /// Since A2 S3 each entry carries its module metadata too (the 3-tuple <c>Build</c>), as the fixture's own index does
+    /// through <see cref="AssemblyDisassembler"/>: the 2-tuple overload passes <see cref="ModuleMetadata.None"/>, which
+    /// would drop the Release fixture's module-initializer opacity and make the two graphs differ for that reason alone.
+    /// </summary>
     [Fact]
     public void Build_TheSameAssemblyInstanceTwice_DoesNotThrow_AndIndexesEachMethodOnce()
     {
-        var mechanism = fixture.Assemblies.Disassemblers.Select(d => (d.Assembly, d.Forwarders)).ToArray();
+        var mechanism = fixture.Assemblies.Disassemblers.Select(d => (d.Assembly, d.Forwarders, d.Module)).ToArray();
         var doubled = mechanism.Concat(mechanism).Prepend(mechanism[0]).ToArray();
 
         MemberIndex? index = null;
@@ -54,6 +59,7 @@ public sealed class MemberIndexCoverageTests : IClassFixture<MechanismMethodGrap
         Assert.Equal(fixture.Graph.Edges, graph.Edges);
         Assert.Equal(fixture.Graph.Opacities, graph.Opacities);
         Assert.Equal(fixture.Graph.Coverage, graph.Coverage);
+        Assert.Equal(1, graph.Coverage.ModuleInitializers);   // one per assembly NAME, not per entry
     }
 
     /// <summary>

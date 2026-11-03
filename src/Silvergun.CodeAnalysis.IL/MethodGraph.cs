@@ -45,7 +45,12 @@ public enum MethodEdgeKind
     /// </summary>
     StateMachine,
 
-    /// <summary>From a method that touches a type to that type's static constructor (phase A2).</summary>
+    /// <summary>
+    /// From a method that touches a static field of an own type, or calls one of its static methods or constructors, to
+    /// that type's static constructor (<see cref="MemberIndex.TypeInitializerTargets(IFieldReference)"/>), at the
+    /// instruction's offset; and from each instance method of an own value type to its type's, at offset 0
+    /// (<see cref="MemberIndex.InstanceInitializerTargets"/>). Not a call site.
+    /// </summary>
     TypeInitializer,
 
     /// <summary>
@@ -53,7 +58,14 @@ public enum MethodEdgeKind
     /// declared target, by class-hierarchy analysis (<see cref="MemberIndex.DispatchTargets"/>). Added beside the
     /// site's own edge, at the same offset.
     /// </summary>
-    Dispatch
+    Dispatch,
+
+    /// <summary>
+    /// An <c>ldtoken</c> of a method: the handle can become a <c>MethodInfo</c> that runs (an expression tree's
+    /// <c>Expression.Call</c>). Resolved like a call site, but counted in <see cref="GraphCoverage.TokenSites"/>, not
+    /// <see cref="GraphCoverage.CallSites"/>.
+    /// </summary>
+    LoadToken
 }
 
 /// <summary>Why part of the program could not be followed. Opacity is reported, never dropped.</summary>
@@ -68,7 +80,11 @@ public enum OpacityKind
     /// <summary>A call that matched several definitions, or that a type forwarder sends somewhere besides a definition.</summary>
     Ambiguous,
 
-    /// <summary>The module initializer is absent from the Analysis.Net model (phase A2).</summary>
+    /// <summary>
+    /// An assembly's module initializer (<c>&lt;Module&gt;..cctor</c>), which runs when it loads, is absent from the
+    /// Analysis.Net model, and so is every other method of <c>&lt;Module&gt;</c>; or its module metadata could not be
+    /// read, so whether it has one is unknown. Sited at <c>[assembly]&lt;Module&gt;</c> (<see cref="MemberIndex.Qualified"/>).
+    /// </summary>
     ModuleInitializerInvisible,
 
     /// <summary>A body whose instructions could not be read.</summary>
@@ -79,7 +95,14 @@ public enum OpacityKind
     /// <c>System.Environment.GetEnvironmentVariable</c>, say. The two are kept apart (the external one under a
     /// <see cref="MemberIndex.Qualified"/> id) and the collision is reported: shadowing a platform name is a signal.
     /// </summary>
-    NameShadowed
+    NameShadowed,
+
+    /// <summary>
+    /// An assembly has MethodImpl rows that bind an implementation whose name is not the declared method's (VB
+    /// <c>Implements</c>, hand-written IL), which CHA's name match does not follow (decision D3). One per assembly,
+    /// sited at <c>[assembly]&lt;Module&gt;</c>, naming the count.
+    /// </summary>
+    RenamedImplementation
 }
 
 /// <summary>A method in the graph, keyed by its <see cref="CanonicalName"/> node id.</summary>
@@ -142,6 +165,11 @@ public sealed record ResolutionCounts(int Exact, int Substituted, int External, 
 /// override for), <see cref="DispatchEdges"/> the <see cref="MethodEdgeKind.Dispatch"/> edges they produced, and
 /// <see cref="DispatchWork"/> the <see cref="MemberIndex.DispatchWork"/> units it spent. Once the dispatch work budget
 /// is reached, sites are no longer fanned out or counted, so both counts are then lower bounds.
+/// <see cref="TokenSites"/> counts the <c>ldtoken</c>s of methods, which are resolved but are not in
+/// <see cref="CallSites"/> or <see cref="Resolutions"/>; a token that does not resolve carries the same Unresolved or
+/// Ambiguous opacity a call site would, so those opacities can outnumber the matching <see cref="Resolutions"/>. <see cref="ModuleInitializers"/> counts the assemblies whose
+/// module initializer the model cannot show, <see cref="RenamedImplementations"/> the MethodImpl rows CHA cannot follow,
+/// and <see cref="ModulesUnreadable"/> the assemblies for which neither is known — never counted as having none.
 /// </summary>
 public sealed record GraphCoverage(
     IndexCoverage Index,
@@ -153,6 +181,10 @@ public sealed record GraphCoverage(
     int DispatchSites,
     int DispatchEdges,
     long DispatchWork,
+    int TokenSites,
+    int ModuleInitializers,
+    int RenamedImplementations,
+    int ModulesUnreadable,
     bool Truncated,
     string? TruncatedBy);
 
@@ -161,8 +193,10 @@ public sealed record GraphCoverage(
 /// from Analysis.Net's bytecode instructions — the rung below three-address code, which needs no stack simulation —
 /// and the <c>Disassembler</c> is never run. A virtual site, or a static call to an interface member, also gets a
 /// <see cref="MethodEdgeKind.Dispatch"/> edge to every own override or implementation CHA finds, and a site that creates
-/// or names an own state machine a <see cref="MethodEdgeKind.StateMachine"/> edge to its <c>MoveNext</c>.
-/// Type-initializer edges are added later in phase A2.
+/// or names an own state machine a <see cref="MethodEdgeKind.StateMachine"/> edge to its <c>MoveNext</c>. A static
+/// member access gets a <see cref="MethodEdgeKind.TypeInitializer"/> edge to its type's static constructor, and an
+/// <c>ldtoken</c> of a method a <see cref="MethodEdgeKind.LoadToken"/> edge to it. What the model drops from each
+/// module (the module initializer, renamed implementations) is reported as opacity.
 /// <para>
 /// Every collection is ordinal-sorted, so two builds over the same input are identical. Unresolved and ambiguous
 /// sites keep an edge to the reference's own node id as well as an opacity record, so no site is lost. Never throws.
@@ -216,6 +250,8 @@ public sealed class MethodGraph
             builder.AddOwn(method);
         foreach (var method in index.Methods.Where(m => m.Definition.HasBody))
             builder.Walk(index, method);
+        foreach (var assembly in index.Assemblies)
+            builder.AddModule(assembly, index.Module(assembly));
         return builder.ToGraph(index.Coverage, index.Methods.Count);
     }
     #endregion
@@ -263,6 +299,8 @@ public sealed class MethodGraph
             }
 
             bodiesRead++;
+            // A value type's instance method may run its type's initializer itself, however it is reached.
+            AddImplied(method.NodeId, 0, MethodEdgeKind.TypeInitializer, (index, method), static s => s.index.InstanceInitializerTargets(s.method));
             foreach (var instruction in instructions)
                 Visit(index, method.NodeId, instruction);
         }
@@ -273,7 +311,8 @@ public sealed class MethodGraph
                 [.. edges.OrderBy(e => e.From, StringComparer.Ordinal).ThenBy(e => e.To, StringComparer.Ordinal).ThenBy(e => e.Kind).ThenBy(e => e.Offset)],
                 [.. opacities.OrderBy(o => o.Site, StringComparer.Ordinal).ThenBy(o => o.Offset).ThenBy(o => o.Kind).ThenBy(o => o.Detail, StringComparer.Ordinal)],
                 new GraphCoverage(index, methodsIndexed, bodiesRead, bodiesFailed, callSites, resolutions, dispatchSites, dispatchEdges,
-                    dispatchWork.Spent, truncatedBy is not null || dispatchTruncatedBy is not null,
+                    dispatchWork.Spent, tokenSites, moduleInitializers, renamedImplementations, modulesUnreadable,
+                    truncatedBy is not null || dispatchTruncatedBy is not null,
                     truncatedBy is null ? dispatchTruncatedBy : dispatchTruncatedBy is null ? truncatedBy : $"{dispatchTruncatedBy}; {truncatedBy}"));
 
         private void Visit(MemberIndex index, string caller, Model.IInstruction instruction)
@@ -283,14 +322,26 @@ public sealed class MethodGraph
             {
                 case MethodCallInstruction call:
                     AddCall(index, caller, offset, call.Method, call.Operation == MethodCallOperation.Virtual ? MethodEdgeKind.CallVirt : MethodEdgeKind.Call);
-                    AddStateMachines(index, caller, offset, call.Method, construction: false);
+                    AddImplied(caller, offset, MethodEdgeKind.StateMachine, (index, call.Method), static s => s.index.StateMachineTargets(s.Method, construction: false));
+                    AddImplied(caller, offset, MethodEdgeKind.TypeInitializer, (index, call.Method), static s => s.index.TypeInitializerTargets(s.Method));
                     break;
                 case CreateObjectInstruction create:
                     AddCall(index, caller, offset, create.Constructor, MethodEdgeKind.NewObj);
-                    AddStateMachines(index, caller, offset, create.Constructor, construction: true);
+                    AddImplied(caller, offset, MethodEdgeKind.StateMachine, (index, create.Constructor), static s => s.index.StateMachineTargets(s.Constructor, construction: true));
+                    AddImplied(caller, offset, MethodEdgeKind.TypeInitializer, (index, create.Constructor), static s => s.index.TypeInitializerTargets(s.Constructor));
                     break;
                 case LoadMethodAddressInstruction load:
                     AddCall(index, caller, offset, load.Method, load.Operation == LoadMethodAddressOperation.Virtual ? MethodEdgeKind.Ldvirtftn : MethodEdgeKind.Ldftn);
+                    AddImplied(caller, offset, MethodEdgeKind.TypeInitializer, (index, load.Method), static s => s.index.TypeInitializerTargets(s.Method));
+                    break;
+                case LoadFieldInstruction field:
+                    AddImplied(caller, offset, MethodEdgeKind.TypeInitializer, (index, field.Field), static s => s.index.TypeInitializerTargets(s.Field));
+                    break;
+                case StoreFieldInstruction field:
+                    AddImplied(caller, offset, MethodEdgeKind.TypeInitializer, (index, field.Field), static s => s.index.TypeInitializerTargets(s.Field));
+                    break;
+                case LoadTokenInstruction { Token: IMethodReference method }:
+                    AddToken(index, caller, offset, method);
                     break;
                 case IndirectMethodCallInstruction when truncatedBy is null:
                     callSites++;
@@ -307,7 +358,39 @@ public sealed class MethodGraph
             callSites++;
             var resolution = index.Resolve(target);
             resolutions = resolutions.Add(resolution.Kind);
+            if (!AddResolved(index, caller, offset, resolution, kind))
+                return;
 
+            // CHA: the overrides this site may run instead. Own methods only, all already nodes. Once the work budget is
+            // spent no further fan-out is added, but the walk goes on for the static edges.
+            var overrides = index.DispatchTargets(target, resolution, kind is MethodEdgeKind.CallVirt or MethodEdgeKind.Ldvirtftn, dispatchWork);
+            if (dispatchWork.Exhausted)
+                dispatchTruncatedBy ??= $"dispatch work budget of {dispatchWork.Limit} reached";
+            if (overrides is null)
+                return;
+            dispatchSites++;
+            foreach (var to in overrides)
+            {
+                if (!Room(edges.Count, budget.MaxEdges, "edges"))
+                    return;
+                edges.Add(new MethodEdge(caller, to, MethodEdgeKind.Dispatch, offset));
+                dispatchEdges++;
+            }
+        }
+
+        // An ldtoken of a method: resolved and recorded like a call site's static target, with the same opacity, but
+        // not a call site, and never fanned out.
+        private void AddToken(MemberIndex index, string caller, uint offset, IMethodReference method)
+        {
+            if (truncatedBy is not null)
+                return;
+            tokenSites++;
+            AddResolved(index, caller, offset, index.Resolve(method), MethodEdgeKind.LoadToken);
+        }
+
+        // The edges of one resolved reference, and its opacity; false once a budget is reached.
+        private bool AddResolved(MemberIndex index, string caller, uint offset, MethodResolution resolution, MethodEdgeKind kind)
+        {
             // An own target, or every candidate of an ambiguous one (over-approximate: never pick one and drop the
             // rest; a candidate that is not own code - the target of a type forwarder - is already Qualified).
             // Anything else is a leaf under the reference's own id - qualified by its assembly when that id is also
@@ -337,45 +420,60 @@ public sealed class MethodGraph
                 if (!nodes.ContainsKey(to))
                 {
                     if (!Room(nodes.Count, budget.MaxNodes, "nodes"))
-                        return;
+                        return false;
                     nodes[to] = new MethodNode(to, resolution.ClassificationKey, MethodNodeKind.External);
                 }
 
                 if (!Room(edges.Count, budget.MaxEdges, "edges"))
-                    return;
+                    return false;
                 edges.Add(new MethodEdge(caller, to, kind, offset));
             }
-
-            // CHA: the overrides this site may run instead. Own methods only, all already nodes. Once the work budget is
-            // spent no further fan-out is added, but the walk goes on for the static edges.
-            var overrides = index.DispatchTargets(target, resolution, kind is MethodEdgeKind.CallVirt or MethodEdgeKind.Ldvirtftn, dispatchWork);
-            if (dispatchWork.Exhausted)
-                dispatchTruncatedBy ??= $"dispatch work budget of {dispatchWork.Limit} reached";
-            if (overrides is null)
-                return;
-            dispatchSites++;
-            foreach (var to in overrides)
-            {
-                if (!Room(edges.Count, budget.MaxEdges, "edges"))
-                    return;
-                edges.Add(new MethodEdge(caller, to, MethodEdgeKind.Dispatch, offset));
-                dispatchEdges++;
-            }
+            return true;
         }
 
-        // The MoveNext of each state machine the instruction creates or names. Own methods only, all already nodes. A
-        // MoveNext naming its own state machine (AwaitUnsafeOnCompleted<TAwaiter, S>) adds no self-edge.
-        private void AddStateMachines(MemberIndex index, string caller, uint offset, IMethodReference target, bool construction)
+        // Edges an instruction implies rather than names: a state machine's MoveNext, a type's .cctor. Own methods only,
+        // all already nodes; targets are asked for only while the build has room, through a static lambda over state, so
+        // no closure is allocated per instruction (S3 review N5). A method implying itself (a MoveNext naming its own
+        // state machine, a .cctor touching its own type's statics) adds no self-edge.
+        private void AddImplied<T>(string caller, uint offset, MethodEdgeKind kind, T state, Func<T, IReadOnlyList<string>> targets)
         {
             if (truncatedBy is not null)
                 return;
-            foreach (var to in index.StateMachineTargets(target, construction).Where(to => to != caller))
+            foreach (var to in targets(state).Where(to => to != caller))
             {
                 if (!Room(edges.Count, budget.MaxEdges, "edges"))
                     return;
-                edges.Add(new MethodEdge(caller, to, MethodEdgeKind.StateMachine, offset));
+                edges.Add(new MethodEdge(caller, to, kind, offset));
             }
         }
+
+        // What the model drops from one assembly's module, as opacity: facts, not graph work, so recorded even after
+        // truncation. Unreadable metadata is its own record, never read as "no module initializer".
+        public void AddModule(string assembly, ModuleMetadata module)
+        {
+            var site = MemberIndex.Qualified(assembly, "<Module>");
+            if (!module.IsReadable)
+            {
+                modulesUnreadable++;
+                opacities.Add(new GraphOpacity(site, 0, OpacityKind.ModuleInitializerInvisible,
+                    "the module metadata could not be read: whether it has a module initializer or renamed implementations is unknown"));
+                return;
+            }
+            if (module.HasModuleInitializer)
+            {
+                moduleInitializers++;
+                opacities.Add(new GraphOpacity(site, 0, OpacityKind.ModuleInitializerInvisible,
+                    $"<Module> has a module initializer, which runs when the assembly loads, and {Count(module.ModuleMethods, "method")}; the model loads none of them"));
+            }
+            if (module.RenamedImplementations > 0)
+            {
+                renamedImplementations += module.RenamedImplementations;
+                opacities.Add(new GraphOpacity(site, 0, OpacityKind.RenamedImplementation,
+                    $"MethodImpl rows that bind an implementation whose name is not the declared method's, which CHA does not follow: {module.RenamedImplementations}"));
+            }
+        }
+
+        private static string Count(int count, string noun) => $"{count} {noun}{(count == 1 ? "" : "s")}";
 
         // True while there is room; the first time a budget is hit the build is marked truncated and stops.
         private bool Room(int count, int max, string what)
@@ -398,6 +496,10 @@ public sealed class MethodGraph
         private int callSites;
         private int dispatchSites;
         private int dispatchEdges;
+        private int tokenSites;
+        private int moduleInitializers;
+        private int renamedImplementations;
+        private int modulesUnreadable;
         // The build stops at truncatedBy, but only the fan-out stops at dispatchTruncatedBy.
         private string? truncatedBy;
         private string? dispatchTruncatedBy;

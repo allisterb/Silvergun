@@ -17,9 +17,10 @@ using Xunit;
 /// satisfied 65 of the 79 A1-era path rows and the opacity row; A2's first slice (<see cref="Phase.A2Dispatch"/>,
 /// CHA fan-out) activated the seven CHA rows and its own fifteen dispatch rows; its second
 /// (<see cref="Phase.A2StateMachine"/>, state-machine edges) the four state-machine rows and its own ten AsyncIterator
-/// and Debug rows. The rest are pinned as pending, and must still FAIL on today's graph — so a row that starts passing
-/// early is noticed and promoted, and none can disappear silently. Bumping <c>CurrentPhase</c> to
-/// <see cref="Phase.A2"/> is the red-to-green moment of the type-initializer edges.
+/// and Debug rows; the whole of A2 (<see cref="Phase.A2"/>, S3: type-initializer and <c>ldtoken</c> edges, module
+/// opacity) the two type-initializer rows, S3's <c>newobj</c> pair, the promoted ExpressionTree.CompilesEnvTree and the
+/// module-initializer opacity row. The rest (today only the Reachability row) are pinned as pending, and must still FAIL
+/// on today's graph — so a row that starts passing early is noticed and promoted, and none can disappear silently.
 /// </summary>
 public sealed class MechanismGroundTruthTests
 {
@@ -31,15 +32,17 @@ public sealed class MechanismGroundTruthTests
     /// those 7 + the 12 S1 dispatch rows (ObjectVirtual x3, ExplicitImpl x2, GenericInterface x2, StaticAbstract x2,
     /// OpenHierarchy x3) + S1b's 3 InheritedImpl rows (review C1). A2 S2 re-tagged the four state-machine rows (Async x3,
     /// Iterator.Stub) from A2 to A2StateMachine (A2 6 -> 2: the type initializer x2 rows still pending), and
-    /// A2StateMachine's 14 = those 4 + S2's 4 AsyncIterator rows + its 6 Debug rows (spec §8). Reachability = the
-    /// bodyless-extern capability row.
+    /// A2StateMachine's 14 = those 4 + S2's 4 AsyncIterator rows + its 6 Debug rows (spec §8). A2 S3 moved
+    /// ExpressionTree.CompilesEnvTree from A1 to A2 with its Expect (spec §5; A1 65 -> 64) and added the StaticInit
+    /// newobj pair (§8), and S3 review W3 the value-type pair, so A2's 7 = the type initializer x2 + CompilesEnvTree + the
+    /// newobj pair + the value-type pair. Reachability = the bodyless-extern capability row.
     /// </summary>
     private static readonly Dictionary<Phase, int> pathRowsPerPhase = new()
     {
-        [Phase.A1] = 65,
+        [Phase.A1] = 64,
         [Phase.A2Dispatch] = 22,
         [Phase.A2StateMachine] = 14,
-        [Phase.A2] = 2,
+        [Phase.A2] = 7,
         [Phase.Reachability] = 1,
     };
 
@@ -49,14 +52,17 @@ public sealed class MechanismGroundTruthTests
     /// mechanism), 5 Absent (ObjectVirtual.DescribesNumber, ExplicitImpl, GenericInterface and StaticAbstract twins,
     /// OpenHierarchy.FlushesJournal) and 2 KnownImprecision (the ObjectVirtual and OpenHierarchy twin drivers). S1b
     /// added InheritedImpl's 2 Present and 1 Absent. S2 added 5 Present (AsyncIterator.Stub and .Consumer, Debug x3),
-    /// 4 Absent (AsyncIterator.StubSafe, the Debug twins x3) and 1 KnownImprecision (the AsyncIterator twin driver).
+    /// 4 Absent (AsyncIterator.StubSafe, the Debug twins x3) and 1 KnownImprecision (the AsyncIterator twin driver). S3
+    /// moved ExpressionTree.CompilesEnvTree from KnownGap to Present (spec §5, the only Expect change of A2; KnownGap
+    /// 5 -> 4) and added StaticInit.CreatesExplicitInit (Present) and its twin StaticInit.CreatesSafeInit (Absent); S3
+    /// review W3 added StaticInit.CallsValueMember (Present) and its twin StaticInit.CallsSafeValueMember (Absent).
     /// </summary>
     private static readonly Dictionary<Expectation, int> pathRowsPerExpectation = new()
     {
-        [Expectation.Present] = 47,
-        [Expectation.Absent] = 46,
+        [Expectation.Present] = 50,
+        [Expectation.Absent] = 48,
         [Expectation.KnownImprecision] = 6,
-        [Expectation.KnownGap] = 5,
+        [Expectation.KnownGap] = 4,
     };
 
     /// <summary>The rows CHA fan-out (A2 S1) activated, by id — every one failed on the A1 graph.</summary>
@@ -86,11 +92,18 @@ public sealed class MechanismGroundTruthTests
         "Debug.AsyncMethod", "Debug.AsyncMethodSafe", "Debug.AsyncLambda", "Debug.AsyncLambdaSafe", "Debug.IteratorStub", "Debug.IteratorStubSafe",
     ];
 
-    /// <summary>The rows that still wait for phase A2's later edges, by id — today's graph cannot satisfy any of them.</summary>
-    private static readonly string[] pendingA2Rows =
+    /// <summary>The rows A2's last slice (S3) activated, by id.</summary>
+    private static readonly string[] a2Rows =
     [
-        // Type-initializer edges (static member reference -> .cctor).
+        // The two type-initializer rows pending since A1 (static field access -> .cctor); both failed on the
+        // A2StateMachine graph.
         "StaticInit.TriggersInit", "StaticInit.TriggersExplicitInit",
+        // S3's newobj pair (§8): a constructor call -> .cctor.
+        "StaticInit.CreatesExplicitInit", "StaticInit.CreatesSafeInit",
+        // S3 review W3's value-type pair: an instance method of a struct -> its own .cctor (the callee's edge).
+        "StaticInit.CallsValueMember", "StaticInit.CallsSafeValueMember",
+        // KnownGap until the ldtoken edge, Present since (spec §5).
+        "ExpressionTree.CompilesEnvTree",
     ];
 
     public static TheoryData<string> ActivePathRows() =>
@@ -188,6 +201,48 @@ public sealed class MechanismGroundTruthTests
         Assert.False(verdict.Holds, $"{row.Id} holds without any StateMachine edge: {verdict.Detail} It is not about state machines - re-tag it.");
     }
 
+    public static TheoryData<string> TypeInitializerOrTokenDependentPathRows() =>
+        Ids(MechanismGroundTruth.Paths
+            .Where(p => p.ActiveFrom == Phase.A2 && p.Expect is Expectation.Present or Expectation.KnownImprecision)
+            .Select(p => p.Id));
+
+    /// <summary>
+    /// Keeps the A2 tag honest, as the Dispatch and StateMachine theories do for theirs: every path row tagged A2 and
+    /// asserted present (the StaticInit triggers and newobj row, ExpressionTree.CompilesEnvTree) FAILS once the
+    /// <see cref="MethodEdgeKind.TypeInitializer"/> and <see cref="MethodEdgeKind.LoadToken"/> edges are taken out of the
+    /// very same graph (every other kind kept) — so it holds because of S3's edges.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(TypeInitializerOrTokenDependentPathRows))]
+    public void A2Path_DoesNotHoldWithoutTheTypeInitializerAndLoadTokenEdges(string id)
+    {
+        var row = MechanismGroundTruth.Paths.Single(p => p.Id == id);
+        var graph = MechanismGraphSource.BuildWithout(MethodEdgeKind.TypeInitializer, MethodEdgeKind.LoadToken);
+
+        var verdict = WaypointMatcher.Evaluate(row, graph.Adjacency, graph.CapabilityOf);
+
+        Assert.False(verdict.Holds, $"{row.Id} holds without any TypeInitializer or LoadToken edge: {verdict.Detail} It is not about S3's edges - re-tag it.");
+    }
+
+    /// <summary>
+    /// Each A2 row needs the ONE S3 kind its note names: the StaticInit rows the TypeInitializer edge (and hold without
+    /// LoadToken), CompilesEnvTree the LoadToken edge (and holds without TypeInitializer).
+    /// </summary>
+    [Theory]
+    [InlineData("StaticInit.TriggersInit", MethodEdgeKind.TypeInitializer, MethodEdgeKind.LoadToken)]
+    [InlineData("StaticInit.TriggersExplicitInit", MethodEdgeKind.TypeInitializer, MethodEdgeKind.LoadToken)]
+    [InlineData("StaticInit.CreatesExplicitInit", MethodEdgeKind.TypeInitializer, MethodEdgeKind.LoadToken)]
+    [InlineData("StaticInit.CallsValueMember", MethodEdgeKind.TypeInitializer, MethodEdgeKind.LoadToken)]
+    [InlineData("ExpressionTree.CompilesEnvTree", MethodEdgeKind.LoadToken, MethodEdgeKind.TypeInitializer)]
+    public void A2Path_NeedsExactlyItsOwnS3EdgeKind(string id, MethodEdgeKind needed, MethodEdgeKind unneeded)
+    {
+        var row = MechanismGroundTruth.Paths.Single(p => p.Id == id);
+        bool Holds(MechanismGraph graph) => WaypointMatcher.Evaluate(row, graph.Adjacency, graph.CapabilityOf).Holds;
+
+        Assert.False(Holds(MechanismGraphSource.BuildWithout(needed)));
+        Assert.True(Holds(MechanismGraphSource.BuildWithout(unneeded)));
+    }
+
     /// <summary>
     /// The <c>await foreach</c> consumer needs BOTH A2 edge kinds, as its note says: the StateMachine edges (into its own
     /// state machine, and from the iterator's <c>MoveNextAsync</c> into <c>MoveNext</c>) and the Dispatch edge (from
@@ -244,11 +299,14 @@ public sealed class MechanismGroundTruthTests
     }
 
     [Fact]
-    public void CurrentPhase_IsA2StateMachine_AndActivatesTheStaticTheChaAndTheStateMachineRows()
+    public void CurrentPhase_IsA2_AndActivatesEveryRowButTheReachabilityOne()
     {
-        Assert.Equal(Phase.A2StateMachine, MechanismGroundTruth.CurrentPhase);
-        Assert.Equal(pathRowsPerPhase[Phase.A1] + pathRowsPerPhase[Phase.A2Dispatch] + pathRowsPerPhase[Phase.A2StateMachine], MechanismGroundTruth.ActivePaths.Count);
-        Assert.Equal(["Opacity.FunctionPointerCalli"], MechanismGroundTruth.ActiveOpacities.Select(o => o.Id));
+        Assert.Equal(Phase.A2, MechanismGroundTruth.CurrentPhase);
+        Assert.Equal(
+            pathRowsPerPhase[Phase.A1] + pathRowsPerPhase[Phase.A2Dispatch] + pathRowsPerPhase[Phase.A2StateMachine] + pathRowsPerPhase[Phase.A2],
+            MechanismGroundTruth.ActivePaths.Count);
+        Assert.Equal(MechanismGroundTruth.Paths.Count - pathRowsPerPhase[Phase.Reachability], MechanismGroundTruth.ActivePaths.Count);
+        Assert.Equal(["Opacity.FunctionPointerCalli", "ModuleInit.ModuleInitializerInvisible"], MechanismGroundTruth.ActiveOpacities.Select(o => o.Id));
     }
 
     /// <summary>The ratchet's order: A2's first and second slices sit strictly between A1 and the whole of A2, in slice order.</summary>
@@ -271,10 +329,10 @@ public sealed class MechanismGroundTruthTests
     }
 
     [Fact]
-    public void PendingA2Rows_AreExactlyTheRowsThatNeedA2Edges()
+    public void A2SliceRows_AreExactlyTheRowsEachSliceActivated()
     {
         Assert.Equal(
-            pendingA2Rows.Order(StringComparer.Ordinal),
+            a2Rows.Order(StringComparer.Ordinal),
             MechanismGroundTruth.Paths.Where(p => p.ActiveFrom == Phase.A2).Select(p => p.Id).Order(StringComparer.Ordinal));
         Assert.Equal(
             a2DispatchRows.Order(StringComparer.Ordinal),

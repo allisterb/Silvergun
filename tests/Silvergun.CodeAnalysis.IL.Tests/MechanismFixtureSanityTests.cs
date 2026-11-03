@@ -100,8 +100,17 @@ public sealed class MechanismFixtureSanityTests : IClassFixture<MechanismFixture
     public void EveryWaypoint_MatchesARealNode_OwnOnesADefinitionAndPlatformOnesACallSite()
     {
         var problems = new List<string>();
+        // A module opacity site ([assembly]<Module>, A2 S3) names no node: it is checked on its own below.
+        var moduleSites = MechanismGroundTruth.Opacities.Where(o => o.Kind is OpacityKind.ModuleInitializerInvisible or OpacityKind.RenamedImplementation).ToArray();
         var waypoints = MechanismGroundTruth.Paths.SelectMany(p => p.Waypoints.Select(w => (p.Id, Waypoint: w)))
-            .Concat(MechanismGroundTruth.Opacities.Select(o => (o.Id, Waypoint: o.Site)));
+            .Concat(MechanismGroundTruth.Opacities.Except(moduleSites).Select(o => (o.Id, Waypoint: o.Site)));
+        foreach (var row in moduleSites)
+        {
+            var assembly = new[] { MechanismFixtureAssemblies.FixtureName, MechanismFixtureAssemblies.DependencyName, MechanismFixtureAssemblies.DebugFixtureName }
+                .SingleOrDefault(a => new Regex(row.Site).IsMatch(MemberIndex.Qualified(a, "<Module>")));
+            if (assembly is null)
+                problems.Add($"{row.Id}: module site {row.Site} names no mechanism-fixture assembly's <Module>.");
+        }
 
         foreach (var (id, waypoint) in waypoints)
         {
@@ -275,6 +284,41 @@ public sealed class MechanismFixtureSanityTests : IClassFixture<MechanismFixture
         // The StaticInit premise: reading a static field is not a call, so only A2's TypeInitializer edge can link it.
         foreach (var trigger in new[] { "TriggersInit()", "TriggersExplicitInit()", "TriggersSafeInit()" })
             Assert.Empty(fixture.GroundTruthCallSites.Edges[$"MechanismFixture.StaticInit.Triggers.{trigger}"]);
+
+        // A2 S3's newobj pair: the only call site is the instance constructor, never the static one.
+        Assert.Equal(["MechanismFixture.StaticInit.Constructed..ctor()"], fixture.GroundTruthCallSites.Edges["MechanismFixture.StaticInit.Creators.CreatesExplicitInit()"]);
+        Assert.Equal(["MechanismFixture.StaticInit.SafeConstructed..ctor()"], fixture.GroundTruthCallSites.Edges["MechanismFixture.StaticInit.Creators.CreatesSafeInit()"]);
+
+        // S3 review W3's value-type pair: the caller only calls the instance method M, which itself names no static.
+        Assert.Equal(["MechanismFixture.StaticInit.ValueInit.M()"], fixture.GroundTruthCallSites.Edges["MechanismFixture.StaticInit.ValueCallers.CallsValueMember()"]);
+        Assert.Equal(["MechanismFixture.StaticInit.SafeValueInit.M()"], fixture.GroundTruthCallSites.Edges["MechanismFixture.StaticInit.ValueCallers.CallsSafeValueMember()"]);
+        Assert.Empty(fixture.GroundTruthCallSites.Edges["MechanismFixture.StaticInit.ValueInit.M()"]);
+        var types = fixture.Fixture.Module.GetAllTypes().ToDictionary(t => CanonicalName.NodeId(CciNames.Of(t)), t => t, StringComparer.Ordinal);
+        Assert.True(types["MechanismFixture.StaticInit.ValueInit"].IsValueType);
+        Assert.False(types["MechanismFixture.StaticInit.ValueInit"].IsBeforeFieldInit);
+    }
+
+    /// <summary>
+    /// The module-opacity premise (A2 S3, spec §6), read with SRM through <see cref="ModuleMetadata.Read"/>: only the
+    /// Release fixture's <c>&lt;Module&gt;</c> has a static constructor (its two <c>[ModuleInitializer]</c>s are called
+    /// from it, and it is <c>&lt;Module&gt;</c>'s one method); the Dependency and the Debug fixture have none; and no
+    /// fixture has a renamed MethodImpl — the C# explicit implementations (<c>IExplicitProbe.Run</c>, the iterators'
+    /// <c>IEnumerator&lt;string&gt;.get_Current</c>) end in the declared name.
+    /// </summary>
+    [Fact]
+    public void Fixture_OnlyTheReleaseFixtureHasAModuleInitializer_AndNoFixtureHasARenamedImplementation()
+    {
+        var release = ModuleMetadata.Read(MechanismFixtureAssemblies.Fixture);
+        var dependency = ModuleMetadata.Read(MechanismFixtureAssemblies.Dependency);
+        var debug = ModuleMetadata.Read(MechanismFixtureAssemblies.DebugFixture);
+
+        Assert.True(release.IsReadable && dependency.IsReadable && debug.IsReadable);
+        Assert.True(release.HasModuleInitializer);
+        Assert.Equal(1, release.ModuleMethods);
+        Assert.False(dependency.HasModuleInitializer);
+        Assert.False(debug.HasModuleInitializer);
+        Assert.All(new[] { release, dependency, debug }, m => Assert.Equal(0, m.RenamedImplementations));
+        Assert.Contains("<Module>..cctor()", fixture.GroundTruthCallSites.Definitions.Keys);
     }
 
     [Fact]

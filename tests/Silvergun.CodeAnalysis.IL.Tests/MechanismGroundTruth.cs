@@ -27,7 +27,8 @@ public enum Expectation
 /// The call-graph phase from which a row is checked. Ordered: a row is active when <c>ActiveFrom &lt;= CurrentPhase</c>.
 /// <see cref="A2Dispatch"/> is phase A2's first slice (S1: CHA fan-out, <c>MethodEdgeKind.Dispatch</c>);
 /// <see cref="A2StateMachine"/> its second (S2: <c>MethodEdgeKind.StateMachine</c>, a stub to its state machine's
-/// <c>MoveNext</c>); <see cref="A2"/> is the whole phase, reached once the type-initializer edges land too
+/// <c>MoveNext</c>); <see cref="A2"/> is the whole phase, reached with its third (S3: <c>MethodEdgeKind.TypeInitializer</c>
+/// and <c>MethodEdgeKind.LoadToken</c>, and the module-initializer opacity)
 /// (docs/agent/tasks/cha-a2-dispatch-and-implicit-edges.md).
 /// </summary>
 public enum Phase
@@ -83,10 +84,14 @@ public static class MechanismGroundTruth
     /// (S1, CHA fan-out) activated the seven CHA rows and the S1 dispatch mechanisms (ObjectVirtual, ExplicitImpl,
     /// GenericInterface, StaticAbstract, OpenHierarchy); <see cref="Phase.A2StateMachine"/> (S2, state-machine edges)
     /// activated the four state-machine rows pending since A1 (Async.Method, Async.Lambda, Async.LocalFunction,
-    /// Iterator.Stub) and the S2 mechanisms (AsyncIterator, Debug); bumping this to <see cref="Phase.A2"/> once the
-    /// type-initializer edges land is the red-to-green moment of the rest of the phase.
+    /// Iterator.Stub) and the S2 mechanisms (AsyncIterator, Debug); <see cref="Phase.A2"/> (S3) activated the two
+    /// type-initializer rows pending since A1 (StaticInit.TriggersInit, StaticInit.TriggersExplicitInit), S3's
+    /// <c>newobj</c> pair (StaticInit.CreatesExplicitInit and its twin), S3 review W3's value-type pair
+    /// (StaticInit.CallsValueMember and its twin), ExpressionTree.CompilesEnvTree (KnownGap until
+    /// the <c>ldtoken</c> edge; Present since, spec §5) and the module-initializer opacity row. Every row but the
+    /// Reachability one is active now.
     /// </summary>
-    public static Phase CurrentPhase => Phase.A2StateMachine;
+    public static Phase CurrentPhase => Phase.A2;
 
     /// <summary>The path rows active at <see cref="CurrentPhase"/>.</summary>
     public static IReadOnlyList<MechanismPath> ActivePaths => Paths.Where(p => p.ActiveFrom <= CurrentPhase).ToArray();
@@ -191,6 +196,19 @@ public static class MechanismGroundTruth
             "Twin .cctor: safe System.String.Concat initializer."),
         new("StaticInit.TriggersSafeInit", "StaticInit", [Own("StaticInit.Triggers.TriggersSafeInit()")], null, Expectation.Absent, Phase.A1,
             "Twin trigger: its TypeInitializer edge leads only to the benign SafeFieldInit..cctor."),
+        new("StaticInit.CreatesExplicitInit", "StaticInit",
+            [Own("StaticInit.Creators.CreatesExplicitInit()"), Own("StaticInit.Constructed..cctor()"), GetEnv],
+            Env, Expectation.Present, Phase.A2,
+            "A2 S3 (§8): CreatesExplicitInit only does newobj Constructed::.ctor() - no static member of Constructed is named. A constructor call is a TypeInitializer trigger (§4), so the edge goes to Constructed's explicit .cctor."),
+        new("StaticInit.CreatesSafeInit", "StaticInit", [Own("StaticInit.Creators.CreatesSafeInit()")], null, Expectation.Absent, Phase.A2,
+            "Twin: newobj SafeConstructed::.ctor(), whose TypeInitializer edge leads only to the benign SafeConstructed..cctor."),
+        new("StaticInit.CallsValueMember", "StaticInit",
+            [Own("StaticInit.ValueCallers.CallsValueMember()"), Own("StaticInit.ValueInit.M()"), Own("StaticInit.ValueInit..cctor()"), GetEnv],
+            Env, Expectation.Present, Phase.A2,
+            "A2 S3 review W3: `default(ValueInit).M()` is initobj + call ValueInit::M() - an INSTANCE method, which the caller-side rule (§4) does not count. " +
+            "The CLR runs a value type's .cctor before its instance method (ECMA-335 II.10.5.3.1), so M itself has the TypeInitializer edge, at offset 0, to ValueInit..cctor."),
+        new("StaticInit.CallsSafeValueMember", "StaticInit", [Own("StaticInit.ValueCallers.CallsSafeValueMember()")], null, Expectation.Absent, Phase.A2,
+            "Twin: SafeValueInit.M's TypeInitializer edge leads only to the benign SafeValueInit..cctor."),
 
         // ---- ModuleInit --------------------------------------------------------------------------------------
         new("ModuleInit.Init", "ModuleInit", [Own("ModuleInit.Startup.Init()"), GetEnv], Env, Expectation.Present, Phase.A1,
@@ -388,11 +406,10 @@ public static class MechanismGroundTruth
         // Both rows are about EnvironmentProbe specifically: both methods call Expression`1.Compile, which the map
         // classifies DynamicCodeLoading, so "any capability" would hold for the twin too and prove nothing.
         new("ExpressionTree.CompilesEnvTree", "ExpressionTree", [Own("ExpressionTree.Trees.CompilesEnvTree()"), GetEnv],
-            Env, Expectation.KnownGap, Phase.A1,
+            Env, Expectation.Present, Phase.A2,
             "`Expression<Func<string>> e = () => Environment.GetEnvironmentVariable(...); e.Compile()()`: the lambda is never an own method - " +
             "the IL is `ldtoken GetEnvironmentVariable` + MethodBase.GetMethodFromHandle + Expression.Call + Expression.Lambda + Compile + Invoke, " +
-            "so no call/callvirt/newobj/ldftn names the sink and the static graph has no edge to it. ideal: Present. " +
-            "lever: an `ldtoken` method edge (A2 decides)."),
+            "so no call/callvirt/newobj/ldftn names the sink. A2's LoadToken edge (spec §5) is the edge to it. KnownGap until A2 S3; Present since, a design decision recorded in spec §5."),
         new("ExpressionTree.CompilesSafeTree", "ExpressionTree", [Own("ExpressionTree.Trees.CompilesSafeTree()")], Env, Expectation.Absent, Phase.A1,
             "Twin: the same tree shape with ldtoken System.String.Concat. Scoped to EnvironmentProbe because Compile (DynamicCodeLoading) is reached by both; " +
             "stays Absent even once an ldtoken edge lands, since Concat is safe."),
@@ -525,6 +542,9 @@ public static class MechanismGroundTruth
     [
         new("Opacity.FunctionPointerCalli", "Opacity", Own("Opacity.Pointers.CallsThroughPointer()"), OpacityKind.IndirectCall, Phase.A1,
             "The calli in CallsThroughPointer has no target in IL: it must be recorded as an IndirectCall opacity, never dropped - asserted separately from the ldftn path (Opacity.FunctionPointer)."),
+        new("ModuleInit.ModuleInitializerInvisible", "ModuleInit", ModuleSite(ReleaseFixtureAssembly), OpacityKind.ModuleInitializerInvisible, Phase.A2,
+            "A2 S3 (spec §6): the Release fixture's [ModuleInitializer]s are called only from <Module>..cctor(), which the model drops. The gap is made explicit: one opacity per assembly, " +
+            "sited at [assembly]<Module>. (ModuleInit.Init is still Present as an entry point.)"),
     ];
 
     /// <summary>
@@ -549,6 +569,12 @@ public static class MechanismGroundTruth
     /// <summary>An anchored, escaped waypoint for a platform method's full node id.</summary>
     public static string Platform(string nodeId) => "^" + Regex.Escape(nodeId) + "$";
 
+    /// <summary>
+    /// An anchored, escaped opacity site for an indexed assembly's <c>&lt;Module&gt;</c>, as the graph sites module opacities:
+    /// <c>[assembly]&lt;Module&gt;</c> (<see cref="MemberIndex.Qualified"/>). Not a node: no graph node has this id.
+    /// </summary>
+    public static string ModuleSite(string assembly) => "^" + Regex.Escape(MemberIndex.Qualified(assembly, "<Module>")) + "$";
+
     /// <summary>Whether a waypoint regex addresses an own fixture method (as opposed to a platform method).</summary>
     public static bool IsOwn(string waypoint) => waypoint.StartsWith("^" + Regex.Escape(RootNamespace + "."), StringComparison.Ordinal);
     #endregion
@@ -556,6 +582,9 @@ public static class MechanismGroundTruth
     #region Fields
     /// <summary>The root namespace of every mechanism-fixture assembly (the Debug-built one under <c>MechanismFixture.Debug</c>).</summary>
     public const string RootNamespace = "MechanismFixture";
+
+    /// <summary>The Release fixture's assembly name (as <c>MechanismFixtureAssemblies.FixtureName</c>), for module sites.</summary>
+    public const string ReleaseFixtureAssembly = "Silvergun.CodeAnalysis.IL.Tests.MechanismFixture";
 
     // A property, not a static readonly field: Paths' initializer runs first in textual order and would see null.
     private static string GetEnv => Platform("System.Environment.GetEnvironmentVariable(System.String)");

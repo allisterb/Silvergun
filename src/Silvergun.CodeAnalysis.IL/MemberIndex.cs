@@ -105,7 +105,8 @@ public sealed record IndexCoverage(int AssembliesUnreadable, int TypesSkipped, i
 /// <see cref="DispatchTargets"/> is class-hierarchy analysis (phase A2): the own overrides and implementations a
 /// virtual call may run, matched by name and shape over the subtype map. <see cref="StateMachineTargets"/> is the
 /// <c>MoveNext</c> of an own state machine (an async method's, an iterator's, or a hand-written enumerator's), which
-/// the code that creates it never calls.
+/// the code that creates it never calls. <see cref="TypeInitializerTargets(IFieldReference)"/> is the static
+/// constructor a static member access may run, and <see cref="Module"/> what Model drops from each module.
 /// </para>
 /// </summary>
 public sealed class MemberIndex
@@ -117,6 +118,7 @@ public sealed class MemberIndex
         IReadOnlyList<IndexedMethod> methods,
         IReadOnlyDictionary<string, IReadOnlyList<string>> subtypes,
         IReadOnlyDictionary<string, TypeForwarders> forwarders,
+        IReadOnlyDictionary<string, ModuleMetadata> modules,
         TypeScope scope,
         IReadOnlySet<string> open,
         IndexCoverage coverage)
@@ -126,6 +128,7 @@ public sealed class MemberIndex
         Methods = methods;
         this.subtypes = subtypes;
         this.forwarders = forwarders;
+        this.modules = modules;
         this.scope = scope;
         this.open = open;
         Coverage = coverage;
@@ -141,12 +144,20 @@ public sealed class MemberIndex
         // per step, so a scan of the definitions there would be uncharged work (review S1 round 4 W1-r4).
         interfaceIds = types.Where(t => t.Value.Any(d => d.Definition is InterfaceDefinition)).Select(t => t.Key).ToHashSet(StringComparer.Ordinal);
         classIds = types.Where(t => t.Value.Any(d => d.Definition is not InterfaceDefinition)).Select(t => t.Key).ToHashSet(StringComparer.Ordinal);
+        valueTypeIds = types.Where(t => t.Value.Any(d => d.Definition is StructDefinition)).Select(t => t.Key).ToHashSet(StringComparer.Ordinal);
         supertypes = types.ToDictionary(
             t => t.Key,
             t => (IReadOnlyList<string>)t.Value.SelectMany(d => d.Supertypes).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)
                 .Concat(implicitSupertypes.GetValueOrDefault(t.Key) ?? []).Distinct(StringComparer.Ordinal).ToArray(),
             StringComparer.Ordinal);
         stateMachines = StateMachines(subtypes, byImplementedShape);
+        initializers = methods
+            .Where(m => m.Definition.IsStatic && m.Definition.Name == ".cctor" && m.Identity.GenericArity == 0 && m.Identity.ParameterTypes.Count == 0)
+            .GroupBy(m => m.DeclaringTypeId, StringComparer.Ordinal)
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyList<string>)g.Select(m => m.NodeId).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(),
+                StringComparer.Ordinal);
     }
     #endregion
 
@@ -165,17 +176,23 @@ public sealed class MemberIndex
     #endregion
 
     #region Methods
-    /// <summary>Indexes the loaded assemblies of <paramref name="assemblies"/>, with the forwarders read from their files.</summary>
+    /// <summary>Indexes the loaded assemblies of <paramref name="assemblies"/>, with the forwarders and module metadata read from their files.</summary>
     public static MemberIndex Build(IEnumerable<AssemblyDisassembler> assemblies) =>
-        Build(assemblies.Where(d => d is not null).Select(d => (d.Assembly, d.Forwarders)));
+        Build(assemblies.Where(d => d is not null).Select(d => (d.Assembly, d.Forwarders, d.Module)));
+
+    // With ModuleMetadata.None for each: for tests over synthetic or emitted assemblies only. Internal, since a real file
+    // indexed this way would read as having no module initializer, which is never assumed (S3 review W4).
+    internal static MemberIndex Build(IEnumerable<(Model.Assembly Assembly, TypeForwarders Forwarders)> assemblies) =>
+        Build(assemblies.Select(a => (a.Assembly, a.Forwarders, ModuleMetadata.None)));
 
     /// <summary>
-    /// Indexes every type and method definition of <paramref name="assemblies"/>, each with its type forwarders —
-    /// <see cref="TypeForwarders.None"/> only for an assembly that has no file (a synthetic one). An assembly, type or
-    /// method whose metadata cannot be read is skipped on its own and counted in <see cref="Coverage"/>, and so is a
-    /// forwarder table that is unreadable or missing (null).
+    /// Indexes every type and method definition of <paramref name="assemblies"/>, each with its type forwarders and
+    /// module metadata — <see cref="TypeForwarders.None"/> and <see cref="ModuleMetadata.None"/> only for an assembly
+    /// that has no file (a synthetic one). An assembly, type or method whose metadata cannot be read is skipped on its
+    /// own and counted in <see cref="Coverage"/>, and so is a forwarder table that is unreadable or missing (null). Module
+    /// metadata that is missing counts as unreadable (<see cref="Module"/>).
     /// </summary>
-    public static MemberIndex Build(IEnumerable<(Model.Assembly Assembly, TypeForwarders Forwarders)> assemblies)
+    public static MemberIndex Build(IEnumerable<(Model.Assembly Assembly, TypeForwarders Forwarders, ModuleMetadata Module)> assemblies)
     {
         var inputs = assemblies.Where(a => a.Assembly is not null).DistinctBy(a => (object)a.Assembly, ReferenceEqualityComparer.Instance).ToArray();
         var loaded = inputs.Select(a => a.Assembly).ToArray();
@@ -189,6 +206,9 @@ public sealed class MemberIndex
         var forwarders = inputs
             .GroupBy(a => a.Assembly.Name ?? CanonicalName.UnknownPart, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => TypeForwarders.Merge(g.Select(a => a.Forwarders)), StringComparer.OrdinalIgnoreCase);
+        var modules = inputs
+            .GroupBy(a => a.Assembly.Name ?? CanonicalName.UnknownPart, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => ModuleMetadata.Merge(g.Select(a => a.Module)), StringComparer.OrdinalIgnoreCase);
 
         var typeCandidates = typeLists
             .SelectMany(l => (l.Types ?? []).Select(t => (l.Assembly, Type: t, NodeId: Guard<string?>(() => CanonicalName.NodeId(ModelNames.Of(t)), null))))
@@ -233,7 +253,7 @@ public sealed class MemberIndex
             inputs.Count(a => a.Forwarders is not { IsReadable: true }),
             indexedTypes.Sum(t => t?.Unresolved ?? 0));
 
-        return new MemberIndex(assemblyNames, typesById, methods, subtypes, forwarders, scope, OpenTypes(typesById, scope), coverage);
+        return new MemberIndex(assemblyNames, typesById, methods, subtypes, forwarders, modules, scope, OpenTypes(typesById, scope), coverage);
     }
 
     /// <summary>
@@ -383,13 +403,49 @@ public sealed class MemberIndex
         IBasicType[] named = construction
             ? Guard(() => reference.ContainingType, null) is { } type ? [type] : []
             : Guard(() => reference.GenericArguments.OfType<IBasicType>().ToArray(), []);
-        // Keys made distinct first: one generic argument list can name the same state machine many times, and each key's
-        // methods are its own (disjoint from every other key's), so the lookups then cost no more than the edges.
-        var keys = named.SelectMany(t => scope.Of(t).Keys).Distinct(StringComparer.Ordinal).ToArray();
-        return keys is [var only]
-            ? stateMachines.GetValueOrDefault(only) ?? []
-            : keys.SelectMany(k => stateMachines.GetValueOrDefault(k) ?? []).Order(StringComparer.Ordinal).ToArray();
+        return Lookup(stateMachines, named.SelectMany(t => scope.Of(t).Keys));
     }
+
+    /// <summary>
+    /// The node ids of the static constructors (<c>.cctor</c>) that a load, store or address of the static field
+    /// <paramref name="field"/> may run (A2 spec §4): its declaring type's, when that is an own type that has one,
+    /// generic arguments stripped. Empty for an instance field. Never throws.
+    /// </summary>
+    public IReadOnlyList<string> TypeInitializerTargets(IFieldReference? field) =>
+        field is not null && initializers.Count > 0 && Guard(() => field.IsStatic, false)
+            ? Lookup(initializers, scope.Of(Guard(() => field.ContainingType, null)).Keys)
+            : [];
+
+    /// <summary>
+    /// The node ids of the static constructors that a <c>call</c>, <c>newobj</c> or <c>ldftn</c> of
+    /// <paramref name="method"/> may run: its declaring type's, as for a field, when it is static or a constructor. This
+    /// over-approximates <c>beforefieldinit</c>, whose trigger is static field access alone. A derived constructor's call
+    /// to its base constructor gives the base type its own edge. A value type's instance methods, which also trigger,
+    /// are the callee's edge instead (<see cref="InstanceInitializerTargets"/>). Never throws.
+    /// </summary>
+    public IReadOnlyList<string> TypeInitializerTargets(IMethodReference? method) =>
+        method is not null && initializers.Count > 0 && Guard(() => method.IsStatic || method.Name == ".ctor", false)
+            ? Lookup(initializers, scope.Of(Guard(() => method.ContainingType, null)).Keys)
+            : [];
+
+    /// <summary>
+    /// The node ids of the static constructors that <paramref name="method"/> itself may run when first called: its
+    /// declaring type's, when <paramref name="method"/> is an instance method of an own value type (ECMA-335
+    /// II.10.5.3.1: a value type's initializer runs before its first instance method does, unless beforefieldinit). The
+    /// edge is the callee's, not a caller's, so it holds however the method is reached: a direct call, a dispatch through
+    /// a dropped <c>constrained.</c> prefix, or reflection. Model does not carry beforefieldinit, so every own value type
+    /// counts (over-approximate). Never throws.
+    /// </summary>
+    public IReadOnlyList<string> InstanceInitializerTargets(IndexedMethod method) =>
+        !method.Definition.IsStatic && valueTypeIds.Contains(method.DeclaringTypeId)
+            ? initializers.GetValueOrDefault(method.DeclaringTypeId) ?? []
+            : [];
+
+    /// <summary>
+    /// The module metadata of the indexed assembly <paramref name="assembly"/> (<see cref="ModuleMetadata"/>);
+    /// <see cref="ModuleMetadata.Unreadable"/> for a name that is not indexed.
+    /// </summary>
+    public ModuleMetadata Module(string assembly) => modules.GetValueOrDefault(assembly) ?? ModuleMetadata.Unreadable;
 
     /// <summary>
     /// True when <paramref name="typeNodeId"/> is an own class whose base-class chain leaves the index at a platform or
@@ -763,6 +819,17 @@ public sealed class MemberIndex
             StringComparer.Ordinal);
     }
 
+    // The node ids map holds under keys, ordinal-sorted. Keys made distinct first: one generic argument list can name the
+    // same type many times (S2 review W1), and each key's ids are its own (disjoint from every other key's, since both
+    // maps are keyed by declaring type), so the lookups cost no more than the answer.
+    private static IReadOnlyList<string> Lookup(IReadOnlyDictionary<string, IReadOnlyList<string>> map, IEnumerable<string> keys) =>
+        keys.Distinct(StringComparer.Ordinal).ToArray() switch
+        {
+            [] => [],
+            [var only] => map.GetValueOrDefault(only) ?? [],
+            var several => several.SelectMany(k => map.GetValueOrDefault(k) ?? []).Order(StringComparer.Ordinal).ToArray(),
+        };
+
     // The DispatchWork units for hashing or scanning text once: one per UnitLength characters, at least one.
     private static long Units(string text) => 1 + text.Length / UnitLength;
 
@@ -781,8 +848,8 @@ public sealed class MemberIndex
 
     // The name a method implements: its own, or the last segment of a C# explicit implementation's
     // ("System.Collections.Generic.IEnumerator<System.String>.get_Current" implements "get_Current"). Dots inside <...>
-    // and a leading dot (".ctor") do not count.
-    private static string ImplementedName(string? name)
+    // and a leading dot (".ctor") do not count. ModuleMetadata counts the MethodImpl rows this rule cannot follow (D3).
+    internal static string ImplementedName(string? name)
     {
         if (name is null)
             return CanonicalName.UnknownPart;
@@ -871,6 +938,7 @@ public sealed class MemberIndex
     private readonly IReadOnlySet<string> open;
     private readonly HashSet<string> interfaceIds;
     private readonly HashSet<string> classIds;
+    private readonly HashSet<string> valueTypeIds;
     // Per type id: the distinct supertypes of all its definitions, ordinal-sorted so the walk does not depend on row
     // order, then its implicitSupertypes.
     private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> supertypes;
@@ -884,6 +952,12 @@ public sealed class MemberIndex
 
     // Per own state-machine type id, its MoveNext node ids (StateMachineTargets).
     private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> stateMachines;
+
+    // Per own type id that has a static constructor, its .cctor node ids (TypeInitializerTargets).
+    private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> initializers;
+
+    // Per indexed assembly name (case-insensitive, like ownership), its merged module metadata.
+    private readonly IReadOnlyDictionary<string, ModuleMetadata> modules;
 
     // The state-machine interfaces and the method of each that runs the body. IEnumerator<T> is listed beside
     // IEnumerator because the subtype map holds only links own types declare, and a hand-written InterfaceImpl may name
