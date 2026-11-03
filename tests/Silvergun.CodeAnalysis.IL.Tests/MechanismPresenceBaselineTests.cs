@@ -263,6 +263,8 @@ public sealed class MechanismPresenceBaselineTests : IClassFixture<MechanismFixt
         "EnvironmentProbe Call MechanismFixture.ObjectVirtual.EnvDescribed::ToString -> System.Environment.GetEnvironmentVariable",
         "EnvironmentProbe Call MechanismFixture.OpenHierarchy.EnvStream::Flush -> System.Environment.GetEnvironmentVariable",
         "EnvironmentProbe Call MechanismFixture.StaticAbstract.EnvFactory::Make -> System.Environment.GetEnvironmentVariable",
+        // A2 S1 review 2 (W-B): SB.Make calls the sink directly; SC inherits it as IFactory's static implementation.
+        "EnvironmentProbe Call MechanismFixture.StaticInherited.SB::Make -> System.Environment.GetEnvironmentVariable",
         "EnvironmentProbe Call MechanismFixture.Generics.A::Baz -> System.Environment.GetEnvironmentVariable",
         "EnvironmentProbe Call MechanismFixture.Generics.Box::Run -> System.Environment.GetEnvironmentVariable",
         "EnvironmentProbe Call MechanismFixture.Generics.Closures.<>c__DisplayClass0_0::<Wraps>b__0 -> System.Environment.GetEnvironmentVariable",

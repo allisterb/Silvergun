@@ -126,6 +126,43 @@ public sealed class MethodGraphRobustnessTests : IClassFixture<MechanismMethodGr
         AssertIdentical(fixture.Graph, MethodGraph.Build(fixture.Index, GraphBudget.Default));
     }
 
+    /// <summary>
+    /// The default CHA work budget (A2 S1d): 20,000,000 units, about 100 times what the largest measured assembly
+    /// spends (Microsoft.CodeAnalysis.CSharp 4.14, 202,824) — and the fixture graph spends some, but far less.
+    /// </summary>
+    [Fact]
+    public void Build_WithTheDefaultBudget_HasTheDefaultDispatchWork_AndSpendsSomeOfIt()
+    {
+        Assert.Equal(20_000_000L, GraphBudget.DefaultDispatchWork);
+        Assert.Equal(GraphBudget.DefaultDispatchWork, GraphBudget.Default.MaxDispatchWork);
+        Assert.Equal(GraphBudget.DefaultDispatchWork, new GraphBudget(1, 1).MaxDispatchWork);
+        Assert.InRange(fixture.Graph.Coverage.DispatchWork, 1, GraphBudget.DefaultDispatchWork - 1);
+    }
+
+    /// <summary>
+    /// A2 S1d: a dispatch work budget of ZERO stops only the fan-out. The graph has no Dispatch edge, every other edge
+    /// is exactly the default build's (static edges never depend on CHA), and so are the nodes, opacities, call sites
+    /// and resolutions — but it is truncated, and says so with the dispatch reason, having spent nothing.
+    /// </summary>
+    [Fact]
+    public void Build_WithNoDispatchWork_HasNoDispatchEdges_ButEveryStaticEdge()
+    {
+        Assert.Contains(fixture.Graph.Edges, e => e.Kind == MethodEdgeKind.Dispatch);
+
+        var graph = MethodGraph.Build(fixture.Index, new GraphBudget(1_000_000, 5_000_000, MaxDispatchWork: 0));
+
+        Assert.DoesNotContain(graph.Edges, e => e.Kind == MethodEdgeKind.Dispatch);
+        Assert.Equal(fixture.Graph.Edges.Where(e => e.Kind != MethodEdgeKind.Dispatch), graph.Edges);
+        Assert.Equal(fixture.Graph.Nodes, graph.Nodes);
+        Assert.Equal(fixture.Graph.Opacities, graph.Opacities);
+        Assert.True(graph.Coverage.Truncated);
+        Assert.Equal("dispatch work budget of 0 reached", graph.Coverage.TruncatedBy);
+        Assert.Equal(0L, graph.Coverage.DispatchWork);
+        Assert.Equal(0, graph.Coverage.DispatchEdges);
+        Assert.Equal(fixture.Graph.Coverage with { DispatchSites = graph.Coverage.DispatchSites, DispatchEdges = 0, DispatchWork = 0, Truncated = true, TruncatedBy = graph.Coverage.TruncatedBy },
+            graph.Coverage);
+    }
+
     // ---- an unreadable body ------------------------------------------------------------------------------------
 
     /// <summary>

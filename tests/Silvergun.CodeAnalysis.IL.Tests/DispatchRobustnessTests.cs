@@ -178,6 +178,11 @@ public sealed class DispatchRobustnessTests
     /// <summary>
     /// The same bound on a deep base chain C0 : … : C4999 : Object: from C0 the walk passes 4,096 visits and counts as
     /// below the unrelated own class <c>Target</c>; from C4999 it reaches Object and does not.
+    /// <para>
+    /// <c>Target</c> has one own subclass, <c>TargetSub</c>, which defines no <c>Run</c>. It is there only so that the
+    /// walk runs at all: since S1d, a declared own class that nothing derives from is answered <c>[]</c> by the
+    /// pre-filter without walking (correct, and more precise). <c>TargetSub</c> is not a candidate and changes no answer.
+    /// </para>
     /// </summary>
     [Fact]
     public void DispatchTargets_PastTheUpwardWalkBoundOnADeepChain_CountsAsBelow()
@@ -185,6 +190,7 @@ public sealed class DispatchRobustnessTests
         const int length = 5000;
         var (assembly, space) = NewAssembly(Syn);
         Virtual(Class(space, "Target", ObjectRef), "Run");
+        Class(space, "TargetSub", SyntheticModel.TypeRef(Syn, "Target", assembly: Syn));
         for (var i = 0; i < length; i++)
         {
             var type = Class(space, $"C{i}", i == length - 1 ? ObjectRef : SyntheticModel.TypeRef(Syn, $"C{i + 1}", assembly: Syn));
@@ -193,10 +199,13 @@ public sealed class DispatchRobustnessTests
         }
         var index = WithinDeadline(() => MemberIndex.Build([(assembly, TypeForwarders.None)]));
         var reference = CallvirtTarget("Target", "Run");
+        var work = new MemberIndex.DispatchWork(long.MaxValue);
 
-        var targets = WithinDeadline(() => index.DispatchTargets(reference, index.Resolve(reference), virtualSite: true));
+        var targets = WithinDeadline(() => index.DispatchTargets(reference, index.Resolve(reference), virtualSite: true, work));
 
         Assert.Equal([Id("C0.Run()")], targets);
+        // Non-vacuity: the upward walk really ran into the bound (one unit per step), it was not pre-filtered.
+        Assert.True(work.Spent > 4096, $"spent {work.Spent} units; the walk from C0 did not reach the 4,096-visit bound");
     }
 
     /// <summary>
@@ -311,7 +320,9 @@ public sealed class DispatchRobustnessTests
     /// ZERO targets, so only time shows the work:
     /// <list type="bullet">
     /// <item><description><b>Leaf</b> — a chain C0 &lt;- C1 &lt;- … &lt;- C(n-1), every class declaring <c>m</c>, called once
-    /// through the leaf: n candidates, each an ancestor, each walked up to the root;</description></item>
+    /// through the leaf: n candidates, each an ancestor, each walked up to the root. The leaf has one own subclass
+    /// <c>Below</c> without an <c>m</c>, so the S1d pre-filter (a declared class nothing derives from costs nothing)
+    /// does not answer it before any walk;</description></item>
     /// <item><description><b>Downward</b> — a chain B0 &lt;- … &lt;- B(n-1), every class declaring <c>Run</c>, none
     /// implementing the own interface <c>I</c>, called through <c>I</c>: each candidate's <c>InheritedBelow</c> walks
     /// down the rest of the chain, calling <c>Below</c> at every step.</description></item>
@@ -346,6 +357,7 @@ public sealed class DispatchRobustnessTests
             {
                 for (var i = 0; i < n; i++)
                     Virtual(Class(space, $"C{i}", i == 0 ? ObjectRef : SyntheticModel.TypeRef(Syn, $"C{i - 1}", assembly: Syn)), "m");
+                Class(space, "Below", SyntheticModel.TypeRef(Syn, $"C{n - 1}", assembly: Syn));
                 reference = CallvirtTarget($"C{n - 1}", "m");
             }
             else

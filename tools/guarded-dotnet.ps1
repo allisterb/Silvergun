@@ -13,7 +13,8 @@
     that was already running, e.g. Visual Studio's, is never counted or killed; one that something else starts
     DURING the run would be) and kills the whole tree when the sum exceeds -LimitMB or the run exceeds
     -TimeoutSec. A process joins the tree only if it started after the guard and after its parent, so a reused
-    process id cannot pull an unrelated process into it; every process killed is logged first. Sampling can miss a process that lives under 500 ms, so the reported peak is a lower bound. If the
+    process id cannot pull an unrelated process into it; every process killed is logged first. A descendant whose
+    parent has already exited is no longer linked to the tree, so it is neither counted nor killed. Sampling can miss a process that lives under 500 ms, so the reported peak is a lower bound. If the
     script stops on Ctrl-C or an error, the tree is killed too; if the script itself is hard-killed, its finally
     block does not run and dotnet can outlive it.
 

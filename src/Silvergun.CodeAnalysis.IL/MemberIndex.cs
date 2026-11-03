@@ -135,6 +135,15 @@ public sealed class MemberIndex
         // instances, and the first entry wins anyway, so a definition reachable twice cannot throw here.
         ownMethods = methods.GroupBy<IndexedMethod, MethodDefinition>(m => m.Definition, ReferenceEqualityComparer.Instance)
             .ToDictionary<IGrouping<MethodDefinition, IndexedMethod>, MethodDefinition, IndexedMethod>(g => g.Key, g => g.First(), ReferenceEqualityComparer.Instance);
+        // Per id, not per definition: one file may define an id many times over, and CHA asks these per candidate and
+        // per step, so a scan of the definitions there would be uncharged work (review S1 round 4 W1-r4).
+        interfaceIds = types.Where(t => t.Value.Any(d => d.Definition is InterfaceDefinition)).Select(t => t.Key).ToHashSet(StringComparer.Ordinal);
+        classIds = types.Where(t => t.Value.Any(d => d.Definition is not InterfaceDefinition)).Select(t => t.Key).ToHashSet(StringComparer.Ordinal);
+        supertypes = types.ToDictionary(
+            t => t.Key,
+            t => (IReadOnlyList<string>)t.Value.SelectMany(d => d.Supertypes).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)
+                .Concat(implicitSupertypes.GetValueOrDefault(t.Key) ?? []).Distinct(StringComparer.Ordinal).ToArray(),
+            StringComparer.Ordinal);
     }
     #endregion
 
@@ -274,7 +283,10 @@ public sealed class MemberIndex
     public IReadOnlyList<string> DirectSubtypes(string typeNodeId) =>
         subtypes.TryGetValue(typeNodeId, out var found) ? found : [];
 
-    /// <summary>The indexed definitions of <paramref name="typeNodeId"/> (more than one only across assemblies).</summary>
+    /// <summary>
+    /// The indexed definitions of <paramref name="typeNodeId"/>: more than one across assemblies, or when one file
+    /// defines the same name more than once.
+    /// </summary>
     public IReadOnlyList<IndexedType> Types(string typeNodeId) =>
         types.TryGetValue(typeNodeId, out var found) ? found : [];
 
@@ -295,8 +307,14 @@ public sealed class MemberIndex
     /// precision only, since these targets are added beside the resolution, never in its place. Hierarchy walks are
     /// bounded and count as a match past the bound. Memoized per declared shape. Never throws.
     /// </para>
+    /// <para>
+    /// The search is charged to <paramref name="work"/> (unlimited when null) per candidate considered and per hierarchy
+    /// step, in proportion to the text hashed and compared. A memoized answer is charged what it cost to compute, once
+    /// per <paramref name="work"/>; a repeat within it is free. Once <paramref name="work"/> is <see cref="DispatchWork.Exhausted">exhausted</see>
+    /// this returns null for every call, so the caller must check it.
+    /// </para>
     /// </summary>
-    public IReadOnlyList<string>? DispatchTargets(IMethodReference? reference, MethodResolution resolution, bool virtualSite)
+    public IReadOnlyList<string>? DispatchTargets(IMethodReference? reference, MethodResolution resolution, bool virtualSite, DispatchWork? work = null)
     {
         if (reference is null || resolution.Definition is { IsVirtual: false, IsAbstract: false })
             return null;
@@ -315,16 +333,35 @@ public sealed class MemberIndex
         var arity = identity.GenericArity;
         var parameterTypes = identity.ParameterTypes;
 
-        return dispatched.GetOrAdd(
-            Key([declared.Count.ToString(CultureInfo.InvariantCulture), .. declared, name, arity.ToString(CultureInfo.InvariantCulture),
-                 parameterTypes.Count.ToString(CultureInfo.InvariantCulture), .. parameterTypes, isStatic ? "static" : "instance"]),
-            _ => Dispatch(declared, name, arity, parameterTypes, isStatic));
+        var memo = Key([declared.Count.ToString(CultureInfo.InvariantCulture), .. declared, name, arity.ToString(CultureInfo.InvariantCulture),
+                        parameterTypes.Count.ToString(CultureInfo.InvariantCulture), .. parameterTypes, isStatic ? "static" : "instance"]);
+        work ??= new DispatchWork(long.MaxValue);
+        if (work.Exhausted)
+            return null;
+        // A memoized answer is charged what it cost to compute, once per build, so a build's work and where it runs out
+        // do not depend on what earlier builds over this index computed.
+        if (dispatched.TryGetValue(memo, out var known))
+            return work.ChargeOnce(memo, known.Cost) ? known.Targets : null;
+        var before = work.Spent;
+        try
+        {
+            var targets = Dispatch(declared, name, arity, parameterTypes, isStatic, work);
+            work.ChargeOnce(memo, 0);
+            return dispatched.GetOrAdd(memo, new DispatchAnswer(targets, work.Spent - before)).Targets;
+        }
+        catch (WorkExhaustedException)
+        {
+            // Abandoned part-way: nothing is memoized, so a build with more work can still answer it.
+            return null;
+        }
     }
 
     /// <summary>
     /// True when <paramref name="typeNodeId"/> is an own class whose base-class chain leaves the index at a platform or
     /// dependency class other than <c>System.Object</c>, <c>System.ValueType</c>, <c>System.Enum</c> or a delegate
     /// base (<c>EnvStream : MemoryStream</c>): it may override a virtual of a type the subtype map never links it to.
+    /// Over-approximate: a base that cannot be read, or a base chain that may run past 256 classes, also counts as open,
+    /// and so does every type below an open one.
     /// </summary>
     public bool IsOpen(string typeNodeId) => open.Contains(typeNodeId);
 
@@ -418,19 +455,31 @@ public sealed class MemberIndex
         type.NestingChain is [var name, ..] && name != CanonicalName.UnknownPart ? (type.Namespace ?? string.Empty, name) : null;
 
     // DispatchTargets for one declared shape. Starts from the methods of that shape, so the cost follows the candidates,
-    // not the size of the hierarchy, and nothing per hierarchy is kept (review S1 W1).
-    private IReadOnlyList<string> Dispatch(IReadOnlyList<string> declared, string name, int arity, IReadOnlyList<string> parameterTypes, bool isStatic)
+    // not the size of the hierarchy, and nothing per hierarchy is kept (review S1 W1). Each candidate and each hierarchy
+    // step is charged to work, which throws WorkExhaustedException once spent: many unrelated types sharing one method
+    // name make every shape scan every candidate, quadratic in a crafted assembly (review S1 round 2 W-A). The charge
+    // follows the text hashed and compared (Units), since names cost an attacker almost nothing (round 3 W1).
+    private IReadOnlyList<string> Dispatch(IReadOnlyList<string> declared, string name, int arity, IReadOnlyList<string> parameterTypes, bool isStatic, DispatchWork work)
     {
         var keys = declared.ToHashSet(StringComparer.Ordinal);
         // Only an own class hierarchy is narrowed by parameter types: an interface may be variant (IComparer<in T> runs
         // Compare(object, object) for a Compare(string, string) call), and an external type may be an interface.
-        var narrow = declared.All(k => types.TryGetValue(k, out var defined) && defined.All(t => t.Definition is not InterfaceDefinition));
+        var narrow = declared.All(k => types.ContainsKey(k) && !interfaceIds.Contains(k));
         var external = !isStatic && declared.Any(k => !types.ContainsKey(k));
-        var inherited = !isStatic && declared.Any(MayBeInterface);
-        var walk = new HierarchyWalk(this, keys);
+        // A static abstract member may be implemented by a static method inherited from a base class too (W-B).
+        var inherited = declared.Any(MayBeInterface);
+        // Nothing can be below a type nothing derives from: the common call on a leaf class costs nothing.
+        if (!external && !inherited && !declared.Any(subtypes.ContainsKey))
+            return [];
+
+        var candidates = byImplementedShape.GetValueOrDefault(ImplementedShape(name, arity, parameterTypes.Count)) ?? [];
+        // Each candidate's type id is hashed a few times, and under narrow MayOverride scans both sides' parameter types.
+        var compared = narrow ? parameterTypes.Sum(Units) : 0;
+        work.Charge(candidates.Sum(m => Units(m.DeclaringTypeId) + (narrow ? compared + m.Identity.ParameterTypes.Sum(Units) : 0)));
+        var walk = new HierarchyWalk(this, keys, work);
 
         // A candidate declared in the declared type itself is the site's own target, not a dispatch target.
-        return (byImplementedShape.GetValueOrDefault(ImplementedShape(name, arity, parameterTypes.Count)) ?? [])
+        return candidates
             .Where(m => !keys.Contains(m.DeclaringTypeId))
             .Where(m => isStatic ? m.Definition.IsStatic : !m.Definition.IsStatic && (m.Definition.IsVirtual || m.Definition.IsAbstract))
             .Where(m => !narrow || MayOverride(parameterTypes, m.Identity.ParameterTypes))
@@ -443,13 +492,12 @@ public sealed class MemberIndex
             .ToArray();
     }
 
-    private IEnumerable<string> Supertypes(string key) =>
-        (types.TryGetValue(key, out var defined) ? defined.SelectMany(t => t.Supertypes) : [])
-            .Concat(implicitSupertypes.GetValueOrDefault(key) ?? []);
+    private IReadOnlyList<string> Supertypes(string key) =>
+        supertypes.GetValueOrDefault(key) ?? implicitSupertypes.GetValueOrDefault(key) ?? [];
 
-    // An external type might be one; an own type is one only if every definition of it is; a platform root is not.
+    // An external type might be one; an own type is one if any definition of it is; a platform root is not.
     private bool MayBeInterface(string key) =>
-        !closedRoots.Contains(key) && !(types.TryGetValue(key, out var defined) && defined.All(t => t.Definition is not InterfaceDefinition));
+        !closedRoots.Contains(key) && (!types.ContainsKey(key) || interfaceIds.Contains(key));
 
     // The memoized definition-level answer for one indexed assembly, rebound to the reference's own id and key. Keyed on
     // every input ResolveOwn reads, each part separately (a node id alone is not injective: names may contain '.' and
@@ -544,31 +592,112 @@ public sealed class MemberIndex
             supertypes.Count(s => s.Unresolved));
     }
 
-    // See IsOpen. Iterative with a depth bound, since the chain is attacker-controlled: past the bound, or on an unreadable
-    // base, a type counts as open (over-approximate). A base-class cycle counts as closed at the repeat.
+    // See IsOpen. An id is open when a base of any of its definitions is unreadable or leaves the index at anything but a
+    // closed root, when any indexed base is open, or when a base chain from it may run past MaxBaseDepth (over-
+    // approximate); a base-class cycle alone is closed. Linear in definitions and base links: one file may define an id
+    // many times over, and a walk per type was quadratic in that and in chain length (review S1 round 5 W1-r5).
     private static HashSet<string> OpenTypes(IReadOnlyDictionary<string, IReadOnlyList<IndexedType>> types, TypeScope scope)
     {
-        var open = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var start in types.Keys)
+        var ids = types.Keys.Order(StringComparer.Ordinal).ToArray();
+        var position = ids.Select((id, i) => (id, i)).ToDictionary(p => p.id, p => p.i, StringComparer.Ordinal);
+        var open = new bool[ids.Length];
+        var bases = new int[ids.Length][];
+        for (var i = 0; i < ids.Length; i++)
         {
-            var chain = new HashSet<string>(StringComparer.Ordinal);
-            var frontier = new List<string> { start };
-            var isOpen = false;
-            for (var depth = 0; !isOpen && frontier.Count > 0; depth++)
-            {
-                var bases = frontier.Where(chain.Add)
-                    .SelectMany(id => types[id])
-                    .Select(t => Guard<IReadOnlyList<string>?>(() => t.Definition is ClassDefinition { Base: { } b } ? scope.Of(b).Keys : [], null))
-                    .ToArray();
-                isOpen = depth > MaxBaseDepth || bases.Any(b => b is null)
-                    || bases.SelectMany(b => b!).Any(k => !types.ContainsKey(k) && !closedRoots.Contains(k));
-                frontier = bases.SelectMany(b => b!).Where(types.ContainsKey).Distinct(StringComparer.Ordinal).ToList();
-            }
-            if (isOpen)
-                open.Add(start);
+            var keys = types[ids[i]]
+                .Select(t => Guard<IReadOnlyList<string>?>(() => t.Definition is ClassDefinition { Base: { } b } ? scope.Of(b).Keys : [], null))
+                .ToArray();
+            var distinct = keys.SelectMany(k => k ?? []).Distinct(StringComparer.Ordinal).ToArray();
+            open[i] = keys.Any(k => k is null) || distinct.Any(k => !types.ContainsKey(k) && !closedRoots.Contains(k));
+            bases[i] = distinct.Where(types.ContainsKey).Select(k => position[k]).ToArray();
         }
-        return open;
+
+        // Open-ness flows from a base to every type below it, each type once.
+        var height = BaseHeights(bases, MaxBaseDepth + 1);
+        var below = Enumerable.Range(0, ids.Length).SelectMany(i => bases[i].Select(b => (Base: b, Sub: i))).ToLookup(p => p.Base, p => p.Sub);
+        var queue = new Queue<int>(Enumerable.Range(0, ids.Length).Where(i => open[i] || height[i] > MaxBaseDepth));
+        foreach (var i in queue)
+            open[i] = true;
+        while (queue.TryDequeue(out var i))
+            foreach (var sub in below[i].Where(sub => !open[sub]))
+            {
+                open[sub] = true;
+                queue.Enqueue(sub);
+            }
+        return ids.Where((_, i) => open[i]).ToHashSet(StringComparer.Ordinal);
     }
+
+    // Per node, an upper bound on how deep a walk along next can reach before repeating a node, saturating at cap: up to
+    // n edges inside a strongly connected component of n nodes that holds a cycle, a self-loop included (back round to
+    // the start, as the old per-type walk counted one), none in a single node without one, plus one edge out to the
+    // highest component below it. Tarjan's
+    // algorithm, iterative since the graph is attacker-controlled; it completes every component below one before that
+    // one, so each height is final when read.
+    private static int[] BaseHeights(int[][] next, int cap)
+    {
+        var count = next.Length;
+        var order = Enumerable.Repeat(-1, count).ToArray();
+        var low = new int[count];
+        var component = Enumerable.Repeat(-1, count).ToArray();
+        var height = new int[count];
+        var onStack = new bool[count];
+        var stack = new Stack<int>();
+        var visited = 0;
+        var components = 0;
+        for (var root = 0; root < count; root++)
+        {
+            if (order[root] >= 0)
+                continue;
+            var frames = new Stack<(int Node, int Edge)>([(root, 0)]);
+            order[root] = low[root] = visited++;
+            stack.Push(root);
+            onStack[root] = true;
+            while (frames.TryPop(out var frame))
+            {
+                var (node, edge) = frame;
+                if (edge < next[node].Length)
+                {
+                    frames.Push((node, edge + 1));
+                    var to = next[node][edge];
+                    if (order[to] < 0)
+                    {
+                        order[to] = low[to] = visited++;
+                        stack.Push(to);
+                        onStack[to] = true;
+                        frames.Push((to, 0));
+                    }
+                    else if (onStack[to])
+                        low[node] = Math.Min(low[node], order[to]);
+                    continue;
+                }
+                if (frames.TryPeek(out var parent))
+                    low[parent.Node] = Math.Min(low[parent.Node], low[node]);
+                if (low[node] != order[node])
+                    continue;
+
+                var members = new List<int>();
+                int member;
+                do
+                {
+                    member = stack.Pop();
+                    onStack[member] = false;
+                    component[member] = components;
+                    members.Add(member);
+                }
+                while (member != node);
+                var exit = members.SelectMany(m => next[m]).Where(to => component[to] != components).Select(to => 1 + height[to]).DefaultIfEmpty(0).Max();
+                var cyclic = members.Count > 1 || next[node].Contains(node);
+                var bound = Math.Min(cap, (cyclic ? members.Count : 0) + exit);
+                foreach (var m in members)
+                    height[m] = bound;
+                components++;
+            }
+        }
+        return height;
+    }
+
+    // The DispatchWork units for hashing or scanning text once: one per UnitLength characters, at least one.
+    private static long Units(string text) => 1 + text.Length / UnitLength;
 
     // An override's parameters are the declared method's, exactly, after substitution - but a reference carries
     // substitutions the override does not (A1 review C1), so a position settles only when both sides are concrete: a
@@ -673,13 +802,18 @@ public sealed class MemberIndex
     private readonly IReadOnlyDictionary<string, TypeForwarders> forwarders;
     private readonly TypeScope scope;
     private readonly IReadOnlySet<string> open;
+    private readonly HashSet<string> interfaceIds;
+    private readonly HashSet<string> classIds;
+    // Per type id: the distinct supertypes of all its definitions, ordinal-sorted so the walk does not depend on row
+    // order, then its implicitSupertypes.
+    private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> supertypes;
 
     // Resolution of a reference into an indexed assembly, keyed on every input ResolveOwn reads (see Defined) and
     // rebound to each reference's own id and key on a hit; memoized so a repeated call site costs one candidate scan.
     private readonly ConcurrentDictionary<string, MethodResolution> resolved = new(StringComparer.Ordinal);
 
-    // DispatchTargets per (declared type keys, implemented name, arity, parameter types, static).
-    private readonly ConcurrentDictionary<string, IReadOnlyList<string>> dispatched = new(StringComparer.Ordinal);
+    // DispatchTargets per (declared type keys, implemented name, arity, parameter types, static), with its cost.
+    private readonly ConcurrentDictionary<string, DispatchAnswer> dispatched = new(StringComparer.Ordinal);
 
     // Platform bases an open-ness walk stops at: every own type's chain may end in one without hiding a supertype
     // (implicitSupertypes links each to System.Object).
@@ -716,6 +850,7 @@ public sealed class MemberIndex
 
     private const int MaxBaseDepth = 256;
     private const int MaxHierarchyWalk = 4096;
+    private const int UnitLength = 64;
     #endregion
 
     #region Child types
@@ -727,6 +862,54 @@ public sealed class MemberIndex
 
     /// <summary>An indexed method definition with its identity, node id and declaring type's node id.</summary>
     public sealed record IndexedMethod(string Assembly, string NodeId, string DeclaringTypeId, MethodIdentity Identity, MethodDefinition Definition);
+
+    /// <summary>
+    /// An allowance of class-hierarchy-analysis work shared by the <see cref="DispatchTargets"/> calls of one graph
+    /// build: one unit per candidate considered and per hierarchy step, and one more per 64 characters of the type ids and
+    /// parameter types each one hashes or compares; each declared shape charged once. Not thread-safe; one build at a time.
+    /// </summary>
+    public sealed class DispatchWork(long limit)
+    {
+        #region Properties
+        /// <summary>The units allowed; a negative limit counts as 0.</summary>
+        public long Limit { get; } = Math.Max(limit, 0);
+
+        /// <summary>The units charged so far; <see cref="Limit"/> once <see cref="Exhausted"/>.</summary>
+        public long Spent { get; private set; }
+
+        /// <summary>True once a charge would have gone over <see cref="Limit"/>.</summary>
+        public bool Exhausted { get; private set; }
+        #endregion
+
+        #region Methods
+        // Charges units, abandoning the Dispatch in progress once the allowance is spent.
+        internal void Charge(long units)
+        {
+            if (!Add(units))
+                throw new WorkExhaustedException();
+        }
+
+        // Charges a memoized shape's cost unless this build already paid for it; false once the allowance is spent.
+        internal bool ChargeOnce(string shape, long units) => !charged.Add(shape) ? !Exhausted : Add(units);
+
+        // Capped at the limit, so where the work runs out never depends on how far past it the last charge reached.
+        private bool Add(long units)
+        {
+            if (Exhausted || units > Limit - Spent)
+            {
+                Exhausted = true;
+                Spent = Limit;
+                return false;
+            }
+            Spent += units;
+            return true;
+        }
+        #endregion
+
+        #region Fields
+        private readonly HashSet<string> charged = new(StringComparer.Ordinal);
+        #endregion
+    }
 
     // One reference being resolved: its own id and key, the definition-level identity behind it, and the
     // instantiation's type arguments.
@@ -781,12 +964,20 @@ public sealed class MemberIndex
     // The subtype-map keys a type reference stands for, and whether any place it lands was unresolved.
     private sealed record TypeKeys(IReadOnlyList<string> Keys, bool Unresolved);
 
+    // Thrown by DispatchWork.Charge once the work is spent, to abandon a Dispatch part-way; DispatchTargets catches it.
+    private sealed class WorkExhaustedException : Exception;
+
+    // A memoized DispatchTargets answer and the work it took to compute.
+    private sealed record DispatchAnswer(IReadOnlyList<string> Targets, long Cost);
+
     // The hierarchy questions of one Dispatch, against one set of declared keys. What a walk settles is kept for the
     // next candidate - every type on a path that reaches a key is below it, every type of a walk that finds none is
     // not - so a long chain is walked about once per declared shape, not once per candidate (review S1 W1, case H).
-    // Each walk is bounded, since the hierarchy is attacker-controlled: past the bound it counts as a match, and
-    // nothing is recorded. Lives for one Dispatch only, so nothing per hierarchy is retained.
-    private sealed class HierarchyWalk(MemberIndex index, IReadOnlySet<string> keys)
+    // Each walk is bounded, since the hierarchy is attacker-controlled: past the bound it counts as a match, and that
+    // walk records nothing - though an InheritedBelow walk that takes such a Below as its hit records its own path, which
+    // costs precision only (review S1 round 2 N-B). Every step is charged to work. Lives for one Dispatch only, so
+    // nothing per hierarchy is retained.
+    private sealed class HierarchyWalk(MemberIndex index, IReadOnlySet<string> keys, DispatchWork work)
     {
         #region Methods
         // True when typeId is a proper subtype of a key: up the indexed supertypes and the fixed platform links.
@@ -797,12 +988,12 @@ public sealed class MemberIndex
         // interface slot from a method the subtype inherits (review S1 C1).
         public bool InheritedBelow(string typeId) =>
             !keys.Contains(typeId)
-            && index.types.TryGetValue(typeId, out var defined) && defined.Any(t => t.Definition is not InterfaceDefinition)
+            && index.classIds.Contains(typeId)
             && Search(typeId, index.DirectSubtypes, t => inherits.Contains(t) || keys.Contains(t) || Below(t), inherits, inheritsNot);
 
         // Breadth-first from start (exclusive) along next, until a type satisfies hit. On a hit, start and every type on
         // the path to the hit are recorded in yes; on a full search without one, every type seen is recorded in no.
-        private static bool Search(string start, Func<string, IEnumerable<string>> next, Func<string, bool> hit, HashSet<string> yes, HashSet<string> no)
+        private bool Search(string start, Func<string, IEnumerable<string>> next, Func<string, bool> hit, HashSet<string> yes, HashSet<string> no)
         {
             if (yes.Contains(start))
                 return true;
@@ -814,6 +1005,7 @@ public sealed class MemberIndex
             {
                 foreach (var step in next(current))
                 {
+                    work.Charge(Units(step));
                     if (!parent.TryAdd(step, current))
                         continue;
                     if (hit(step))

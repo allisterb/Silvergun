@@ -79,11 +79,13 @@ public static class ModelNames
 
     /// <summary>
     /// The rendered return type of <paramref name="method"/>, substituted exactly as <see cref="ParameterTypes"/>
-    /// substitutes a parameter at the same depth. Not part of any node id (ADR 0019); it tells apart definitions
-    /// that share one. <see cref="CanonicalName.UnknownPart"/> when unreadable.
+    /// substitutes a parameter at the same depth, then <c>&amp;</c> when returned by reference and each custom modifier
+    /// in signature order (<c>System.Int32&amp; modreq(System.Runtime.InteropServices.InAttribute)</c>): everything the
+    /// CLR compares when it binds a reference. Not part of any node id (ADR 0019); it tells apart definitions that share
+    /// one. <see cref="CanonicalName.UnknownPart"/> when unreadable.
     /// </summary>
     public static string ReturnType(IMethodReference? method, IReadOnlyList<string> typeArguments) =>
-        method is null ? CanonicalName.UnknownPart : Guard(() => TypeName(method.ReturnType, 1, typeArguments), CanonicalName.UnknownPart);
+        method is null ? CanonicalName.UnknownPart : Guard(() => ReturnName(method, typeArguments), CanonicalName.UnknownPart);
 
     /// <summary>
     /// The rendered generic arguments of <paramref name="type"/>, cumulative over its nesting chain in signature
@@ -134,6 +136,16 @@ public static class ModelNames
     // replaces type generic parameter !n by its n-th element (empty: render positionally).
     private static IReadOnlyList<string> ParameterNames(IMethodReference method, IReadOnlyList<string> substitution) =>
         method.Parameters.Select(p => Guard(() => ParameterName(p, 0, substitution), CanonicalName.UnknownPart)).ToArray();
+
+    // Modifier types are rendered unsubstituted: CCI leaves a specialized reference's modifiers unspecialized, as the
+    // definition's are, so both sides render alike even for a generic modifier in hostile metadata.
+    private static string ReturnName(IMethodReference method, IReadOnlyList<string> typeArguments)
+    {
+        var type = TypeName(method.ReturnType, 1, typeArguments);
+        return string.Concat([
+            method.ReturnValueIsByRef ? CanonicalName.ByRefTo(type) : type,
+            .. method.ReturnValueCustomModifiers.Select(m => $" {(m.IsOptional ? "modopt" : "modreq")}({TypeName(m.Modifier, 1, [])})")]);
+    }
 
     // CCIProvider erases by-ref into a PointerType and keeps the distinction only in the parameter kind.
     private static string ParameterName(IMethodParameterReference parameter, int depth, IReadOnlyList<string> substitution) =>

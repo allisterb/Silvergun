@@ -279,3 +279,36 @@ namespace MechanismFixture.InheritedImpl
         }
     }
 }
+
+// Mechanism: a C# 11 static abstract interface member implemented by a static method INHERITED from a base class that
+// does not itself implement the interface (A2 S1 review 2, W-B): `class SC : SB, IFactory {}` - `T.Make()` with T = SC
+// runs SB.Make, which is declared in a type that is not below IFactory at all. csc accepts it, but (the CLR does not
+// fill a static slot from a base class by itself) synthesizes a static stub in SC, bound to IFactory.Make by a
+// MethodImpl, that calls SB.Make - so CHA reaches the stub as it would any implementation. The stub-less hand-written
+// IL form the W-B rule is for is emitted in MechanismDispatchPremiseTests, which also pins this shape; no ground-truth
+// row (yet).
+namespace MechanismFixture.StaticInherited
+{
+    using System;
+
+    public interface IFactory
+    {
+        static abstract string Make();
+    }
+
+    public class SB
+    {
+        public static string Make() => Environment.GetEnvironmentVariable(Names.Variable);
+    }
+
+    public sealed class SC : SB, IFactory
+    {
+    }
+
+    public static class Builders
+    {
+        public static string Create<T>() where T : IFactory => T.Make();
+
+        public static string CreatesSC() => Create<SC>();
+    }
+}

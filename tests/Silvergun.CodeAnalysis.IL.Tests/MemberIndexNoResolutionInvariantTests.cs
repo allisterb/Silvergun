@@ -96,7 +96,8 @@ public sealed class MemberIndexNoResolutionInvariantTests : IClassFixture<Assemb
     /// (the forwarder-aware type key, the shared forwarder walk, the candidate filter <c>Dispatch</c> with the bounded,
     /// per-Dispatch memoized walks of the nested <c>HierarchyWalk</c> — <c>Below</c> up <c>Supertypes</c>,
     /// <c>InheritedBelow</c> down the subtype map, both through its shared <c>Search</c> — <c>MayBeInterface</c>, the parameter
-    /// and name matchers), the return-type check of <c>ResolveOwn</c>, the open-type walk, and the graph's fan-out —
+    /// and name matchers), the return-type check of <c>ResolveOwn</c>, the open-type walk, the S1d work budget
+    /// (<c>DispatchWork</c>'s <c>Charge</c>, <c>ChargeOnce</c>, <c>Add</c>), and the graph's fan-out —
     /// and that code reads the Model members a forbidden read would sit beside (<c>IsVirtual</c>, <c>IsAbstract</c>,
     /// <c>IsStatic</c>, <c>Base</c>).
     /// </summary>
@@ -273,6 +274,10 @@ public sealed class MemberIndexNoResolutionInvariantTests : IClassFixture<Assemb
         "Silvergun.CodeAnalysis.IL.MemberIndex.TypeScope.Of(",
         "Silvergun.CodeAnalysis.IL.MemberIndex.TypeScope.Land(",
         "Silvergun.CodeAnalysis.IL.MethodGraph.Builder.AddCall(",
+        // S1d (review 2, W-A): the CHA work budget charged by DispatchTargets, Dispatch and HierarchyWalk.Search.
+        "Silvergun.CodeAnalysis.IL.MemberIndex.DispatchWork.Charge(",
+        "Silvergun.CodeAnalysis.IL.MemberIndex.DispatchWork.ChargeOnce(",
+        "Silvergun.CodeAnalysis.IL.MemberIndex.DispatchWork.Add(",
     ];
 
     /// <summary>

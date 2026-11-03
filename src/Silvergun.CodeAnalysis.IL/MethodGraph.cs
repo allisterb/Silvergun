@@ -90,12 +90,23 @@ public sealed record GraphOpacity(string Site, uint Offset, OpacityKind Kind, st
 /// <summary>
 /// Explicit size limits. A graph that reaches one is returned marked <see cref="GraphCoverage.Truncated"/> — one
 /// 6.7 MB assembly alone peaked at 816 MB (ADR 0020 amendment item 5), so an unbounded build is not an option.
+/// <see cref="MaxDispatchWork"/> bounds class-hierarchy analysis (<see cref="MemberIndex.DispatchWork"/>), which a
+/// crafted assembly can make quadratic without producing a single edge; reaching it stops only the
+/// <see cref="MethodEdgeKind.Dispatch"/> fan-out, so every static edge is still added.
 /// </summary>
-public sealed record GraphBudget(int MaxNodes, int MaxEdges)
+public sealed record GraphBudget(int MaxNodes, int MaxEdges, long MaxDispatchWork = GraphBudget.DefaultDispatchWork)
 {
     #region Properties
     /// <summary>Generous defaults for a single package's own assemblies.</summary>
     public static GraphBudget Default { get; } = new(1_000_000, 5_000_000);
+    #endregion
+
+    #region Fields
+    /// <summary>
+    /// The default <see cref="MaxDispatchWork"/>: about 60 times what the largest measured assembly spends
+    /// (Microsoft.CodeAnalysis.CSharp 4.14, 344,965 units; A2 spec, S1 review 3).
+    /// </summary>
+    public const long DefaultDispatchWork = 20_000_000;
     #endregion
 }
 
@@ -124,7 +135,9 @@ public sealed record ResolutionCounts(int Exact, int Substituted, int External, 
 /// What the build saw and what it could not see. "Could not analyze" must never read as "no capability", so this is a
 /// first-class part of the graph (ADR 0020 decision 8). <see cref="Index"/> carries what the member index itself
 /// could not read. <see cref="DispatchSites"/> counts the call sites CHA fanned out from (including those it found no
-/// override for), and <see cref="DispatchEdges"/> the <see cref="MethodEdgeKind.Dispatch"/> edges they produced.
+/// override for), <see cref="DispatchEdges"/> the <see cref="MethodEdgeKind.Dispatch"/> edges they produced, and
+/// <see cref="DispatchWork"/> the <see cref="MemberIndex.DispatchWork"/> units it spent. Once the dispatch work budget
+/// is reached, sites are no longer fanned out or counted, so both counts are then lower bounds.
 /// </summary>
 public sealed record GraphCoverage(
     IndexCoverage Index,
@@ -135,6 +148,7 @@ public sealed record GraphCoverage(
     ResolutionCounts Resolutions,
     int DispatchSites,
     int DispatchEdges,
+    long DispatchWork,
     bool Truncated,
     string? TruncatedBy);
 
@@ -185,8 +199,9 @@ public sealed class MethodGraph
     public IReadOnlyList<MethodEdge> Successors(string nodeId) => successors.GetValueOrDefault(nodeId) ?? [];
 
     /// <summary>
-    /// Builds the static-target graph of <paramref name="index"/>. Stops adding when <paramref name="budget"/> is
-    /// reached and marks the result truncated.
+    /// Builds the static-target graph of <paramref name="index"/>. Stops adding when the node or edge budget of
+    /// <paramref name="budget"/> is reached, and only stops the Dispatch fan-out when its dispatch work budget is; either
+    /// way the result is marked truncated.
     /// </summary>
     public static MethodGraph Build(MemberIndex index, GraphBudget? budget = null)
     {
@@ -251,7 +266,9 @@ public sealed class MethodGraph
                 [.. nodes.Values.OrderBy(n => n.NodeId, StringComparer.Ordinal)],
                 [.. edges.OrderBy(e => e.From, StringComparer.Ordinal).ThenBy(e => e.To, StringComparer.Ordinal).ThenBy(e => e.Kind).ThenBy(e => e.Offset)],
                 [.. opacities.OrderBy(o => o.Site, StringComparer.Ordinal).ThenBy(o => o.Offset).ThenBy(o => o.Kind).ThenBy(o => o.Detail, StringComparer.Ordinal)],
-                new GraphCoverage(index, methodsIndexed, bodiesRead, bodiesFailed, callSites, resolutions, dispatchSites, dispatchEdges, truncatedBy is not null, truncatedBy));
+                new GraphCoverage(index, methodsIndexed, bodiesRead, bodiesFailed, callSites, resolutions, dispatchSites, dispatchEdges,
+                    dispatchWork.Spent, truncatedBy is not null || dispatchTruncatedBy is not null,
+                    truncatedBy is null ? dispatchTruncatedBy : dispatchTruncatedBy is null ? truncatedBy : $"{dispatchTruncatedBy}; {truncatedBy}"));
 
         private void Visit(MemberIndex index, string caller, Model.IInstruction instruction)
         {
@@ -321,8 +338,12 @@ public sealed class MethodGraph
                 edges.Add(new MethodEdge(caller, to, kind, offset));
             }
 
-            // CHA: the overrides this site may run instead. Own methods only, all already nodes.
-            if (index.DispatchTargets(target, resolution, kind is MethodEdgeKind.CallVirt or MethodEdgeKind.Ldvirtftn) is not { } overrides)
+            // CHA: the overrides this site may run instead. Own methods only, all already nodes. Once the work budget is
+            // spent no further fan-out is added, but the walk goes on for the static edges.
+            var overrides = index.DispatchTargets(target, resolution, kind is MethodEdgeKind.CallVirt or MethodEdgeKind.Ldvirtftn, dispatchWork);
+            if (dispatchWork.Exhausted)
+                dispatchTruncatedBy ??= $"dispatch work budget of {dispatchWork.Limit} reached";
+            if (overrides is null)
                 return;
             dispatchSites++;
             foreach (var to in overrides)
@@ -348,13 +369,16 @@ public sealed class MethodGraph
         private readonly Dictionary<string, MethodNode> nodes = new(StringComparer.Ordinal);
         private readonly List<MethodEdge> edges = [];
         private readonly List<GraphOpacity> opacities = [];
+        private readonly MemberIndex.DispatchWork dispatchWork = new(budget.MaxDispatchWork);
         private ResolutionCounts resolutions = ResolutionCounts.None;
         private int bodiesRead;
         private int bodiesFailed;
         private int callSites;
         private int dispatchSites;
         private int dispatchEdges;
+        // The build stops at truncatedBy, but only the fan-out stops at dispatchTruncatedBy.
         private string? truncatedBy;
+        private string? dispatchTruncatedBy;
         #endregion
     }
     #endregion
