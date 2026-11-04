@@ -87,16 +87,23 @@ public sealed class DispatchSupertypeKeyTests : IClassFixture<DispatchForwarderF
 
     /// <summary>
     /// With <c>ChaU</c> NOT indexed, the walk from <c>ChaA</c> finds two places: the own decoy (bare <c>NS.IProbe</c>)
-    /// and ChaU's type, kept <see cref="MemberIndex.Qualified"/> because an own type shares its id. Impl is a subtype of
-    /// BOTH (over-approximation, the CLR's answer included), so a call through either reaches it: through ChaU
-    /// (<c>ChaE</c>'s site, External) and through ChaA (<c>ChaC</c>'s site, Ambiguous over the decoy and ChaU).
+    /// and ChaU's type, kept under a qualified key because an own type shares its id. Impl is a subtype of BOTH
+    /// (over-approximation, the CLR's answer included), so a call through either reaches it: through ChaU (<c>ChaE</c>'s
+    /// site, External) and through ChaA (<c>ChaC</c>'s site, Ambiguous over the decoy and ChaU).
+    /// <para>
+    /// Since A2Multi S2 the qualified subtype-map key of a shadowed EXTERNAL type is <c>[*]NS.IProbe</c> — one key for
+    /// every unindexed assembly, so the spellings <c>[netstandard]X</c> and <c>[System.Runtime]X</c> join — instead of
+    /// <c>[ChaU]NS.IProbe</c> per referencing spelling (cha-a2multi-package-graphs.md, S2 "Qualified spelling"). The key
+    /// changes; the subtype links, the resolutions and the dispatch answers this test pins do not.
+    /// </para>
     /// </summary>
     [Fact]
     public void DispatchTargets_WithADecoyAndAForwardToAnUnindexedAssembly_ReachTheImplementorThroughEither()
     {
         using var loaded = ModelAssemblies.Load(fixture.DecoyForwardsToU, fixture.C, fixture.E);
         var index = loaded.Index();
-        var qualified = MemberIndex.Qualified("ChaU", "NS.IProbe");
+        var qualified = MemberIndex.Qualified("*", "NS.IProbe");
+        Assert.Empty(index.DirectSubtypes(MemberIndex.Qualified("ChaU", "NS.IProbe")));
 
         Assert.Equal(new[] { "NS.IProbe", "System.Object", qualified }.Order(StringComparer.Ordinal), Assert.Single(index.Types(Impl)).Supertypes);
         Assert.Equal([Impl], index.DirectSubtypes("NS.IProbe"));

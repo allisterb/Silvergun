@@ -175,6 +175,25 @@ public sealed class MemberIndexNoResolutionInvariantTests : IClassFixture<Assemb
     }
 
     /// <summary>
+    /// CHA A2Multi S2: the declaring-type parts key (<c>TypeParts</c>) and the shadowed-external key
+    /// (<c>TypeScope.ExternalKey</c>) are walked, and reached from the code that uses them (<c>ResolveOwn</c>, and
+    /// <c>TypeScope</c>'s own landing code). <c>PackageGraphs</c> (S1) lives in <c>Silvergun.PackageAnalysis.NuGet</c>, which
+    /// this walk does not read (it is per assembly, over <c>Silvergun.CodeAnalysis.IL.dll</c>): it is guarded by the same
+    /// kind of walk in that project's tests (<c>PackageGraphsNoResolutionInvariantTests</c>), and everything it calls here
+    /// (<c>MemberIndex.Build</c>, <c>MethodGraph.Build</c>, <c>AssemblyDisassembler</c>) is a root or is reached from one.
+    /// </summary>
+    [Fact]
+    public void Walk_CoversTheA2MultiKeys()
+    {
+        foreach (var method in new[] { "Silvergun.CodeAnalysis.IL.MemberIndex.TypeParts(", "Silvergun.CodeAnalysis.IL.MemberIndex.TypeScope.ExternalKey(" })
+            Assert.Contains(closure.Methods, m => m.StartsWith(method, StringComparison.Ordinal));
+        Assert.Contains(closure.References, r => r.From.StartsWith("Silvergun.CodeAnalysis.IL.MemberIndex.ResolveOwn(", StringComparison.Ordinal) &&
+                                                 r.Member.StartsWith("Silvergun.CodeAnalysis.IL.MemberIndex.TypeParts(", StringComparison.Ordinal));
+        Assert.Contains(closure.References, r => r.From.StartsWith("Silvergun.CodeAnalysis.IL.MemberIndex.TypeScope.", StringComparison.Ordinal) &&
+                                                 r.Member.StartsWith("Silvergun.CodeAnalysis.IL.MemberIndex.TypeScope.ExternalKey(", StringComparison.Ordinal));
+    }
+
+    /// <summary>
     /// The guard can go red. A MUTANT library is emitted (<see cref="EmittedAssembly"/>; read as metadata only) with the
     /// root types' names: its <c>MemberIndex.DispatchTargets</c> reads <c>IMethodReference.ResolvedMethod</c> directly,
     /// and its <c>MemberIndex.OpenTypes</c> reaches <c>IBasicType.ResolvedType</c> only through a helper in a NON-root

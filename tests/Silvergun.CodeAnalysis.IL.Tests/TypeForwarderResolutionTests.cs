@@ -87,13 +87,13 @@ public sealed class TypeForwarderResolutionTests : IClassFixture<TypeForwarderFi
     }
 
     /// <summary>
-    /// (a) TypeDef decoy + forwarder, (b) nested-type decoy + forwarder: Ambiguous over BOTH places the call can land —
-    /// the own decoy and the platform method, the latter under its <see cref="MemberIndex.Qualified"/> id so it can
-    /// never merge into the decoy's node. Never Exact to the decoy alone.
+    /// (a) TypeDef decoy + forwarder: Ambiguous over BOTH places the call can land — the own decoy and the platform
+    /// method, the latter under its <see cref="MemberIndex.Qualified"/> id so it can never merge into the decoy's node.
+    /// Never Exact to the decoy alone. (b), the NESTED decoy, was here too until A2Multi S2; it now follows the forwarder
+    /// alone (<see cref="Resolve_ANestedDecoyBehindAForwarder_FollowsTheForwarderToThePlatformAlone"/>).
     /// </summary>
     [Theory]
     [InlineData(nameof(TypeForwarderFixture.DefinedAndForwarded))]
-    [InlineData(nameof(TypeForwarderFixture.NestedAndForwarded))]
     public void Resolve_ADecoyBehindAForwarder_IsAmbiguousOverTheDecoyAndThePlatform(string variant)
     {
         using var loaded = ModelAssemblies.Load(fixture.Variant(variant), fixture.Caller);
@@ -113,12 +113,12 @@ public sealed class TypeForwarderResolutionTests : IClassFixture<TypeForwarderFi
     }
 
     /// <summary>
-    /// (a) / (b) in the graph: the caller has an edge to the decoy AND to an External node under the qualified id,
-    /// which carries the platform method's classification key (so the sink is classified), plus an Ambiguous opacity.
+    /// (a) in the graph: the caller has an edge to the decoy AND to an External node under the qualified id, which
+    /// carries the platform method's classification key (so the sink is classified), plus an Ambiguous opacity. (b): see
+    /// <see cref="Build_ANestedDecoyBehindAForwarder_EdgesToAQualifiedPlatformLeafOnly"/>.
     /// </summary>
     [Theory]
     [InlineData(nameof(TypeForwarderFixture.DefinedAndForwarded))]
-    [InlineData(nameof(TypeForwarderFixture.NestedAndForwarded))]
     public void Build_ADecoyBehindAForwarder_EdgesToTheDecoyAndToAQualifiedPlatformLeaf(string variant)
     {
         using var loaded = ModelAssemblies.Load(fixture.Variant(variant), fixture.Caller);
@@ -134,6 +134,60 @@ public sealed class TypeForwarderResolutionTests : IClassFixture<TypeForwarderFi
         Assert.Equal(
             [new GraphOpacity(Env, site.Offset, OpacityKind.Ambiguous, $"{GetEnvironmentVariable}: FwdA forwards this type, and it resolves into FwdA, {Core}")],
             graph.Opacities.Where(o => o.Site == Env));
+    }
+
+    /// <summary>
+    /// (b) Nested-type decoy (<c>System+Environment</c>, same joined node id) + forwarder. Since A2Multi S2 own
+    /// definitions are bucketed by the declaring type's PARTS (namespace and nesting chain), so the nested decoy is not
+    /// the namespace type <c>System.Environment</c> the reference names; the forwarder walk finds no own place in FwdA and
+    /// follows the forward alone — External into CoreLib, which is exactly what the CLR runs (the oracle above, with this
+    /// variant pinned, returns the platform value). Until S2 the decoy was an extra Ambiguous candidate: a precision cost
+    /// A1 §2.9 had recorded.
+    /// </summary>
+    [Fact]
+    public void Resolve_ANestedDecoyBehindAForwarder_FollowsTheForwarderToThePlatformAlone()
+    {
+        using var loaded = ModelAssemblies.Load(fixture.NestedAndForwarded, fixture.Caller);
+        var index = loaded.Index();
+        Assert.True(index.IsOwnMethod(GetEnvironmentVariable));   // the decoy still renders the platform id
+
+        var resolution = index.Resolve(Site(index, Env).Target);
+
+        Assert.Equal(ResolutionKind.External, resolution.Kind);
+        Assert.False(resolution.IsOwn);
+        Assert.Equal(Core, resolution.Assembly);
+        Assert.Equal(GetEnvironmentVariable, resolution.NodeId);
+        Assert.Equal(EnvironmentKey, resolution.ClassificationKey);
+        Assert.Empty(resolution.Candidates);
+        Assert.Equal("forwarded by FwdA", resolution.Reason);
+        Environment.SetEnvironmentVariable(fixture.Variable, Platform);
+        try
+        {
+            Assert.Equal(Platform, Run(new() { ["FwdA"] = fixture.NestedAndForwarded }, "Env"));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(fixture.Variable, null);
+        }
+    }
+
+    /// <summary>
+    /// (b) in the graph: ONE edge, to the platform method as an External leaf under its qualified id — the own nested
+    /// decoy renders the same node id, so the leaf is kept apart from it and the collision reported as
+    /// <see cref="OpacityKind.NameShadowed"/>; no edge to the decoy, and no Ambiguous opacity.
+    /// </summary>
+    [Fact]
+    public void Build_ANestedDecoyBehindAForwarder_EdgesToAQualifiedPlatformLeafOnly()
+    {
+        using var loaded = ModelAssemblies.Load(fixture.NestedAndForwarded, fixture.Caller);
+        var index = loaded.Index();
+        var graph = MethodGraph.Build(index);
+        var site = Site(index, Env);
+
+        Assert.Equal([new MethodEdge(Env, QualifiedGetEnvironmentVariable, MethodEdgeKind.Call, site.Offset)], graph.Successors(Env));
+        Assert.Equal(new MethodNode(QualifiedGetEnvironmentVariable, EnvironmentKey, MethodNodeKind.External), graph.Node(QualifiedGetEnvironmentVariable));
+        Assert.Equal(MethodNodeKind.OwnWithBody, graph.Node(GetEnvironmentVariable)?.Kind);
+        Assert.Equal([OpacityKind.NameShadowed], graph.Opacities.Where(o => o.Site == Env).Select(o => o.Kind));
     }
 
     // ---- (c) / (d): a pure forwarder ---------------------------------------------------------------------------------
@@ -717,13 +771,12 @@ public sealed class TypeForwarderResolutionTests : IClassFixture<TypeForwarderFi
     // ---- (h): a generic forwarded type, matched coarsely ---------------------------------------------------------------
 
     /// <summary>
-    /// (h) A forwarder for <c>P.Q`1</c> and a decoy <c>P.Q`1</c> (TypeDef or nested): the reference through
-    /// <c>P.Q&lt;int&gt;</c> is not resolved to the decoy alone — Ambiguous over the decoy and the qualified platform
-    /// leaf, both of which the graph keeps.
+    /// (h) A forwarder for <c>P.Q`1</c> and a TypeDef decoy <c>P.Q`1</c>: the reference through <c>P.Q&lt;int&gt;</c> is
+    /// not resolved to the decoy alone — Ambiguous over the decoy and the qualified platform leaf, both of which the graph
+    /// keeps. The nested decoy (<c>P+Q`1</c>): <see cref="Resolve_AGenericTypeBehindAForwarder_WithANestedDecoy_IsThePlatformAlone"/>.
     /// </summary>
     [Theory]
     [InlineData(nameof(TypeForwarderFixture.DefinedAndForwarded))]
-    [InlineData(nameof(TypeForwarderFixture.NestedAndForwarded))]
     public void Resolve_AGenericTypeBehindAForwarder_IsNotTheDecoyAlone(string variant)
     {
         using var loaded = ModelAssemblies.Load(fixture.Variant(variant), fixture.Caller);
@@ -742,6 +795,33 @@ public sealed class TypeForwarderResolutionTests : IClassFixture<TypeForwarderFi
         Assert.Contains(graph.Successors(Generic), e => e.To == "P.Q`1.M(!0)" && e.Kind == MethodEdgeKind.CallVirt);
         Assert.Contains(graph.Successors(Generic), e => e.To == qualified && e.Kind == MethodEdgeKind.CallVirt);
         Assert.Equal(new MethodNode(qualified, CanonicalName.ClassificationKey(ModelNames.Of(site.Target)), MethodNodeKind.External), graph.Node(qualified));
+    }
+
+    /// <summary>
+    /// (h) with the NESTED decoy <c>P+Q`1</c> (A2Multi S2): not the namespace type <c>P.Q`1</c> by parts, so the
+    /// reference through <c>P.Q&lt;int&gt;</c> follows the forwarder alone — External into CoreLib, where the CLR sends it
+    /// — and the graph has no edge to the decoy, only to the platform leaf. The instantiated reference id
+    /// <c>P.Q`1.M(System.Int32)</c> is no own method's (the decoy's is <c>P.Q`1.M(!0)</c>), so the leaf keeps the bare id.
+    /// </summary>
+    [Fact]
+    public void Resolve_AGenericTypeBehindAForwarder_WithANestedDecoy_IsThePlatformAlone()
+    {
+        using var loaded = ModelAssemblies.Load(fixture.NestedAndForwarded, fixture.Caller);
+        var index = loaded.Index();
+        var site = Site(index, Generic, MethodEdgeKind.CallVirt);
+        Assert.Equal("P.Q`1.M(System.Int32)", site.ReferenceNodeId);
+        Assert.True(index.IsOwnMethod("P.Q`1.M(!0)"));
+
+        var resolution = index.Resolve(site.Target);
+        var graph = MethodGraph.Build(index);
+
+        Assert.Equal(ResolutionKind.External, resolution.Kind);
+        Assert.Equal(Core, resolution.Assembly);
+        Assert.Equal(site.ReferenceNodeId, resolution.NodeId);
+        Assert.Empty(resolution.Candidates);
+        Assert.DoesNotContain(graph.Successors(Generic), e => e.To == "P.Q`1.M(!0)");
+        Assert.Contains(new MethodEdge(Generic, site.ReferenceNodeId, MethodEdgeKind.CallVirt, site.Offset), graph.Successors(Generic));
+        Assert.Equal(MethodNodeKind.External, graph.Node(site.ReferenceNodeId)?.Kind);
     }
 
     /// <summary>
@@ -916,6 +996,14 @@ public sealed class TypeForwarderFixture : IDisposable
             SelfForwarder = emitted.Save("FwdA", EnvironmentDecoy, EmittedAssembly.Forwarding(("System", "Environment", "FwdA")), "self");
             ModuleDecoy = emitted.Save("FwdA", EnvironmentDecoy, EmittedAssembly.ExportingFromModule(Module, ("System", "Environment")), "moduledecoy");
             ModuleOnly = emitted.Save("FwdA", module => Marker(module, "Module"), EmittedAssembly.ExportingFromModule(Module, ("System", "Environment")), "moduleonly");
+            // A2Multi S2: the nested decoys with NO forwarder, and a caller (FwdN) emitted against them, so its reference
+            // names the NESTED type System+Environment itself (the positive control of MemberIndexHygieneTests).
+            NestedOnly = emitted.Save("FwdA", NestedDecoys, "nestonly");
+            using (var context = new IsolatedLoadContext())
+            {
+                var nested = context.LoadBytes(NestedOnly);
+                NestedCaller = emitted.Save("FwdN", module => DefineNestedCaller(module, nested, Variable), "nestcaller");
+            }
         }
         catch (Exception)
         {
@@ -958,6 +1046,12 @@ public sealed class TypeForwarderFixture : IDisposable
     public string ModuleDecoy { get; }
 
     public string ModuleOnly { get; }
+
+    /// <summary><c>FwdA</c> with only the nested decoys <c>System+Environment</c> and <c>P+Q`1</c>, and no forwarder (A2Multi S2).</summary>
+    public string NestedOnly { get; }
+
+    /// <summary><c>FwdN</c>, emitted against <see cref="NestedOnly"/>: <c>Client.NestedCaller.Env()</c> calls the NESTED <c>System+Environment.GetEnvironmentVariable</c>.</summary>
+    public string NestedCaller { get; }
     #endregion
 
     #region Methods
@@ -1032,6 +1126,17 @@ public sealed class TypeForwarderFixture : IDisposable
 
         CallThrough(Callers(caller, "ForwardedGeneric", typeof(int)), stub.GetType("NS.G`1", throwOnError: true)!.MakeGenericType(typeof(int)));
 
+        caller.CreateType();
+    }
+
+    // Client.NestedCaller.Env() => System+Environment.GetEnvironmentVariable(variable), naming the nested type itself.
+    private static void DefineNestedCaller(ModuleBuilder module, Assembly nested, string variable)
+    {
+        var caller = module.DefineType("Client.NestedCaller", StaticClass);
+        var il = Callers(caller, "Env", typeof(string));
+        il.Emit(OpCodes.Ldstr, variable);
+        il.Emit(OpCodes.Call, nested.GetType("System+Environment", throwOnError: true)!.GetMethod("GetEnvironmentVariable")!);
+        il.Emit(OpCodes.Ret);
         caller.CreateType();
     }
 

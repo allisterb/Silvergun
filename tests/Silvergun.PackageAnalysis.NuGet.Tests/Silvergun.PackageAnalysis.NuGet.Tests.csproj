@@ -48,6 +48,11 @@
     <ProjectReference Include="..\..\src\Silvergun.Intel\Silvergun.Intel.csproj" />
     <ProjectReference Include="..\..\src\Silvergun.PackageAnalysis.NuGet\Silvergun.PackageAnalysis.NuGet.csproj" />
     <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.Fixture\Silvergun.CodeAnalysis.IL.Tests.Fixture.csproj" />
+    <!-- The CHA mechanism fixture and (transitively) its Dependency, for PackageGraphsTests (A2Multi S1): staged into
+         test packages as one lib/<tfm> folder so the CrossAssembly path must join the two. A plain reference only so
+         both DLLs are copied next to this test assembly; they are located BY PATH and read through PackageGraphs /
+         AssemblyDisassembler, never loaded by the test host (the fixture has a [ModuleInitializer]). -->
+    <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.MechanismFixture\Silvergun.CodeAnalysis.IL.Tests.MechanismFixture.csproj" />
     <!-- Exe, so a plain ProjectReference copies its apphost next to this test assembly (the same mechanism
          Silvergun.CodeAnalysis.IL.Tests uses for its child-process probes). The ADR 0029 fail-closed tests
          spawn it two ways: as a stand-in `yara` binary that misbehaves on demand — which is what makes

@@ -34,6 +34,7 @@ Silvergun is a security analyzer that will be constantly in the neighborhood of 
 - Do not commit secrets.
 
   ### External services and data collection
+	- **Never send any personally identifiable information (PII) like email addresses if requested by an external service.*
 	- **A bot challenge is a refusal. Never circumvent one.** If a host returns a CAPTCHA,
 	  a JS challenge, or an `x-amzn-waf-action: challenge` (often HTTP 202 with an empty
 	  body), **stop and report**. Do not mint tokens, drive a headless browser to solve
@@ -117,7 +118,6 @@ dotnet test  <csproj_file>    # Run unit tests in a project
 ```
 
 ## Coding instructions
-
 - **Prefer functional paradigms** where appropriate (immutability, pure functions, expression-bodied members, LINQ; avoid unnecessary mutable state).
 - **Prefer concise code** over more verbose constructs.
 - Follow the existing style of the file you're editing.
@@ -131,8 +131,10 @@ dotnet test  <csproj_file>    # Run unit tests in a project
 - **Fields:** begin with a **lower-case** letter (camelCase), *except* backing fields for properties, which begin with an **underscore** (`_camelCase`).
 
 ### For source code in `ext`
-
 - ext/ holds our forks of upstream projects. Follow the existing style of the file you are editing — CLAUDE.md's style rules describe src/, not ext/. Keep diffs minimal and surgical: we still merge from upstream, so every line touched is a future merge conflict. Prefer adding a new file over editing an upstream one where that achieves the same result.
+
+## Project documentation style
+- Avoid verbose documentation on members. Try to be as terse as possible while giving all relevant information about usage.
 
 ### Environment notes:
 - `find` resolves to Windows `find.exe` and **hangs**: use an alternative.
@@ -140,5 +142,6 @@ dotnet test  <csproj_file>    # Run unit tests in a project
 - **Build and test new or edited fixture projects, and run agent-driven builds, through the memory guard** `tools/guarded-dotnet.ps1` (`powershell -NoProfile -ExecutionPolicy Bypass -File tools/guarded-dotnet.ps1 -Verb build|test|run -Project <csproj> [-Filter <expr>] [-AppArgs <args>]`). It turns off the compiler server and node reuse and kills the build's process tree over 4 GB (exit 99), over 900 s (exit 98) or when it can no longer sample processes (exit 97); full logs go to `%TEMP%\silvergun-guarded-logs`. **If it kills a run, stop and report** — do not raise the limit or retry. Never write compiled fixtures with deeply nested types (arrays, generic arguments, pointers; more than ~4 levels): a 40-rank jagged-array overload once drove the compiler server to ~50 GB.
 - `Silvergun.PackageAnalysis.NuGet` and `Silvergun.CLI` multi-target `net10.0;net10.0-windows`; pass `-f net10.0` when you want one.
 - Literal `user@host` strings get redacted on file write — split the token.
+
 
 

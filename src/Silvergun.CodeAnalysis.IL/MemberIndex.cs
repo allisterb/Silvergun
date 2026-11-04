@@ -137,8 +137,8 @@ public sealed class MemberIndex
         byNodeId = Group(methods, m => m.NodeId);
         // Per assembly, so a lookup costs what it finds, never a scan of other assemblies' same-named definitions; and
         // each definition's return type rendered once here, not per reference (review A1-W2r5).
-        byShape = Group(methods, m => Key([AssemblyKey(m.Assembly), Shape(m.DeclaringTypeId, m.Definition.Name, m.Identity.GenericArity, m.Identity.ParameterTypes.Count)]));
-        byReturn = Group(methods, m => Key([AssemblyKey(m.Assembly), m.NodeId, ModelNames.ReturnType(m.Definition, [])]));
+        byShape = Group(methods, m => Key([AssemblyKey(m.Assembly), Shape(TypeParts(m.Identity.DeclaringType), m.Definition.Name, m.Identity.GenericArity, m.Identity.ParameterTypes.Count)]));
+        byReturn = Group(methods, m => Key([AssemblyKey(m.Assembly), TypeParts(m.Identity.DeclaringType), m.NodeId, ModelNames.ReturnType(m.Definition, [])]));
         byImplementedShape = Group(methods, m => ImplementedShape(ImplementedName(m.Definition.Name), m.Identity.GenericArity, m.Identity.ParameterTypes.Count));
         // By reference: Model's MethodDefinition has no value equality worth trusting. Build removes duplicate assembly
         // instances, and the first entry wins anyway, so a definition reachable twice cannot throw here.
@@ -603,7 +603,7 @@ public sealed class MemberIndex
         var memo = Key([
             assembly,
             CanonicalName.NodeId(site.Target),
-            CanonicalName.NodeId(site.Target.DeclaringType),
+            TypeParts(site.Target.DeclaringType),
             site.Target.MethodName ?? CanonicalName.UnknownPart,
             site.Target.GenericArity.ToString(CultureInfo.InvariantCulture),
             site.Target.ParameterTypes.Count.ToString(CultureInfo.InvariantCulture),
@@ -650,7 +650,7 @@ public sealed class MemberIndex
             { Count: 0 } when truncated => "the signature could not be read in full",
             _ => null,
         };
-        var shapeKey = Key([AssemblyKey(assembly), Shape(CanonicalName.NodeId(target.DeclaringType), target.MethodName, target.GenericArity, target.ParameterTypes.Count)]);
+        var shapeKey = Key([AssemblyKey(assembly), Shape(TypeParts(target.DeclaringType), target.MethodName, target.GenericArity, target.ParameterTypes.Count)]);
         var sameShape = typeArguments is { Count: 0 } && unreadable is null ? [] : byShape.GetValueOrDefault(shapeKey) ?? [];
         var cannotCheck = unreadable
             ?? (typeArguments is { Count: > 0 } && sameShape.Count > MaxComparedCandidates
@@ -664,7 +664,7 @@ public sealed class MemberIndex
                     cannotCheck);
 
         IReadOnlyList<IndexedMethod> matches = typeArguments!.Count == 0
-            ? byReturn.GetValueOrDefault(Key([AssemblyKey(assembly), CanonicalName.NodeId(target), returnType])) ?? []
+            ? byReturn.GetValueOrDefault(Key([AssemblyKey(assembly), TypeParts(target.DeclaringType), CanonicalName.NodeId(target), returnType])) ?? []
             : sameShape.Where(m => ModelNames.ParameterTypes(m.Definition, typeArguments).SequenceEqual(target.ParameterTypes, StringComparer.Ordinal)
                 && ModelNames.ReturnType(m.Definition, typeArguments) == returnType).ToArray();
 
@@ -677,6 +677,12 @@ public sealed class MemberIndex
                 typeArguments.Count == 0 ? "several definitions share this node id" : "several definitions match the instantiated signature"),
         };
     }
+
+    // A declaring type for a definition key: its node id and the parts it joins. A node id alone conflates a namespace
+    // with an enclosing type (System.Environment and a nested System/Environment both render "System.Environment"),
+    // which the CLR never binds across (A1 review 4 C-E, the nested-decoy hygiene item, A2Multi).
+    private static string TypeParts(TypeIdentity type) =>
+        Key([CanonicalName.NodeId(type), type.Namespace ?? string.Empty, .. type.NestingChain is { } chain ? [chain.Count.ToString(CultureInfo.InvariantCulture), .. chain] : (IEnumerable<string>)["?"]]);
 
     // The canonical spelling of an assembly name (ownership is case-insensitive), for keys.
     private string AssemblyKey(string assembly) => canonicalAssemblies.GetValueOrDefault(assembly) ?? assembly;
@@ -1033,7 +1039,8 @@ public sealed class MemberIndex
     #region Child types
     /// <summary>
     /// An indexed type definition and the subtype-map keys of its base and interfaces: definition-normalized node ids,
-    /// following forwarders, <see cref="Qualified"/> when external and shadowed by an own type.
+    /// following forwarders, <c>[*]id</c> (one <see cref="Qualified"/> key for every unindexed assembly) when external
+    /// and shadowed by an own type.
     /// </summary>
     public sealed record IndexedType(string Assembly, string NodeId, ITypeDefinition Definition, IReadOnlyList<string> Supertypes);
 
@@ -1095,8 +1102,9 @@ public sealed class MemberIndex
     // Where a type reference lands, as subtype-map keys (A2 spec §1). One answer for supertypes and for a call site's
     // declared type, so CHA joins them on the same key: a type the CLR finds in an indexed assembly (following its
     // forwarders, as Follow does for methods) keeps its bare id; one in an unindexed assembly keeps it too, unless an own
-    // type shares it, then it is Qualified by that assembly. A place the walk cannot settle is unresolved and keyed by
-    // the bare id (and the Qualified one, when shadowed and the assembly is unreadable): over-approximate, and counted.
+    // type shares it, then it is keyed [*]id, one key for every unindexed assembly (ExternalKey). A place the walk cannot
+    // settle is unresolved and keyed by the bare id (and [*]id, when shadowed and the assembly is unreadable):
+    // over-approximate, and counted.
     private sealed class TypeScope(HashSet<string> assemblies, IReadOnlyDictionary<string, TypeForwarders> forwarders, IReadOnlyDictionary<string, HashSet<string>> definedIn)
     {
         #region Methods
@@ -1107,7 +1115,7 @@ public sealed class MemberIndex
         {
             var id = CanonicalName.NodeId(identity);
             if (assembly is null)
-                return new(definedIn.ContainsKey(id) ? [id, Qualified(null, id)] : [id], true);
+                return new(definedIn.ContainsKey(id) ? [id, ExternalKey(id)] : [id], true);
             var chain = identity.NestingChain ?? [];
             return memo.GetOrAdd(
                 Key([assembly, identity.Namespace ?? string.Empty, chain.Count.ToString(CultureInfo.InvariantCulture), .. chain, identity.GenericArity.ToString(CultureInfo.InvariantCulture)]),
@@ -1130,11 +1138,20 @@ public sealed class MemberIndex
             return new(places.Select(p => p ?? id).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(), places.Any(p => p is null));
         }
 
-        private string External(string assembly, string id) => definedIn.ContainsKey(id) ? Qualified(assembly, id) : id;
+        private string External(string assembly, string id) => definedIn.ContainsKey(id) ? ExternalKey(id) : id;
+
+        // One key for a shadowed external type however it is reached: references spell its assembly as they were
+        // compiled ([netstandard]X, [System.Runtime]X), so a key per spelling would stop a supertype and a call site's
+        // declared type from joining (A2 S1 review 1, recorded for A2Multi). Merging two unindexed assemblies' types of
+        // one name over-approximates only; the key never meets the own type's bare id.
+        private static string ExternalKey(string id) => Qualified(AnyExternalAssembly, id);
         #endregion
 
         #region Fields
         private readonly ConcurrentDictionary<string, TypeKeys> memo = new(StringComparer.Ordinal);
+
+        // The assembly part of ExternalKey: every unindexed assembly at once.
+        private const string AnyExternalAssembly = "*";
         #endregion
     }
 

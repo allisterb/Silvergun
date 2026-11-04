@@ -120,11 +120,13 @@ public sealed class NameShadowingTests : IClassFixture<ShadowMethodGraphFixture>
     /// <summary>
     /// Supertypes are scoped like method targets: <c>PlatformDisposable</c> implements the PLATFORM
     /// <c>System.IDisposable</c> and is listed under its qualified id; <c>ShadowDisposable</c> implements the OWN one and
-    /// is listed under the bare id. <c>System.Object</c> is not shadowed, so it stays bare.
+    /// is listed under the bare id. <c>System.Object</c> is not shadowed, so it stays bare. Since A2Multi S2 the qualified
+    /// key is the assembly-agnostic <c>[*]System.IDisposable</c>; the per-spelling <c>[System.Runtime]</c> key is gone.
     /// </summary>
     [Fact]
     public void Subtypes_ThePlatformAndTheOwnIDisposable_StayDifferentKeys()
     {
+        Assert.Empty(fixture.Index.DirectSubtypes("[System.Runtime]System.IDisposable"));
         Assert.Equal(["ShadowFixture.PlatformDisposable"], fixture.Index.DirectSubtypes(QualifiedIDisposable));
         Assert.Equal(["ShadowFixture.ShadowDisposable"], fixture.Index.DirectSubtypes("System.IDisposable"));
         Assert.Equal(["System.Object", QualifiedIDisposable], Assert.Single(fixture.Index.Types("ShadowFixture.PlatformDisposable")).Supertypes);
@@ -153,7 +155,10 @@ public sealed class NameShadowingTests : IClassFixture<ShadowMethodGraphFixture>
     private const string PlatformAssembly = "System.Runtime";
     private const string GetEnv = "System.Environment.GetEnvironmentVariable(System.String)";
     private const string QualifiedGetEnv = "[System.Runtime]System.Environment.GetEnvironmentVariable(System.String)";
-    private const string QualifiedIDisposable = "[System.Runtime]System.IDisposable";
+    // The SUBTYPE-MAP key of the shadowed platform interface. Since A2Multi S2 it is [*]id, one key for every unindexed
+    // assembly, so every referencing spelling ([System.Runtime], [netstandard]) joins (cha-a2multi-package-graphs.md, S2
+    // "Qualified spelling"). Graph node ids of external LEAVES are unchanged (QualifiedGetEnv above).
+    private const string QualifiedIDisposable = "[*]System.IDisposable";
     private const string ReadsPlatform = "ShadowFixture.Callers.ReadsPlatformEnvironment()";
     private const string ReadsShadow = "ShadowFixture.Callers.ReadsShadowEnvironment()";
 
