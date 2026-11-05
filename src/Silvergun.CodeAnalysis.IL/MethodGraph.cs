@@ -239,6 +239,15 @@ public sealed class MethodGraph
     /// <summary>The node with <paramref name="nodeId"/>, or null.</summary>
     public MethodNode? Node(string nodeId) => nodesById.GetValueOrDefault(nodeId);
 
+    // A graph from given parts, each put in the graph's order: for tests of what consumes a graph, without a build.
+    internal static MethodGraph FromParts(IEnumerable<MethodNode> nodes, IEnumerable<MethodEdge> edges, IEnumerable<GraphOpacity> opacities, GraphCoverage coverage, GraphFacts facts) =>
+        new(
+            [.. nodes.OrderBy(n => n.NodeId, StringComparer.Ordinal)],
+            [.. edges.OrderBy(e => e.From, StringComparer.Ordinal).ThenBy(e => e.To, StringComparer.Ordinal).ThenBy(e => e.Kind).ThenBy(e => e.Offset)],
+            [.. opacities.OrderBy(o => o.Site, StringComparer.Ordinal).ThenBy(o => o.Offset).ThenBy(o => o.Kind).ThenBy(o => o.Detail, StringComparer.Ordinal)],
+            coverage,
+            facts);
+
     /// <summary>The edges leaving <paramref name="nodeId"/>, in order.</summary>
     public IReadOnlyList<MethodEdge> Successors(string nodeId) => successors.GetValueOrDefault(nodeId) ?? [];
 

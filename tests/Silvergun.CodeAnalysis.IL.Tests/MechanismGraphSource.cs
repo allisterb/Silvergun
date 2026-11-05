@@ -39,6 +39,11 @@ public sealed record MechanismGraph(
 /// </summary>
 public static class MechanismGraphSource
 {
+    #region Properties
+    /// <summary>The fixture <see cref="MethodGraph"/> itself (all three assemblies, built once), for consumers of a real graph such as reachability.</summary>
+    public static MethodGraph Graph => built.Value;
+    #endregion
+
     #region Methods
     public static MechanismGraph Build(Phase phase) =>
         phase < Phase.Reachability
