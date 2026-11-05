@@ -103,6 +103,12 @@ public sealed class PackageCache(string root, string feedUrl = PackageCache.NuGe
     #region Properties
     /// <summary>The cache root. Created on first use.</summary>
     public string Root { get; } = root;
+
+    /// <summary>
+    /// How many caches - and so feed repositories - this process has constructed. <c>--reachability</c> must construct
+    /// none; its offline test reads this.
+    /// </summary>
+    public static int Constructed => constructed;
     #endregion
 
     #region Methods
@@ -115,7 +121,7 @@ public sealed class PackageCache(string root, string feedUrl = PackageCache.NuGe
     {
         try
         {
-            var nupkg = Path.Combine(Root, "packages", $"{entry.Id}.{entry.Version}.nupkg");
+            var nupkg = CachedNupkg.PathOf(Root, entry);
             if (!File.Exists(nupkg))
             {
                 var downloaded = await DownloadAsync(entry, nupkg, ct);
@@ -175,11 +181,19 @@ public sealed class PackageCache(string root, string feedUrl = PackageCache.NuGe
         File.Move(temp, nupkg, overwrite: true);
         return null;
     }
+
+    private static SourceRepository CreateRepository(string feedUrl)
+    {
+        Interlocked.Increment(ref constructed);
+        return Repository.Factory.GetCoreV3(feedUrl);
+    }
     #endregion
 
     #region Fields
     public const string NuGetV3Feed = "https://api.nuget.org/v3/index.json";
 
-    private readonly SourceRepository repository = Repository.Factory.GetCoreV3(feedUrl);
+    private static int constructed;
+
+    private readonly SourceRepository repository = CreateRepository(feedUrl);
     #endregion
 }

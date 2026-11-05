@@ -13,12 +13,17 @@
          opens .nupkg files); no Silvergun.Intel type is used. Deliberately NOT a new PackageReference - the task
          forbids adding NuGet packages, and Silvergun.Intel already carries exactly the ones needed. -->
     <ProjectReference Include="..\..\src\Silvergun.Intel\Silvergun.Intel.csproj" />
+    <!-- Reachability R2 (docs/agent/tasks/reachability-r2.md): NuGetPackage.Open and PackageGraphs.Build for the
+         offline reachability mode. A project, not a package; it resolves to its net10.0 flavour. -->
+    <ProjectReference Include="..\..\src\Silvergun.PackageAnalysis.NuGet\Silvergun.PackageAnalysis.NuGet.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <!-- The pinned corpus. Lives in the repo (it IS the experiment definition); the .nupkg files it names are
          cached outside the repo and never committed. -->
     <Content Include="benign-corpus.manifest" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The 2026-08-21 P-lib presence baseline as data, R2's regression oracle; its header names its source. -->
+    <Content Include="presence-oracle-2026-08-21.tsv" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

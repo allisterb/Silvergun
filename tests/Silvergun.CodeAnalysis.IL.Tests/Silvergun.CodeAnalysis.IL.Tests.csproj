@@ -96,6 +96,11 @@
          located BY PATH (RootFixtureAssemblies) and read as metadata, never loaded - it has a [ModuleInitializer]. The
          tests index RootFixture ALONE, so the stubbed host contracts stay external. -->
     <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.RootFixture\Silvergun.CodeAnalysis.IL.Tests.RootFixture.csproj" />
+    <!-- The benign-corpus harness (an Exe), for the unit tests of its reachability R2 mode: the aggregation and the
+         E1/E2 decision, the offline driver, the child's status rule, and its copy of the parity rule
+         (ReachabilityHarnessTests; docs/agent/tasks/reachability-r2.md). It brings Silvergun.PackageAnalysis.NuGet and
+         Silvergun.Intel along as project references; no package reference is added here. -->
+    <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.BenignCorpusHarness\Silvergun.CodeAnalysis.IL.Tests.BenignCorpusHarness.csproj" />
   </ItemGroup>
 
 </Project>

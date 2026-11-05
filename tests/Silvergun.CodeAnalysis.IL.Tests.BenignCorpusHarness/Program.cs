@@ -17,6 +17,9 @@ public sealed record HarnessOptions(
     string OutputDirectory,
     TimeSpan ChildTimeout);
 
+/// <summary>The <c>--reachability</c> options on top of the common ones.</summary>
+public sealed record ReachabilityOptions(HarnessOptions Common, string Results, int MaxChildren, DateOnly Date);
+
 /// <summary>
 /// Benign-corpus harness - <b>a measurement instrument, not a shipped feature and not a unit test</b>. It scans a
 /// pinned set of ordinary, widely-used NuGet packages and reports which capabilities and
@@ -43,6 +46,8 @@ public static class Program
     {
         if (args.Length > 0 && string.Equals(args[0], ChildScan.Verb, StringComparison.Ordinal))
             return ChildScan.Execute(args);
+        if (args.Length > 0 && string.Equals(args[0], ReachabilityChild.Verb, StringComparison.Ordinal))
+            return ReachabilityChild.Execute(args);
 
         try
         {
@@ -51,6 +56,9 @@ public static class Program
                 Console.WriteLine(Usage);
                 return 0;
             }
+
+            if (args.Contains(ReachabilityFlag))
+                return RunReachability(args);
 
             var options = Parse(args);
             var manifest = CorpusManifest.Load(options.Manifest, options.Take);
@@ -96,6 +104,89 @@ public static class Program
             Console.Error.WriteLine($"FAILED {ex}");
             return 1;
         }
+    }
+
+    // --reachability (reachability R2): offline, one child per package, results cached in --results, the report rendered
+    // once every manifest entry has a result. Never constructs a PackageCache, so nothing is ever downloaded.
+    private static int RunReachability(string[] args)
+    {
+        if (ParseReachability(args) is not { } options)
+        {
+            Console.Error.WriteLine("--reachability needs --results <dir>; see --help.");
+            return 2;
+        }
+
+        var common = options.Common;
+        var manifest = CorpusManifest.Load(common.Manifest, common.Take);
+        var identity = BuildIdentities.Current(RepositoryRoot(), AppContext.BaseDirectory);
+        var oracle = PresenceOracle.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, OracleFileName)));
+        var harness = HarnessExecutable();
+
+        Console.WriteLine($"manifest {manifest.Path}");
+        Console.WriteLine($"manifest-hash {manifest.Hash} ({manifest.Entries.Count} package(s))");
+        Console.WriteLine($"cache {common.CacheRoot} (read only)");
+        Console.WriteLine($"results {options.Results}");
+        Console.WriteLine($"identity {identity}");
+
+        try
+        {
+            var driver = new ReachabilityDriver(common.CacheRoot, options.Results, options.MaxChildren, identity,
+                (entry, nupkg) => ReachabilityChildRunner.Run(harness, options.Results, entry, nupkg, common.ChildTimeout, identity));
+            var run = driver.Run(manifest, Console.Out);
+
+            var notCached = run.Results.Count(r => r.Status == PackageReachResult.NotCached);
+            if (notCached > 0)
+                Console.WriteLine($"WARNING {notCached} manifest entr(ies) not-cached; nothing was downloaded.");
+            if (!run.Complete)
+            {
+                Console.WriteLine($"PENDING {run.Pending.Count} package(s) still to measure ({run.ChildrenRun} child(ren) run); rerun to continue.");
+                return 0;
+            }
+
+            var context = new ReachabilityReportContext(options.Date, manifest, common.CacheRoot, identity, common.ChildTimeout, oracle);
+            var (paths, notComparable) = ReachabilityCorpusReport.Write(common.OutputDirectory, context, run.Results);
+            foreach (var path in paths)
+                Console.WriteLine($"wrote {path}");
+            Console.WriteLine($"COMPLETE {run.Results.Count} result(s); {run.ChildrenRun} child(ren) run in this invocation");
+            if (notComparable is not null)
+            {
+                // The report is written, but no verdict may be read off it (spec, review W2).
+                Console.Error.WriteLine($"NOT-COMPARABLE {notComparable}");
+                return NotComparableExitCode;
+            }
+            return 0;
+        }
+        catch (MixedBuildException ex)
+        {
+            Console.Error.WriteLine($"FAILED {ex.Message}");
+            return 1;
+        }
+    }
+
+    private static ReachabilityOptions? ParseReachability(string[] args)
+    {
+        string? Value(string name)
+        {
+            var index = Array.IndexOf(args, name);
+            return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
+        }
+
+        if (Value("--results") is not { } results)
+            return null;
+
+        // This mode's own defaults: every manifest entry (--take 0) and a 600 s child timeout.
+        var common = Parse(args);
+        if (Value("--take") is null)
+            common = common with { Take = 0 };
+        if (Value("--timeout") is null)
+            common = common with { ChildTimeout = TimeSpan.FromSeconds(DefaultReachabilityTimeoutSeconds) };
+        return new ReachabilityOptions(
+            common,
+            Path.GetFullPath(results),
+            Value("--max-children") is { } max ? int.Parse(max, CultureInfo.InvariantCulture) : int.MaxValue,
+            Value("--date") is { } date
+                ? DateOnly.ParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture)
+                : DateOnly.FromDateTime(DateTime.UtcNow));
     }
 
     private static HarnessOptions Parse(string[] args)
@@ -153,6 +244,16 @@ public static class Program
     #region Fields
     public const string ManifestFileName = "benign-corpus.manifest";
 
+    /// <summary>The 2026-08-21 presence baseline as data, copied next to the executable.</summary>
+    public const string OracleFileName = "presence-oracle-2026-08-21.tsv";
+
+    private const string ReachabilityFlag = "--reachability";
+
+    private const int DefaultReachabilityTimeoutSeconds = 600;
+
+    /// <summary><c>--reachability</c> wrote its report, but the population is not comparable, so it carries no verdict.</summary>
+    public const int NotComparableExitCode = 3;
+
     private const string Usage = """
         Benign-corpus harness (measurement instrument; changes no scoring).
 
@@ -165,6 +266,18 @@ public static class Program
                       MUST be outside the repository - a .nupkg is never committed.
           --out       report directory. Default <repo>/docs/agent/measurements.
           --timeout   per-child-process timeout in seconds. Default 300.
+
+          <harness> --reachability --results <dir> [--max-children <n>] [--date <yyyy-MM-dd>] [common options]
+          <harness> reach <nupkg> <out-json>  (child mode - one package, one process)
+
+          Reachability R2 (docs/agent/tasks/reachability-r2.md). OFFLINE: reads <cache>/packages/<Id>.<Version>.nupkg
+          and never downloads; a missing package is 'not-cached'. One child per package (timeout default 600 s;
+          --take defaults to 0, every entry); each result is cached as <results>/<Id>.<Version>.json and reused;
+          results of another build (git describe --dirty + assembly hash) are refused.
+          --max-children  new children to run in this invocation. Default unlimited.
+          --date          the date in the report's file name. Default today (UTC).
+          Once every entry has a result, writes reachability-benign-<date>.md, .tsv and -cost.md into --out.
+          Exit 3 after writing it when the population is not comparable (oracle not a full MATCH, or not-cached).
         """;
     #endregion
 }

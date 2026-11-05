@@ -1,0 +1,356 @@
+# Presence regression oracle for reachability R2 (docs/agent/tasks/reachability-r2.md, "Populations").
+# Source: docs/agent/measurements/benign-corpus-top100-2026-08-21.md - this repository's own benign-corpus
+# harness output of 2026-08-21 (tables "Capability density", "Per package", "Findings by capability, per
+# package" and the parameter table). Derived 2026-11-05 by a one-off script that cross-checked the tables
+# against each other; every number is copied unchanged. Project-internal data, no third-party licence.
+# Only packages with status 'scanned' (the 78 that contributed) are listed.
+manifest-hash	9e5635c320485af7b86e5656860465e4c1bc5ba753e7771336e7d677ac8838a6
+denominator	78
+assemblies	81
+methods-analysed	148990
+total-findings	8193
+capability	Cryptography	18	2336
+capability	DynamicCodeLoading	32	1460
+capability	EnvironmentProbe	42	391
+capability	FileSystem	26	407
+capability	NativeInterop	15	1247
+capability	Network	14	399
+capability	ProcessExecution	12	142
+capability	ReflectionInvocation	32	341
+capability	Registry	1	4
+capability	RuntimeControl	29	619
+capability	UnsafeMemory	35	847
+package	AWSSDK.Core	4.0.101.1	net8.0	1	5921	317
+package	AWSSDK.S3	4.0.102.2	net8.0	1	10274	56
+package	AutoMapper	16.2.0	net10.0	1	2180	34
+package	Azure.Core	1.61.0	net10.0	1	4217	240
+package	Azure.Identity	1.21.0	net10.0	1	0	0
+package	Azure.Security.KeyVault.Secrets	4.11.0	net10.0	1	1046	3
+package	Azure.Storage.Blobs	12.29.1	net10.0	1	6187	67
+package	Azure.Storage.Common	12.28.0	net10.0	1	987	14
+package	Castle.Core	5.2.1	net6.0	1	3323	198
+package	CsvHelper	33.1.0	net9.0	1	1390	15
+package	Dapper	2.1.79	net10.0	1	1083	56
+package	FluentAssertions	8.10.0	net6.0	1	4676	59
+package	FluentValidation	12.1.1	net8.0	1	1312	3
+package	Google.Protobuf	3.35.1	net5.0	1	3745	51
+package	Grpc.Core.Api	2.83.0	netstandard2.0	1	424	3
+package	Grpc.Net.Client	2.83.0	net10.0	1	1442	46
+package	Grpc.Net.Common	2.83.0	net10.0	1	24	0
+package	Humanizer.Core	3.0.10	net10.0	1	2695	19
+package	Microsoft.ApplicationInsights	3.1.2	net10.0	1	567	31
+package	Microsoft.AspNetCore.Mvc.NewtonsoftJson	10.0.11	net10.0	1	179	9
+package	Microsoft.Azure.Amqp	2.7.4	net8.0	1	3424	154
+package	Microsoft.Azure.WebJobs	3.0.47	netstandard2.0	1	3279	91
+package	Microsoft.Bcl.AsyncInterfaces	10.0.11	netstandard2.0	1	91	0
+package	Microsoft.Data.SqlClient	7.0.2	net9.0	1	2725	0
+package	Microsoft.EntityFrameworkCore	10.0.11	net10.0	1	15662	99
+package	Microsoft.Extensions.DependencyInjection	10.0.11	net10.0	1	425	28
+package	Microsoft.Extensions.Diagnostics	10.0.11	net10.0	1	75	5
+package	Microsoft.Extensions.Diagnostics.Abstractions	10.0.11	net10.0	1	71	5
+package	Microsoft.Extensions.Diagnostics.HealthChecks	10.0.11	net10.0	1	141	0
+package	Microsoft.Extensions.Diagnostics.HealthChecks.Abstractions	10.0.11	net10.0	1	48	0
+package	Microsoft.Extensions.Hosting	10.0.11	net10.0	1	301	9
+package	Microsoft.Extensions.Http	10.0.11	net10.0	1	414	35
+package	Microsoft.Extensions.Logging	10.0.11	net10.0	1	227	5
+package	Microsoft.Extensions.Logging.EventLog	10.0.11	net10.0	1	51	0
+package	Microsoft.Identity.Client	4.87.0	net8.0	1	5244	305
+package	Microsoft.Identity.Client.Extensions.Msal	4.87.0	net8.0	1	150	91
+package	Microsoft.IdentityModel.Abstractions	8.22.0	net10.0	1	34	0
+package	Microsoft.OpenApi	3.10.0	net8.0	1	4196	19
+package	Microsoft.SqlServer.Server	1.0.0	netstandard2.0	1	84	1
+package	Microsoft.Win32.SystemEvents	10.0.11	net10.0	1	69	5
+package	Moq	4.20.72	net6.0	1	1670	64
+package	NLog	6.2.0	netstandard2.0	1	5489	186
+package	NUnit	4.6.1	net8.0	2	5357	117
+package	Newtonsoft.Json	13.0.4	net6.0	1	4107	78
+package	Newtonsoft.Json.Bson	1.0.3	netstandard2.0	1	412	2
+package	Npgsql	10.0.3	net10.0	1	7506	203
+package	OpenTelemetry	1.17.0	net10.0	1	1558	28
+package	OpenTelemetry.Api	1.17.0	net10.0	1	413	9
+package	OpenTelemetry.Api.ProviderBuilderExtensions	1.17.0	net10.0	1	123	0
+package	Pipelines.Sockets.Unofficial	2.3.1	net10.0	1	977	103
+package	Polly	8.7.0	net6.0	1	2045	2
+package	Polly.Core	8.7.0	net8.0	1	1265	3
+package	Serilog	4.4.0	net10.0	1	1057	15
+package	Serilog.AspNetCore	10.0.0	net10.0	1	59	0
+package	Serilog.Extensions.Hosting	10.0.0	net10.0	1	204	0
+package	Serilog.Extensions.Logging	10.0.0	net10.0	1	121	0
+package	Serilog.Formatting.Compact	3.0.0	net8.0	1	10	0
+package	Serilog.Settings.Configuration	10.0.1	net10.0	1	316	22
+package	Serilog.Sinks.Console	6.1.1	net8.0	1	124	6
+package	Serilog.Sinks.Debug	3.0.0	net8.0	1	4	0
+package	Serilog.Sinks.File	7.0.0	net9.0	1	156	15
+package	StackExchange.Redis	3.1.13	net10.0	1	9531	120
+package	Swashbuckle.AspNetCore.Swagger	10.2.3	net10.0	1	77	1
+package	Swashbuckle.AspNetCore.SwaggerGen	10.2.3	net10.0	1	812	3
+package	Swashbuckle.AspNetCore.SwaggerUI	10.2.3	net10.0	1	463	3
+package	System.ClientModel	1.15.0	net10.0	1	1644	55
+package	System.CodeDom	10.0.11	net10.0	1	1373	953
+package	System.Diagnostics.EventLog	10.0.11	net10.0	1	388	5
+package	System.Diagnostics.PerformanceCounter	10.0.11	net10.0	1	239	5
+package	System.Drawing.Common	10.0.11	net10.0	3	6327	2029
+package	System.Formats.Asn1	10.0.11	net10.0	1	340	26
+package	System.IO.Hashing	10.0.11	net10.0	1	218	31
+package	System.Memory.Data	10.0.11	net10.0	1	96	7
+package	System.Runtime.Caching	10.0.11	net10.0	1	426	38
+package	System.Security.Cryptography.Pkcs	10.0.11	net10.0	1	1336	1905
+package	System.Text.Json	10.0.11	net10.0	1	3975	81
+package	System.Threading.Channels	10.0.11	net10.0	1	311	0
+package	System.Windows.Extensions	10.0.11	net10.0	1	78	5
+package-capability	AWSSDK.Core	Cryptography	58
+package-capability	AWSSDK.Core	DynamicCodeLoading	9
+package-capability	AWSSDK.Core	EnvironmentProbe	52
+package-capability	AWSSDK.Core	FileSystem	59
+package-capability	AWSSDK.Core	NativeInterop	10
+package-capability	AWSSDK.Core	Network	51
+package-capability	AWSSDK.Core	ProcessExecution	31
+package-capability	AWSSDK.Core	ReflectionInvocation	12
+package-capability	AWSSDK.Core	RuntimeControl	32
+package-capability	AWSSDK.Core	UnsafeMemory	3
+package-capability	AWSSDK.S3	Cryptography	2
+package-capability	AWSSDK.S3	EnvironmentProbe	5
+package-capability	AWSSDK.S3	FileSystem	37
+package-capability	AWSSDK.S3	Network	8
+package-capability	AWSSDK.S3	RuntimeControl	4
+package-capability	AutoMapper	DynamicCodeLoading	28
+package-capability	AutoMapper	EnvironmentProbe	1
+package-capability	AutoMapper	ReflectionInvocation	5
+package-capability	Azure.Core	Cryptography	42
+package-capability	Azure.Core	DynamicCodeLoading	1
+package-capability	Azure.Core	EnvironmentProbe	62
+package-capability	Azure.Core	FileSystem	11
+package-capability	Azure.Core	NativeInterop	26
+package-capability	Azure.Core	Network	25
+package-capability	Azure.Core	ProcessExecution	54
+package-capability	Azure.Core	ReflectionInvocation	8
+package-capability	Azure.Core	RuntimeControl	6
+package-capability	Azure.Core	UnsafeMemory	5
+package-capability	Azure.Security.KeyVault.Secrets	EnvironmentProbe	1
+package-capability	Azure.Security.KeyVault.Secrets	RuntimeControl	2
+package-capability	Azure.Storage.Blobs	Cryptography	47
+package-capability	Azure.Storage.Blobs	EnvironmentProbe	4
+package-capability	Azure.Storage.Blobs	FileSystem	7
+package-capability	Azure.Storage.Blobs	RuntimeControl	4
+package-capability	Azure.Storage.Blobs	UnsafeMemory	5
+package-capability	Azure.Storage.Common	Cryptography	5
+package-capability	Azure.Storage.Common	EnvironmentProbe	2
+package-capability	Azure.Storage.Common	RuntimeControl	2
+package-capability	Azure.Storage.Common	UnsafeMemory	5
+package-capability	Castle.Core	DynamicCodeLoading	135
+package-capability	Castle.Core	EnvironmentProbe	17
+package-capability	Castle.Core	FileSystem	13
+package-capability	Castle.Core	NativeInterop	4
+package-capability	Castle.Core	Network	11
+package-capability	Castle.Core	ReflectionInvocation	10
+package-capability	Castle.Core	RuntimeControl	8
+package-capability	CsvHelper	DynamicCodeLoading	8
+package-capability	CsvHelper	EnvironmentProbe	3
+package-capability	CsvHelper	RuntimeControl	4
+package-capability	Dapper	DynamicCodeLoading	47
+package-capability	Dapper	ReflectionInvocation	7
+package-capability	Dapper	RuntimeControl	2
+package-capability	FluentAssertions	DynamicCodeLoading	40
+package-capability	FluentAssertions	FileSystem	2
+package-capability	FluentAssertions	ReflectionInvocation	11
+package-capability	FluentAssertions	RuntimeControl	6
+package-capability	FluentValidation	DynamicCodeLoading	2
+package-capability	FluentValidation	EnvironmentProbe	1
+package-capability	Google.Protobuf	DynamicCodeLoading	9
+package-capability	Google.Protobuf	NativeInterop	5
+package-capability	Google.Protobuf	ReflectionInvocation	14
+package-capability	Google.Protobuf	UnsafeMemory	23
+package-capability	Grpc.Core.Api	NativeInterop	1
+package-capability	Grpc.Core.Api	ReflectionInvocation	2
+package-capability	Grpc.Net.Client	EnvironmentProbe	6
+package-capability	Grpc.Net.Client	NativeInterop	3
+package-capability	Grpc.Net.Client	Network	34
+package-capability	Grpc.Net.Client	RuntimeControl	3
+package-capability	Humanizer.Core	EnvironmentProbe	9
+package-capability	Humanizer.Core	FileSystem	2
+package-capability	Humanizer.Core	ReflectionInvocation	2
+package-capability	Humanizer.Core	UnsafeMemory	6
+package-capability	Microsoft.ApplicationInsights	DynamicCodeLoading	1
+package-capability	Microsoft.ApplicationInsights	EnvironmentProbe	7
+package-capability	Microsoft.ApplicationInsights	FileSystem	8
+package-capability	Microsoft.ApplicationInsights	Network	4
+package-capability	Microsoft.ApplicationInsights	ProcessExecution	2
+package-capability	Microsoft.ApplicationInsights	ReflectionInvocation	1
+package-capability	Microsoft.ApplicationInsights	RuntimeControl	8
+package-capability	Microsoft.AspNetCore.Mvc.NewtonsoftJson	EnvironmentProbe	1
+package-capability	Microsoft.AspNetCore.Mvc.NewtonsoftJson	ReflectionInvocation	3
+package-capability	Microsoft.AspNetCore.Mvc.NewtonsoftJson	UnsafeMemory	5
+package-capability	Microsoft.Azure.Amqp	Cryptography	5
+package-capability	Microsoft.Azure.Amqp	DynamicCodeLoading	6
+package-capability	Microsoft.Azure.Amqp	EnvironmentProbe	2
+package-capability	Microsoft.Azure.Amqp	Network	95
+package-capability	Microsoft.Azure.Amqp	ProcessExecution	1
+package-capability	Microsoft.Azure.Amqp	ReflectionInvocation	12
+package-capability	Microsoft.Azure.Amqp	RuntimeControl	3
+package-capability	Microsoft.Azure.Amqp	UnsafeMemory	30
+package-capability	Microsoft.Azure.WebJobs	Cryptography	2
+package-capability	Microsoft.Azure.WebJobs	DynamicCodeLoading	15
+package-capability	Microsoft.Azure.WebJobs	EnvironmentProbe	17
+package-capability	Microsoft.Azure.WebJobs	FileSystem	13
+package-capability	Microsoft.Azure.WebJobs	NativeInterop	2
+package-capability	Microsoft.Azure.WebJobs	ProcessExecution	5
+package-capability	Microsoft.Azure.WebJobs	ReflectionInvocation	29
+package-capability	Microsoft.Azure.WebJobs	RuntimeControl	8
+package-capability	Microsoft.EntityFrameworkCore	DynamicCodeLoading	59
+package-capability	Microsoft.EntityFrameworkCore	ReflectionInvocation	34
+package-capability	Microsoft.EntityFrameworkCore	UnsafeMemory	6
+package-capability	Microsoft.Extensions.DependencyInjection	DynamicCodeLoading	20
+package-capability	Microsoft.Extensions.DependencyInjection	ReflectionInvocation	3
+package-capability	Microsoft.Extensions.DependencyInjection	UnsafeMemory	5
+package-capability	Microsoft.Extensions.Diagnostics	UnsafeMemory	5
+package-capability	Microsoft.Extensions.Diagnostics.Abstractions	UnsafeMemory	5
+package-capability	Microsoft.Extensions.Hosting	DynamicCodeLoading	1
+package-capability	Microsoft.Extensions.Hosting	EnvironmentProbe	3
+package-capability	Microsoft.Extensions.Hosting	UnsafeMemory	5
+package-capability	Microsoft.Extensions.Http	EnvironmentProbe	1
+package-capability	Microsoft.Extensions.Http	Network	29
+package-capability	Microsoft.Extensions.Http	UnsafeMemory	5
+package-capability	Microsoft.Extensions.Logging	UnsafeMemory	5
+package-capability	Microsoft.Identity.Client	Cryptography	175
+package-capability	Microsoft.Identity.Client	EnvironmentProbe	35
+package-capability	Microsoft.Identity.Client	FileSystem	7
+package-capability	Microsoft.Identity.Client	NativeInterop	42
+package-capability	Microsoft.Identity.Client	Network	29
+package-capability	Microsoft.Identity.Client	ProcessExecution	16
+package-capability	Microsoft.Identity.Client	ReflectionInvocation	1
+package-capability	Microsoft.Identity.Client.Extensions.Msal	Cryptography	2
+package-capability	Microsoft.Identity.Client.Extensions.Msal	EnvironmentProbe	10
+package-capability	Microsoft.Identity.Client.Extensions.Msal	FileSystem	24
+package-capability	Microsoft.Identity.Client.Extensions.Msal	NativeInterop	50
+package-capability	Microsoft.Identity.Client.Extensions.Msal	ProcessExecution	4
+package-capability	Microsoft.Identity.Client.Extensions.Msal	ReflectionInvocation	1
+package-capability	Microsoft.OpenApi	Cryptography	4
+package-capability	Microsoft.OpenApi	DynamicCodeLoading	1
+package-capability	Microsoft.OpenApi	EnvironmentProbe	1
+package-capability	Microsoft.OpenApi	FileSystem	8
+package-capability	Microsoft.OpenApi	Network	3
+package-capability	Microsoft.OpenApi	ReflectionInvocation	2
+package-capability	Microsoft.SqlServer.Server	EnvironmentProbe	1
+package-capability	Microsoft.Win32.SystemEvents	UnsafeMemory	5
+package-capability	Moq	DynamicCodeLoading	19
+package-capability	Moq	EnvironmentProbe	36
+package-capability	Moq	ReflectionInvocation	9
+package-capability	NLog	DynamicCodeLoading	25
+package-capability	NLog	EnvironmentProbe	29
+package-capability	NLog	FileSystem	93
+package-capability	NLog	ProcessExecution	3
+package-capability	NLog	ReflectionInvocation	12
+package-capability	NLog	RuntimeControl	24
+package-capability	NUnit	Cryptography	1
+package-capability	NUnit	DynamicCodeLoading	2
+package-capability	NUnit	EnvironmentProbe	19
+package-capability	NUnit	FileSystem	17
+package-capability	NUnit	NativeInterop	5
+package-capability	NUnit	ProcessExecution	2
+package-capability	NUnit	ReflectionInvocation	55
+package-capability	NUnit	Registry	4
+package-capability	NUnit	RuntimeControl	12
+package-capability	Newtonsoft.Json	DynamicCodeLoading	35
+package-capability	Newtonsoft.Json	EnvironmentProbe	6
+package-capability	Newtonsoft.Json	ReflectionInvocation	30
+package-capability	Newtonsoft.Json	RuntimeControl	7
+package-capability	Newtonsoft.Json.Bson	EnvironmentProbe	2
+package-capability	Npgsql	Cryptography	51
+package-capability	Npgsql	DynamicCodeLoading	11
+package-capability	Npgsql	EnvironmentProbe	22
+package-capability	Npgsql	FileSystem	10
+package-capability	Npgsql	Network	35
+package-capability	Npgsql	ProcessExecution	11
+package-capability	Npgsql	ReflectionInvocation	12
+package-capability	Npgsql	RuntimeControl	9
+package-capability	Npgsql	UnsafeMemory	42
+package-capability	OpenTelemetry	EnvironmentProbe	3
+package-capability	OpenTelemetry	FileSystem	8
+package-capability	OpenTelemetry	NativeInterop	1
+package-capability	OpenTelemetry	ProcessExecution	2
+package-capability	OpenTelemetry	RuntimeControl	9
+package-capability	OpenTelemetry	UnsafeMemory	5
+package-capability	OpenTelemetry.Api	EnvironmentProbe	1
+package-capability	OpenTelemetry.Api	RuntimeControl	3
+package-capability	OpenTelemetry.Api	UnsafeMemory	5
+package-capability	Pipelines.Sockets.Unofficial	DynamicCodeLoading	3
+package-capability	Pipelines.Sockets.Unofficial	FileSystem	8
+package-capability	Pipelines.Sockets.Unofficial	NativeInterop	5
+package-capability	Pipelines.Sockets.Unofficial	Network	41
+package-capability	Pipelines.Sockets.Unofficial	ReflectionInvocation	4
+package-capability	Pipelines.Sockets.Unofficial	RuntimeControl	7
+package-capability	Pipelines.Sockets.Unofficial	UnsafeMemory	35
+package-capability	Polly	RuntimeControl	2
+package-capability	Polly.Core	DynamicCodeLoading	2
+package-capability	Polly.Core	UnsafeMemory	1
+package-capability	Serilog	DynamicCodeLoading	5
+package-capability	Serilog	EnvironmentProbe	2
+package-capability	Serilog	ReflectionInvocation	7
+package-capability	Serilog	UnsafeMemory	1
+package-capability	Serilog.Settings.Configuration	DynamicCodeLoading	4
+package-capability	Serilog.Settings.Configuration	EnvironmentProbe	1
+package-capability	Serilog.Settings.Configuration	FileSystem	2
+package-capability	Serilog.Settings.Configuration	ReflectionInvocation	14
+package-capability	Serilog.Settings.Configuration	RuntimeControl	1
+package-capability	Serilog.Sinks.Console	EnvironmentProbe	3
+package-capability	Serilog.Sinks.Console	NativeInterop	3
+package-capability	Serilog.Sinks.File	EnvironmentProbe	1
+package-capability	Serilog.Sinks.File	FileSystem	14
+package-capability	StackExchange.Redis	Cryptography	28
+package-capability	StackExchange.Redis	DynamicCodeLoading	1
+package-capability	StackExchange.Redis	EnvironmentProbe	7
+package-capability	StackExchange.Redis	FileSystem	11
+package-capability	StackExchange.Redis	Network	22
+package-capability	StackExchange.Redis	ReflectionInvocation	4
+package-capability	StackExchange.Redis	RuntimeControl	17
+package-capability	StackExchange.Redis	UnsafeMemory	30
+package-capability	Swashbuckle.AspNetCore.Swagger	DynamicCodeLoading	1
+package-capability	Swashbuckle.AspNetCore.SwaggerGen	DynamicCodeLoading	1
+package-capability	Swashbuckle.AspNetCore.SwaggerGen	EnvironmentProbe	1
+package-capability	Swashbuckle.AspNetCore.SwaggerGen	ReflectionInvocation	1
+package-capability	Swashbuckle.AspNetCore.SwaggerUI	Cryptography	2
+package-capability	Swashbuckle.AspNetCore.SwaggerUI	FileSystem	1
+package-capability	System.ClientModel	Cryptography	1
+package-capability	System.ClientModel	DynamicCodeLoading	12
+package-capability	System.ClientModel	EnvironmentProbe	6
+package-capability	System.ClientModel	FileSystem	2
+package-capability	System.ClientModel	Network	12
+package-capability	System.ClientModel	ReflectionInvocation	9
+package-capability	System.ClientModel	RuntimeControl	7
+package-capability	System.ClientModel	UnsafeMemory	6
+package-capability	System.CodeDom	DynamicCodeLoading	911
+package-capability	System.CodeDom	EnvironmentProbe	1
+package-capability	System.CodeDom	FileSystem	21
+package-capability	System.CodeDom	ProcessExecution	11
+package-capability	System.CodeDom	ReflectionInvocation	3
+package-capability	System.CodeDom	RuntimeControl	1
+package-capability	System.CodeDom	UnsafeMemory	5
+package-capability	System.Diagnostics.EventLog	UnsafeMemory	5
+package-capability	System.Diagnostics.PerformanceCounter	UnsafeMemory	5
+package-capability	System.Drawing.Common	DynamicCodeLoading	9
+package-capability	System.Drawing.Common	EnvironmentProbe	7
+package-capability	System.Drawing.Common	FileSystem	9
+package-capability	System.Drawing.Common	NativeInterop	1085
+package-capability	System.Drawing.Common	ReflectionInvocation	9
+package-capability	System.Drawing.Common	RuntimeControl	418
+package-capability	System.Drawing.Common	UnsafeMemory	492
+package-capability	System.Formats.Asn1	Cryptography	20
+package-capability	System.Formats.Asn1	UnsafeMemory	6
+package-capability	System.IO.Hashing	UnsafeMemory	31
+package-capability	System.Memory.Data	FileSystem	2
+package-capability	System.Memory.Data	UnsafeMemory	5
+package-capability	System.Runtime.Caching	EnvironmentProbe	1
+package-capability	System.Runtime.Caching	FileSystem	18
+package-capability	System.Runtime.Caching	NativeInterop	5
+package-capability	System.Runtime.Caching	RuntimeControl	9
+package-capability	System.Runtime.Caching	UnsafeMemory	5
+package-capability	System.Security.Cryptography.Pkcs	Cryptography	1889
+package-capability	System.Security.Cryptography.Pkcs	EnvironmentProbe	1
+package-capability	System.Security.Cryptography.Pkcs	RuntimeControl	1
+package-capability	System.Security.Cryptography.Pkcs	UnsafeMemory	14
+package-capability	System.Text.Json	Cryptography	2
+package-capability	System.Text.Json	DynamicCodeLoading	37
+package-capability	System.Text.Json	EnvironmentProbe	1
+package-capability	System.Text.Json	ReflectionInvocation	15
+package-capability	System.Text.Json	UnsafeMemory	26
+package-capability	System.Windows.Extensions	UnsafeMemory	5
