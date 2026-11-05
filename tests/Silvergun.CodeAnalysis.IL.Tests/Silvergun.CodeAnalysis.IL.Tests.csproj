@@ -101,6 +101,10 @@
          (ReachabilityHarnessTests; docs/agent/tasks/reachability-r2.md). It brings Silvergun.PackageAnalysis.NuGet and
          Silvergun.Intel along as project references; no package reference is added here. -->
     <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.BenignCorpusHarness\Silvergun.CodeAnalysis.IL.Tests.BenignCorpusHarness.csproj" />
+    <!-- The PDB-reader regression fixture (ADR 0022 Stage 1, review round 1 C1): a plain reference so its dll AND pdb are
+         copied here; PdbReaderRegressionTests copies the pair to a temp directory, corrupts it there, and loads it only in
+         a child (the PathologicalSignatureProbe's pdb-load verb). Never loaded by this host. -->
+    <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.AliasedPdbFixture\Silvergun.CodeAnalysis.IL.Tests.AliasedPdbFixture.csproj" />
   </ItemGroup>
 
 </Project>

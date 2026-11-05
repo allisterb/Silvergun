@@ -21,10 +21,12 @@ using CciDebug = Microsoft.Cci.CciDebug;
 /// ADR 0022 Stage 1, read out of the BUILT CCI assembly (<c>Microsoft.Cci.NET6.dll</c>, the copy next to this test
 /// assembly) with <see cref="System.Reflection.Metadata"/>, never by loading or running it:
 /// <list type="bullet">
-/// <item><description>the rebinding is complete: no member reference to <c>System.Diagnostics.Debug</c>'s (or
-/// <c>Trace</c>'s) <c>Assert</c>/<c>Fail</c> survives, so no future upstream merge can bring back a fully qualified call
-/// (as <c>MoveNext.cs:279</c> was) that the <c>global using Debug = Microsoft.Cci.CciDebug</c> alias does not
-/// catch;</description></item>
+/// <item><description>the rebinding is complete, and covers the whole load path (review round 1 W1): no ext assembly
+/// Analysis.Net runs while loading (CCI, the DiaSymReader converter, Model, CCIProvider, Backend, Nuclear.*) references
+/// <c>Debug</c>/<c>Trace</c> <c>Assert</c>/<c>Fail</c>, <c>Debugger.Break</c>/<c>Launch</c> or
+/// <c>Environment.FailFast</c>, so no future upstream merge can bring back a fully qualified call (as
+/// <c>MoveNext.cs:279</c> was) that the <c>global using Debug = Microsoft.Cci.CciDebug</c> alias does not catch, nor a
+/// DEBUG build of a compilation it never covered;</description></item>
 /// <item><description>the rebinding is live: CCI's IL does call <see cref="CciDebug"/>. Those are method DEFINITIONS of the
 /// same assembly, so they appear as call operands, not member references; every method body is decoded with an opcode
 /// table built from <see cref="OpCodes"/> (no byte-pattern guessing) and the call tokens are resolved;</description></item>
@@ -44,23 +46,58 @@ public sealed class CciDebugRebindingTests
         Assert.Equal(Path.GetFullPath(AppContext.BaseDirectory), Path.GetFullPath(Path.GetDirectoryName(CciPath)! + Path.DirectorySeparatorChar), ignoreCase: true);
     }
 
+    /// <summary>
+    /// Review round 1 W1: the ext assemblies on the load path (everything Analysis.Net calls while reading an assembly)
+    /// are found next to this test assembly by name, so a dropped copy fails here rather than shrinking the scan.
+    /// </summary>
     [Fact]
-    public void TheBuiltCci_HasNoMemberReferenceToSystemDiagnosticsDebugOrTraceAssertOrFail()
+    public void Premise_EveryLoadPathAssemblyIsNextToThisTestAssembly()
     {
-        var offenders = cci.Value.MemberReferences
-            .Where(r => r.Namespace == "System.Diagnostics" && r.Type is "Debug" or "Trace" && r.Member is "Assert" or "Fail")
+        var missing = LoadPath.Where(name => !File.Exists(Path.Combine(AppContext.BaseDirectory, name + ".dll"))).ToArray();
+
+        Assert.True(missing.Length == 0, $"Not next to the test assembly: {string.Join(", ", missing)}.");
+        Assert.Contains(LoadPath, name => name.StartsWith("Nuclear.", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// No assembly on the load path references an API that ends the process uncatchably or stops for a debugger:
+    /// <c>Debug</c>/<c>Trace</c> <c>Assert</c>/<c>Fail</c> (<c>Environment.FailFast</c> on .NET, ADR 0021),
+    /// <c>Debugger.Break</c>/<c>Launch</c> and <c>Environment.FailFast</c> itself. In CCI a fully qualified
+    /// <c>System.Diagnostics.Debug</c> call would bypass the <c>CciDebug</c> alias; the DiaSymReader converter is a
+    /// separate compilation the alias never covered (review round 1 C1), which is why it must build without DEBUG.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(LoadPathAssemblies))]
+    public void ALoadPathAssembly_HasNoMemberReferenceToAProcessEndingOrDebuggerApi(string assembly)
+    {
+        var offenders = MemberReferencesOf(assembly)
+            .Where(IsBanned)
             .Select(r => $"{r.Namespace}.{r.Type}::{r.Member}")
             .Distinct(StringComparer.Ordinal)
             .ToArray();
 
         Assert.True(offenders.Length == 0,
-            $"Microsoft.Cci.NET6.dll still calls {string.Join(", ", offenders)}: on .NET that is Environment.FailFast (ADR 0021). A fully qualified call bypasses the CciDebug alias; write it as Debug.*.");
+            $"{assembly}.dll references {string.Join(", ", offenders)}: each can end or stop the process uncatchably (ADR 0021). In CCI, write Debug.* (the CciDebug alias); elsewhere, remove the call or build the project without DEBUG.");
     }
 
-    /// <summary>Non-vacuity for the test above: the member-reference reader does see the BCL references CCI makes.</summary>
+    /// <summary>Non-vacuity for the test above: in each assembly the member-reference reader does see BCL references.</summary>
+    [Theory]
+    [MemberData(nameof(LoadPathAssemblies))]
+    public void Premise_TheMemberReferenceReaderSeesSystemReferences(string assembly) =>
+        Assert.Contains(MemberReferencesOf(assembly), r => r.Namespace == "System" || r.Namespace.StartsWith("System.", StringComparison.Ordinal));
+
+    /// <summary>Non-vacuity for the ban itself: it flags each banned API, and not its harmless neighbours.</summary>
     [Fact]
-    public void Premise_TheMemberReferenceReaderSeesSystemReferences() =>
-        Assert.Contains(cci.Value.MemberReferences, r => r.Namespace == "System" && r.Type == "Object" && r.Member == ".ctor");
+    public void Premise_TheBanFlagsADebuggerOrFailFastReference()
+    {
+        Assert.True(IsBanned(new MemberRef("System.Diagnostics", "Debugger", "Break")));
+        Assert.True(IsBanned(new MemberRef("System", "Environment", "FailFast")));
+        Assert.True(IsBanned(new MemberRef("System.Diagnostics", "Trace", "Fail")));
+        Assert.False(IsBanned(new MemberRef("System.Diagnostics", "Debug", "WriteLine")));
+        Assert.False(IsBanned(new MemberRef("System", "Environment", "GetEnvironmentVariable")));
+    }
+
+    public static TheoryData<string> LoadPathAssemblies => [.. LoadPath];
 
     [Fact]
     public void TheBuiltCci_DefinesCciDebug_WithEveryAssertAndFailOverload()
@@ -85,10 +122,30 @@ public sealed class CciDebugRebindingTests
     {
         Assert.Contains("Microsoft.Cci.CciAssertions::Install", cci.Value.ModuleConstructorCallees);
     }
+
+    private static bool IsBanned(MemberRef r) => (r.Namespace, r.Type, r.Member) switch
+    {
+        ("System.Diagnostics", "Debug" or "Trace", "Assert" or "Fail") => true,
+        ("System.Diagnostics", "Debugger", "Break" or "Launch") => true,
+        ("System", "Environment", "FailFast") => true,
+        _ => false,
+    };
+
+    private static IReadOnlyList<MemberRef> MemberReferencesOf(string assembly) =>
+        CciMetadata.MemberReferencesOf(Path.Combine(AppContext.BaseDirectory, assembly + ".dll"));
     #endregion
 
     #region Fields
     private static readonly string CciPath = typeof(CciAssertions).Assembly.Location;
+
+    // The ext assemblies Analysis.Net runs while loading an assembly: CCI and the DiaSymReader converter it calls for
+    // PDBs, Model, CCIProvider, Backend, and every Nuclear.* assembly beside this one (Nuclear.Assemblies is ext; the rest
+    // come with it).
+    private static readonly string[] LoadPath =
+    [
+        "Microsoft.Cci.NET6", "Microsoft.DiaSymReader.Converter", "Model.NET6", "CCIProvider.NET6", "Backend.NET6",
+        .. Directory.EnumerateFiles(AppContext.BaseDirectory, "Nuclear.*.dll").Select(Path.GetFileNameWithoutExtension).OfType<string>().Order(StringComparer.Ordinal),
+    ];
 
     private static readonly Lazy<CciMetadata> cci = new(() => CciMetadata.Read(CciPath));
     #endregion
@@ -111,17 +168,7 @@ public sealed class CciDebugRebindingTests
             using var stream = File.OpenRead(path);
             using var pe = new PEReader(stream);
             var md = pe.GetMetadataReader();
-
-            // Member references whose parent is a type reference: how a call into another assembly is written.
-            var references = md.MemberReferences
-                .Select(md.GetMemberReference)
-                .Where(r => r.Parent.Kind == HandleKind.TypeReference)
-                .Select(r =>
-                {
-                    var type = md.GetTypeReference((TypeReferenceHandle)r.Parent);
-                    return new MemberRef(md.GetString(type.Namespace), md.GetString(type.Name), md.GetString(r.Name));
-                })
-                .ToArray();
+            var references = MemberReferencesOf(md);
 
             var cciDebug = md.TypeDefinitions.Select(md.GetTypeDefinition)
                 .Single(t => md.GetString(t.Namespace) == "Microsoft.Cci" && md.GetString(t.Name) == nameof(CciDebug));
@@ -155,6 +202,25 @@ public sealed class CciDebugRebindingTests
 
             return new CciMetadata(references, debugMethods, calls, moduleCallees);
         }
+
+        public static IReadOnlyList<MemberRef> MemberReferencesOf(string path)
+        {
+            using var stream = File.OpenRead(path);
+            using var pe = new PEReader(stream);
+            return MemberReferencesOf(pe.GetMetadataReader());
+        }
+
+        // Member references whose parent is a type reference: how a call into another assembly is written.
+        private static MemberRef[] MemberReferencesOf(MetadataReader md) =>
+            md.MemberReferences
+                .Select(md.GetMemberReference)
+                .Where(r => r.Parent.Kind == HandleKind.TypeReference)
+                .Select(r =>
+                {
+                    var type = md.GetTypeReference((TypeReferenceHandle)r.Parent);
+                    return new MemberRef(md.GetString(type.Namespace), md.GetString(type.Name), md.GetString(r.Name));
+                })
+                .ToArray();
 
         private static string Name(MetadataReader md, MethodDefinitionHandle handle)
         {

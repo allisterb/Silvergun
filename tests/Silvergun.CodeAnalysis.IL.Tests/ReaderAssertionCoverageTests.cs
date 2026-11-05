@@ -152,6 +152,8 @@ public sealed class ReaderAssertionCoverageTests
         ("MetadataShapesFixture", () => typeof(ThreeApis).Assembly.Location),
         ("IndicatorCapFixture", () => typeof(IndicatorCapPayloads).Assembly.Location),
         ("PathologicalSignatureProbe", () => typeof(PathologicalSignatureProbe.PathologicalShapes).Assembly.Location),
+        // By path, not typeof: only its clean, uncorrupted build output, with its clean pdb beside it.
+        ("AliasedPdbFixture", () => System.IO.Path.Combine(AppContext.BaseDirectory, "Silvergun.CodeAnalysis.IL.Tests.AliasedPdbFixture.dll")),
     ];
     #endregion
 

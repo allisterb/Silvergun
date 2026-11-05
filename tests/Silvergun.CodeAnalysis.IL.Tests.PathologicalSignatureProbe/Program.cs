@@ -97,6 +97,8 @@ public static class Program
         // A separate mode with its own contract (AssertionProbe); without arguments, this probe is exactly what it was.
         if (args is [AssertionProbe.Verb])
             return AssertionProbe.Run();
+        if (args is [PdbProbe.Verb, var assemblyPath, var mode, var localName])
+            return PdbProbe.Run(assemblyPath, mode, localName);
 
         try
         {

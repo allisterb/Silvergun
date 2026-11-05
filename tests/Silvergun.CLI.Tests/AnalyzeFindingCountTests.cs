@@ -185,6 +185,12 @@ public sealed class AnalyzeFindingCountTests
     /// <summary>
     /// The measured set for <c>Silvergun.CodeAnalysis.IL.dll</c>, ordered ordinally. Nine of these predate
     /// capability-map phase 2; <c>System.IO.StreamReader..ctor</c> is the one it added.
+    /// <para>
+    /// The two <c>System.IO.File.OpenRead</c> calls (12 findings, re-measured 2026-11-05) are the library's own metadata
+    /// side readers, each opening the assembly file it is about to read: <c>TypeForwarders.Read</c> (added in
+    /// <c>f528fe8</c>, CHA begin) and <c>ModuleMetadata.Read</c> (<c>994a097</c>, A2 S3), both classified by
+    /// <c>capability System.IO.File FileSystem</c>. The pin had not been updated since <c>4e092e0</c>, before either.
+    /// </para>
     /// </summary>
     private static readonly string[] MeasuredIlLibraryFindings =
     [
@@ -193,6 +199,8 @@ public sealed class AnalyzeFindingCountTests
         "FileSystem Call System.IO.File.Exists",
         "FileSystem Call System.IO.File.Exists",
         "FileSystem Call System.IO.File.Exists",
+        "FileSystem Call System.IO.File.OpenRead",
+        "FileSystem Call System.IO.File.OpenRead",
         "FileSystem Call System.IO.FileInfo.get_Directory",
         "FileSystem Call System.IO.FileSystemInfo.get_FullName",
         "FileSystem Call System.IO.FileSystemInfo.get_FullName",

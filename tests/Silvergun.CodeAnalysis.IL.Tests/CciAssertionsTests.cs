@@ -355,6 +355,26 @@ public sealed class CciAssertionsTests
         Assert.Equal((1, 1), (outer.Count, after.Count));
     }
 
+    /// <summary>
+    /// Closed out of order: an outer scope disposed while an inner one it contains is still open counts nothing more,
+    /// although it stays on the inner one's parent chain; the inner one still counts, and so does the process total.
+    /// </summary>
+    [Fact]
+    public void AnOuterScopeDisposedWhileAnInnerOneIsOpen_CountsNothingMore_WhileTheInnerOneStillCounts()
+    {
+        var before = CciAssertions.Total;
+        var outer = CciAssertions.BeginScope();
+        CciDebug.Assert(false, Token());
+        using var inner = CciAssertions.BeginScope();
+
+        outer.Dispose();
+        CciDebug.Assert(false, Token());
+
+        Assert.Equal((1, 1), (outer.Count, inner.Count));
+        Assert.Single(outer.Records);
+        Assert.True(CciAssertions.Total >= before + 2, $"Total went from {before} to {CciAssertions.Total}.");
+    }
+
     private static void Raise(Channel channel, string token)
     {
         switch (channel)

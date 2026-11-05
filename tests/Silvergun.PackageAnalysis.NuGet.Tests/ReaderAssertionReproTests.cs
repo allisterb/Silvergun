@@ -34,10 +34,10 @@ using CciAssertions = Microsoft.Cci.CciAssertions;
 /// and extracted to a temp directory by <see cref="NuGetPackage.Open"/>; nothing of it enters the repository.
 /// </para>
 /// </summary>
-public sealed class ReaderAssertionReproTests
+public sealed class ReaderAssertionReproTests : IClassFixture<ReaderAssertionRepro>
 {
     #region Constructors
-    public ReaderAssertionReproTests() => Runtime.Initialize("Silvergun", "TESTS");
+    public ReaderAssertionReproTests(ReaderAssertionRepro repro) => this.repro = repro;
     #endregion
 
     #region Methods
@@ -45,9 +45,8 @@ public sealed class ReaderAssertionReproTests
     public void OpenAndBuild_CompleteInProcess_AndOnlyTheTwoToolsGraphsCountReaderAssertions()
     {
         AssertContained();
-        using var package = Open();
 
-        var graphs = PackageGraphs.Build(package).ToArray();
+        var graphs = repro.Graphs;
 
         // Measured 2026-11-05: exactly these two folders trip the reader; every other folder of the package is clean.
         Assert.Equal(DegradedFolders, graphs.Where(g => g.Graph is { Coverage.Index.ReaderAssertions: > 0 }).Select(g => g.Folder));
@@ -64,9 +63,8 @@ public sealed class ReaderAssertionReproTests
     public void Reachability_OverEachToolsGraph_GivesEveryClassUnknown_WithTheReaderReason()
     {
         AssertContained();
-        using var package = Open();
 
-        foreach (var graph in PackageGraphs.Build(package).Where(g => DegradedFolders.Contains(g.Folder)))
+        foreach (var graph in repro.Graphs.Where(g => DegradedFolders.Contains(g.Folder)))
         {
             var coverage = graph.Graph!.Coverage.Index;
             var report = Reachability.Analyze(graph.Graph);
@@ -92,13 +90,12 @@ public sealed class ReaderAssertionReproTests
     public void TheCulprit_IsTheOneToolsAssemblyWhoseLoadFailsAnAssertion()
     {
         AssertContained();
-        using var package = Open();
-        var graphs = PackageGraphs.Build(package).Where(g => DegradedFolders.Contains(g.Folder)).ToDictionary(g => g.Folder);
+        var graphs = repro.Graphs.Where(g => DegradedFolders.Contains(g.Folder)).ToDictionary(g => g.Folder);
 
         foreach (var folder in DegradedFolders)
         {
             var counts = new Dictionary<string, int>(StringComparer.Ordinal);
-            foreach (var member in package.Assemblies.Where(a => Path.GetDirectoryName(a.RelativePath)!.Replace('\\', '/') == folder))
+            foreach (var member in repro.Package.Assemblies.Where(a => Path.GetDirectoryName(a.RelativePath)!.Replace('\\', '/') == folder))
             {
                 var created = AssemblyDisassembler.Create(member.FullPath);
                 if (!created.IsSuccess)
@@ -121,11 +118,10 @@ public sealed class ReaderAssertionReproTests
     public void TheRawCciScanner_OverTheCulprit_Completes()
     {
         AssertContained();
-        using var package = Open();
 
         foreach (var folder in DegradedFolders)
         {
-            var culprit = Assert.Single(package.Assemblies, a => a.RelativePath == $"{folder}/{Culprit}");
+            var culprit = Assert.Single(repro.Package.Assemblies, a => a.RelativePath == $"{folder}/{Culprit}");
             var loaded = AssemblyAnalyzer.Load(culprit.FullPath);
             Assert.True(loaded.IsSuccess, loaded.Message);
             using var analyzer = loaded.Value;
@@ -145,13 +141,6 @@ public sealed class ReaderAssertionReproTests
         Assert.True(CciAssertions.Mode == CciAssertionMode.RecordAndContinue,
             $"CciAssertions.Mode is {CciAssertions.Mode}: is {CciAssertions.ModeVariable} set in this environment?");
     }
-
-    private static NuGetPackage Open()
-    {
-        var opened = NuGetPackage.Open(CachedCorpusPackageFactAttribute.PathOf(ReproPackage));
-        Assert.True(opened.IsSuccess, opened.Message);
-        return opened.Value;
-    }
     #endregion
 
     #region Fields
@@ -165,6 +154,47 @@ public sealed class ReaderAssertionReproTests
     public const string Culprit = "Microsoft.OpenApi.dll";
 
     private static readonly string[] DegradedFolders = ["tools/net462", "tools/net462-x86"];
+
+    private readonly ReaderAssertionRepro repro;
+    #endregion
+}
+
+/// <summary>
+/// The repro package opened once and its graphs built once (eagerly, every folder) for <see cref="ReaderAssertionReproTests"/>.
+/// Lazy, so a run in which the gate skips every test never touches the cache, and so each test's containment premise is
+/// checked before the package is first read. Released, with its temp extraction, when the class is done.
+/// </summary>
+public sealed class ReaderAssertionRepro : IDisposable
+{
+    #region Constructors
+    public ReaderAssertionRepro()
+    {
+        state = new(() =>
+        {
+            Runtime.Initialize("Silvergun", "TESTS");
+            var opened = NuGetPackage.Open(CachedCorpusPackageFactAttribute.PathOf(ReaderAssertionReproTests.ReproPackage));
+            Assert.True(opened.IsSuccess, opened.Message);
+            return (opened.Value, PackageGraphs.Build(opened.Value).ToArray());
+        });
+    }
+    #endregion
+
+    #region Properties
+    public NuGetPackage Package => state.Value.Package;
+
+    public IReadOnlyList<PackageGraph> Graphs => state.Value.Graphs;
+    #endregion
+
+    #region Methods
+    public void Dispose()
+    {
+        if (state.IsValueCreated)
+            state.Value.Package.Dispose();
+    }
+    #endregion
+
+    #region Fields
+    private readonly Lazy<(NuGetPackage Package, PackageGraph[] Graphs)> state;
     #endregion
 }
 

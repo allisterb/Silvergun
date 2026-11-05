@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- PDB-reader regression fixture (ADR 0022 Stage 1, review round 1 C1; docs/agent/tasks/cci-assertions-stage1.md).
+       Its portable PDB must hold an AliasAssemblyReference import, which is what the extern alias over the aliased
+       reference below produces; PdbReaderRegressionTests copies dll + pdb and corrupts that AssemblyRef row's flags.
+       Optimize off, so the source-named local in AliasedReader.Read survives and PDB reading is observable (Model's local
+       variable names are the PDB's names only when the PDB was read). Read as metadata, never loaded. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <DebugType>portable</DebugType>
+    <Optimize>false</Optimize>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.IndicatorCapFixture\Silvergun.CodeAnalysis.IL.Tests.IndicatorCapFixture.csproj" Aliases="CapFixture" />
+  </ItemGroup>
+
+</Project>

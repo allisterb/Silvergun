@@ -105,7 +105,9 @@ public sealed class AssemblyDisassembler : Runtime, IDisposable
                 using var reads = Microsoft.Cci.CciAssertions.BeginScope();
                 var host = new Model.Host();
                 PlatformTypes.Resolve(host);
-                loader = new Loader(host);
+                // No PDBs: nothing here uses source locations, and a package's PDB is untrusted input to a second parser
+                // whose assertions the CCI shim cannot reach (ADR 0022 Stage 1 review C1).
+                loader = new Loader(host, readPdbs: false);
                 var assembly = loader.LoadAssembly(fullPath);
                 if (reads.Count > 0)
                     Warn("Loading {0}: {1} CCI assertion(s) failed and were recorded; the model may be degraded. First: {2}", fullPath, reads.Count, reads.Records[0]);
