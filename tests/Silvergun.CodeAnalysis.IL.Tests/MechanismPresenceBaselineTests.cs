@@ -328,6 +328,24 @@ public sealed class MechanismPresenceBaselineTests : IClassFixture<MechanismFixt
         "ProcessExecution Call MechanismFixture.Lambda.TaskRunCase.<>c::<RunsOnThreadPool>b__0_0 -> System.Diagnostics.Process.Start",
         "ProcessExecution Call MechanismFixture.Lambda.TaskRunCase.<>c::<RunsOnThreadPool>b__0_0 -> System.Diagnostics.Process.get_Id",
         "ReflectionInvocation Call MechanismFixture.Opacity.Reflective::InvokesByName -> System.Reflection.MethodBase.Invoke",
+        // Reachability R1 S3's root-class and tier cases (MechanismFixture.Roots, measured 2026-11-05): one sink in each
+        // interesting case, none in a twin; and both [UnmanagedCallersOnly] exports, the twin's included, carry the
+        // scanner's NativeExport finding for the export itself (no call site).
+        "EnvironmentProbe Call MechanismFixture.Roots.Host.EnvAnalyzer::.ctor -> System.Environment.GetEnvironmentVariable",
+        "EnvironmentProbe Call MechanismFixture.Roots.Host.EnvTask::Execute -> System.Environment.GetEnvironmentVariable",
+        "EnvironmentProbe Call MechanismFixture.Roots.Runtime.EnvFinalized::Finalize -> System.Environment.GetEnvironmentVariable",
+        "EnvironmentProbe Call MechanismFixture.Roots.Runtime.Exports::ExportsEnv -> System.Environment.GetEnvironmentVariable",
+        "NativeInterop NativeExport MechanismFixture.Roots.Runtime.Exports::ExportsEnv -> <managed>!ExportsEnv",
+        "NativeInterop NativeExport MechanismFixture.Roots.Runtime.Exports::ExportsSafe -> <managed>!ExportsSafe",
+        "EnvironmentProbe Call MechanismFixture.Roots.Tiers.MadeProbe::Run -> System.Environment.GetEnvironmentVariable",
+        "EnvironmentProbe Call MechanismFixture.Roots.Tiers.UnmadeProbe::Run -> System.Environment.GetEnvironmentVariable",
+        "EnvironmentProbe Call MechanismFixture.Roots.Visibility.EnvGauge::Read -> System.Environment.GetEnvironmentVariable",
+        "EnvironmentProbe Call MechanismFixture.Roots.Visibility.EnvLabel::ToString -> System.Environment.GetEnvironmentVariable",
+        "Network Call MechanismFixture.Roots.Visibility.NetResolver::MechanismFixture.Roots.Visibility.IResolver.Resolve -> System.Net.Dns.GetHostAddresses",
+        "EnvironmentProbe Call MechanismFixture.Roots.Visibility.Unreached::ReadsEnv -> System.Environment.GetEnvironmentVariable",
+        // S3's parity call kinds (MechanismFixture.Parity): the fixture's first Construct and MethodPointerLoad findings.
+        "FileSystem Construct MechanismFixture.Parity.Kinds::ConstructsFileInfo -> System.IO.FileInfo..ctor",
+        "EnvironmentProbe MethodPointerLoad MechanismFixture.Parity.Kinds::LoadsEnvPointer -> System.Environment.GetEnvironmentVariable",
     ];
 
     private readonly MechanismFixtureFixture fixture;

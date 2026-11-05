@@ -90,6 +90,63 @@ public sealed class ReachabilitySyntheticTests
         Assert.Empty(report.Reaches);
     }
 
+    // An own InternalCall (S3: a body-less extern that is no P/Invoke) is an Unseen sink, for its caller and for itself as
+    // a root. It has no opacity record, so EndsInOpacity is null, and every class reaching it is Unknown.
+    [Fact]
+    public void Sink_AnOwnInternalCall_IsAnUnseenSink_WithNoOpacityKind_AndItsCallersClassIsUnknown()
+    {
+        var report = new Parts()
+            .Own("App.A", RootClass.PublicApi)
+            .Own("App.Icall", RootClass.Hidden, internalCall: true)
+            .Edge("App.A", "App.Icall", MethodEdgeKind.Call, 5)
+            .Analyze();
+
+        Assert.Equal([(RootClass.PublicApi, (Capability?)null), (RootClass.Hidden, (Capability?)null)], report.Reaches.Select(r => (r.Class, r.Capability)));
+        AssertPath(Assert.Single(report.Reaches[0].Examples), "App.A", ReachEvidence.Bound, null, OwnHop("App.A"), OwnHop("App.Icall", MethodEdgeKind.Call, 5));
+        AssertPath(Assert.Single(report.Reaches[1].Examples), "App.Icall", ReachEvidence.Bound, null, OwnHop("App.Icall"));
+        Assert.All(new[] { RootClass.PublicApi, RootClass.Hidden }, c =>
+        {
+            var status = Status(report, c);
+            Assert.Equal(RootClassVerdict.Unknown, status.Verdict);
+            Assert.Equal("1 root(s) reach code the graph cannot see", Assert.Single(status.Reasons));
+        });
+        Assert.All(report.Profiles, p => Assert.Equal((true, 0), (p.Unseen, p.Capabilities.Count)));
+    }
+
+    // Twin: the same node without the flag is no sink, and the class stays None.
+    [Fact]
+    public void Sink_TheSameOwnNodeWithoutInternalCall_IsNoSink()
+    {
+        var report = new Parts()
+            .Own("App.A", RootClass.PublicApi)
+            .Own("App.Icall", RootClass.Hidden, internalCall: true)
+            .Edge("App.A", "App.Icall", MethodEdgeKind.Call, 5)
+            .Copy(m => m with { InternalCall = false })
+            .Analyze();
+
+        Assert.Empty(report.Reaches);
+        Assert.Equal(RootClassVerdict.None, Status(report, RootClass.PublicApi).Verdict);
+    }
+
+    // The flag is read from own facts only: an External node is classified by the map, never by facts carrying it.
+    [Fact]
+    public void Sink_InternalCallFactsOnAnExternalNode_AreIgnored()
+    {
+        var parts = new Parts().Own("App.A", RootClass.PublicApi).Ext(Safe).Edge("App.A", Safe);
+        parts.Methods.Add(new OwnMethodFacts(Safe, Assembly, DefaultType, RootClass.None, false, true, InternalCall: true));
+
+        Assert.Empty(parts.Analyze().Reaches);
+    }
+
+    // An InternalCall that is also (inconsistently) a NativeImport is both sinks: NativeInterop and Unseen.
+    [Fact]
+    public void Sink_AnOwnNodeBothNativeImportAndInternalCall_IsBothSinks()
+    {
+        var report = new Parts().Own("App.Both", RootClass.PublicApi, native: true, internalCall: true).Analyze();
+
+        Assert.Equal([(Capability?)Capability.NativeInterop, null], report.Reaches.Select(r => r.Capability));
+    }
+
     // A package naming its own method like a platform capability is walked, never classified: with or without facts,
     // with or without a body, and even when the map's capability key is its classification key.
     [Theory]
@@ -500,6 +557,34 @@ public sealed class ReachabilitySyntheticTests
     public void PathTruncation_Premise_MaxPathHopsIs64()
     {
         Assert.Equal(64, Reachability.MaxPathHops);
+    }
+
+    // MaxPathHops - 1 (63) hops: the head holds the first 62 and the tail the one remaining, the sink. Kept whole, not
+    // truncated, and in order across the head/tail seam (S2 status, carried into S3).
+    [Fact]
+    public void PathTruncation_APathOfMaxPathHopsMinusOne_KeepsAOneHopTail_AndIsWhole()
+    {
+        var (parts, expected) = Chain(63, Env);
+
+        var path = Example(parts.Analyze(), "App.C0000");
+
+        Assert.Equal(63, expected.Length);
+        Assert.Equal((63, 63, false), (path.Hops.Count, path.Length, path.Truncated));
+        Assert.Equal(expected, path.Hops);
+        Assert.Equal(new ReachHop(Env, null, MethodEdgeKind.Call, 61), path.Hops[^1]);
+        Assert.Equal(new ReachHop("App.C0061", Assembly, MethodEdgeKind.Call, 60), path.Hops[^2]);
+    }
+
+    // 62 hops: the head alone holds them all (no tail).
+    [Fact]
+    public void PathTruncation_APathOfMaxPathHopsMinusTwo_FitsTheHeadAlone()
+    {
+        var (parts, expected) = Chain(62, Env);
+
+        var path = Example(parts.Analyze(), "App.C0000");
+
+        Assert.Equal((62, 62, false), (path.Hops.Count, path.Length, path.Truncated));
+        Assert.Equal(expected, path.Hops);
     }
 
     // Exactly MaxPathHops hops fit whole.
@@ -1188,10 +1273,10 @@ public sealed class ReachabilitySyntheticTests
         public List<RootGap> Gaps { get; } = [];
         public GraphCoverage Coverage { get; set; } = complete;
 
-        public Parts Own(string id, RootClass roots, string type = DefaultType, bool native = false, bool isStatic = false, string? key = null)
+        public Parts Own(string id, RootClass roots, string type = DefaultType, bool native = false, bool isStatic = false, string? key = null, bool internalCall = false)
         {
-            Node(id, native ? MethodNodeKind.OwnBodyless : MethodNodeKind.OwnWithBody, key);
-            Methods.Add(new OwnMethodFacts(id, Assembly, type, roots, native, isStatic));
+            Node(id, native || internalCall ? MethodNodeKind.OwnBodyless : MethodNodeKind.OwnWithBody, key);
+            Methods.Add(new OwnMethodFacts(id, Assembly, type, roots, native, isStatic, internalCall));
             return this;
         }
 
@@ -1300,6 +1385,7 @@ public sealed class ReachabilitySyntheticTests
             var verdict = node.Kind == MethodNodeKind.External ? map.Classify(node.ClassificationKey) : CapabilityVerdict.None;
             return sink == Sinks - 1
                 ? unseenSites.Contains(id) || verdict.Class == CapabilityClass.Unanalyzed
+                    || (node.Kind != MethodNodeKind.External && facts.TryGetValue(id, out var own) && own.InternalCall)
                 : (verdict.Class == CapabilityClass.Capability && verdict.Capability == (Capability)sink)
                     || ((Capability)sink == Capability.NativeInterop && node.Kind != MethodNodeKind.External && facts.TryGetValue(id, out var f) && f.NativeImport);
         }

@@ -28,6 +28,12 @@ public static class MechanismFixtureAssemblies
     /// state-machine shapes, namespace root <c>MechanismFixture.Debug</c>.
     /// </summary>
     public static string DebugFixture => Locate(DebugFixtureName);
+
+    /// <summary>
+    /// Full path of <c>Silvergun.CodeAnalysis.IL.Tests.MechanismFixture.HostStubs.dll</c>: the MSBuild and Roslyn
+    /// host-contract stand-ins (reachability R1, S3). Copied beside the fixture, and never indexed.
+    /// </summary>
+    public static string HostStubs => Locate(HostStubsName);
     #endregion
 
     #region Methods
@@ -46,5 +52,6 @@ public static class MechanismFixtureAssemblies
     public const string FixtureName = "Silvergun.CodeAnalysis.IL.Tests.MechanismFixture";
     public const string DependencyName = "Silvergun.CodeAnalysis.IL.Tests.MechanismFixture.Dependency";
     public const string DebugFixtureName = "Silvergun.CodeAnalysis.IL.Tests.MechanismFixture.Debug";
+    public const string HostStubsName = "Silvergun.CodeAnalysis.IL.Tests.MechanismFixture.HostStubs";
     #endregion
 }

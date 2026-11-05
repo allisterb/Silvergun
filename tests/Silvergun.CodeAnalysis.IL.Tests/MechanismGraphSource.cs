@@ -24,17 +24,18 @@ public sealed record MechanismGraph(
 /// <see cref="AssemblyDisassembler"/>. It is whatever <c>src/</c> builds today: phase A1 records static targets only,
 /// and A2 adds its CHA, state-machine, type-initializer and <c>ldtoken</c> edges (and the module opacity) inside
 /// <see cref="MethodGraph.Build"/> itself — so bumping <see cref="MechanismGroundTruth.CurrentPhase"/> past what has
-/// landed (today the whole of <see cref="Phase.A2"/>) turns the later rows red, never green. <see cref="BuildStatic"/>
+/// landed (today <see cref="Phase.Reachability"/>, the last phase) turns the later rows red, never green. <see cref="BuildStatic"/>
 /// is the same graph with every <see cref="MethodEdgeKind.Dispatch"/> edge removed, <see cref="BuildWithoutStateMachines"/>
 /// with every <see cref="MethodEdgeKind.StateMachine"/> edge removed, <see cref="BuildWithout"/> with the edges of any
 /// given kinds removed, and <see cref="BuildWithoutDebugFixture"/> the full graph over the Release fixture and its
 /// Dependency alone (what the table was checked against before S2).
 /// </para>
 /// <para>
-/// <see cref="MechanismGraph.CapabilityOf"/> classifies <see cref="MethodNodeKind.External"/> nodes only, with
-/// <c>CapabilityMap.Default.Classify(node.ClassificationKey)</c>: an own node is never a capability by itself. The
-/// <see cref="Phase.Reachability"/> rule for own bodyless externs (P/Invoke) has no test-side counterpart yet, so
-/// asking for that phase throws rather than evaluating its rows under a classifier that cannot pass them.
+/// <see cref="MechanismGraph.CapabilityOf"/> classifies <see cref="MethodNodeKind.External"/> nodes with
+/// <c>CapabilityMap.Default.Classify(node.ClassificationKey)</c>. Before <see cref="Phase.Reachability"/> an own node is
+/// never a capability. From it, an own node whose <see cref="MethodGraph.Facts"/> say <see cref="OwnMethodFacts.NativeImport"/>
+/// (a P/Invoke) is <see cref="Capability.NativeInterop"/> too: the sink rule of ADR 0037 decision 2, as
+/// <see cref="Reachability"/> applies it. No other own node ever is.
 /// </para>
 /// </summary>
 public static class MechanismGraphSource
@@ -45,11 +46,8 @@ public static class MechanismGraphSource
     #endregion
 
     #region Methods
-    public static MechanismGraph Build(Phase phase) =>
-        phase < Phase.Reachability
-            ? graph.Value
-            : throw new NotSupportedException(
-                $"Phase {phase} needs the bodyless-extern classification rule (reachability ADR), which MechanismGraphSource does not model yet.");
+    /// <summary>The matcher's view of the fixture graph at <paramref name="phase"/>; the classifier is the phase's.</summary>
+    public static MechanismGraph Build(Phase phase) => phase < Phase.Reachability ? graph.Value : reachability.Value;
 
     /// <summary>The fixture graph without its <see cref="MethodEdgeKind.Dispatch"/> edges.</summary>
     public static MechanismGraph BuildStatic() => BuildWithout(MethodEdgeKind.Dispatch);
@@ -69,9 +67,10 @@ public static class MechanismGraphSource
 
     /// <summary>
     /// The matcher's view of a real graph: every node a key, successors distinct and in edge order — only the edges
-    /// <paramref name="keep"/> accepts, when given.
+    /// <paramref name="keep"/> accepts, when given. With <paramref name="nativeImports"/>, an own P/Invoke node is
+    /// <see cref="Capability.NativeInterop"/> (the <see cref="Phase.Reachability"/> classifier).
     /// </summary>
-    public static MechanismGraph From(MethodGraph graph, Func<MethodEdge, bool>? keep = null)
+    public static MechanismGraph From(MethodGraph graph, Func<MethodEdge, bool>? keep = null, bool nativeImports = false)
     {
         var adjacency = graph.Nodes.ToDictionary(
             n => n.NodeId,
@@ -79,11 +78,14 @@ public static class MechanismGraphSource
             StringComparer.Ordinal);
         var external = graph.Nodes.Where(n => n.Kind == MethodNodeKind.External)
             .ToDictionary(n => n.NodeId, n => n.ClassificationKey, StringComparer.Ordinal);
+        var native = nativeImports
+            ? graph.Facts.Methods.Where(f => f.NativeImport && graph.Node(f.NodeId) is { Kind: not MethodNodeKind.External }).Select(f => f.NodeId).ToHashSet(StringComparer.Ordinal)
+            : [];
 
         Capability? CapabilityOf(string nodeId) =>
             external.TryGetValue(nodeId, out var key) && CapabilityMap.Default.Classify(key) is { Class: CapabilityClass.Capability } verdict
                 ? verdict.Capability
-                : null;
+                : native.Contains(nodeId) ? Capability.NativeInterop : null;
 
         return new MechanismGraph(adjacency, CapabilityOf, [.. graph.Opacities.Select(o => (o.Site, o.Kind))]);
     }
@@ -106,6 +108,7 @@ public static class MechanismGraphSource
     #region Fields
     private static readonly Lazy<MethodGraph> built = new(BuildFixtureGraph);
     private static readonly Lazy<MechanismGraph> graph = new(() => From(built.Value));
+    private static readonly Lazy<MechanismGraph> reachability = new(() => From(built.Value, nativeImports: true));
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Lazy<MechanismGraph>> without = new(StringComparer.Ordinal);
     private static readonly Lazy<MechanismGraph> withoutDebugFixture = new(BuildReleaseGraph);
     #endregion

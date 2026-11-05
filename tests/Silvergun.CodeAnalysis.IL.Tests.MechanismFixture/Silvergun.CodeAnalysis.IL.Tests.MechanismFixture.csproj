@@ -31,6 +31,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.MechanismFixture.Dependency\Silvergun.CodeAnalysis.IL.Tests.MechanismFixture.Dependency.csproj" />
+    <!-- The MSBuild/Roslyn host-contract stand-ins for the Roots.Host cases (reachability R1, S3). NEVER indexed, so the
+         contracts are external supertypes, as in a real package. -->
+    <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.MechanismFixture.HostStubs\Silvergun.CodeAnalysis.IL.Tests.MechanismFixture.HostStubs.csproj" />
   </ItemGroup>
 
 </Project>

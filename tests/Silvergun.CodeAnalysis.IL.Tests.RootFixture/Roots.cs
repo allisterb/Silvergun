@@ -322,6 +322,44 @@ namespace RootFixture.Native
 
         internal static uint ManagedTickCount() => 0;
     }
+
+    // A delegate: its .ctor, Invoke, BeginInvoke and EndInvoke are runtime-implemented, so external with no body, yet no
+    // internalcall (reachability R1, S3): they run what the delegate was bound to.
+    internal delegate uint TickSource();
+}
+
+// COM interop (S3 review W1): a [ComImport] class, whose implicit constructor C# emits `runtime managed internalcall`, and
+// a [ComImport] interface. Both members are body-less, and calling either goes to a COM object: a NativeInterop sink,
+// never an internalcall. The twin is an ordinary own interface of the same shape.
+namespace RootFixture.Com
+{
+    using System.Runtime.InteropServices;
+
+    [ComImport, Guid("5B0E3C2A-8F57-4C0E-9C11-7D2A41E3B6F1")]
+    public class CoThing
+    {
+    }
+
+    [ComImport, Guid("0F6E9B47-3A1D-4E52-A8C3-2B9D7E4F1A60"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface ICoThing
+    {
+        void Run();
+    }
+
+    public interface IPlainThing
+    {
+        void Run();
+    }
+
+    public static class ComCallers
+    {
+        public static object MakesCoThing() => new CoThing();
+
+        public static void CallsCoThing(ICoThing thing) => thing.Run();
+
+        // Twin: the same call through an ordinary own interface (no implementor).
+        public static void CallsPlainThing(IPlainThing thing) => thing.Run();
+    }
 }
 
 // Live (the RTA tier): a type, or an own subtype, that is concrete and instantiated, a value type, or constructible.

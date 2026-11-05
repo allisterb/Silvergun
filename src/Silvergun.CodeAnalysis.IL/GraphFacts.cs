@@ -40,9 +40,12 @@ public enum RootClass
 
 /// <summary>
 /// What reachability needs to know about one own graph node. <paramref name="Assembly"/> is the ordinal-least assembly
-/// defining it; <paramref name="NativeImport"/> marks a P/Invoke (a <c>NativeInterop</c> sink).
+/// defining it. <paramref name="NativeImport"/> marks a P/Invoke and <paramref name="ComImport"/> a body-less member of a
+/// <c>[ComImport]</c> type (a COM call), both <c>NativeInterop</c> sinks. <paramref name="InternalCall"/> marks any other
+/// concrete body-less extern but a delegate's runtime methods (an <c>internalcall</c> a Mono or Unity host may bind to
+/// native code), an unseen sink.
 /// </summary>
-public sealed record OwnMethodFacts(string NodeId, string Assembly, string DeclaringTypeId, RootClass Roots, bool NativeImport, bool IsStatic);
+public sealed record OwnMethodFacts(string NodeId, string Assembly, string DeclaringTypeId, RootClass Roots, bool NativeImport, bool IsStatic, bool InternalCall = false, bool ComImport = false);
 
 /// <summary>
 /// One own type. <paramref name="Live"/>: it, or an own subtype, is concrete and either instantiated by the package
@@ -104,6 +107,8 @@ public sealed record GraphFacts(IReadOnlyList<OwnMethodFacts> Methods, IReadOnly
     #endregion
 
     #region Fields
+    private static readonly HashSet<string> delegateRuntimeMethods = new(StringComparer.Ordinal) { ".ctor", "Invoke", "BeginInvoke", "EndInvoke" };
+
     private const RootClass AllClasses =
         RootClass.LoadTime | RootClass.HostContract | RootClass.RuntimeInvoked | RootClass.PublicApi | RootClass.PublicContract | RootClass.Hidden;
     #endregion
@@ -135,7 +140,9 @@ public sealed record GraphFacts(IReadOnlyList<OwnMethodFacts> Methods, IReadOnly
                         mask |= RootClass.PublicContract;
                     return new OwnMethodFacts(g.Key, first.Assembly, first.DeclaringTypeId, mask == RootClass.None ? RootClass.Hidden : mask,
                         g.Any(c => Guard(() => c.Method.Definition.IsExternal && c.Method.Definition.IsPlatformInvoke, false)),
-                        g.Any(c => Guard(() => c.Method.Definition.IsStatic, false)));
+                        g.Any(c => Guard(() => c.Method.Definition.IsStatic, false)),
+                        g.Any(c => Guard(() => IsInternalCall(c.Method.Definition), true)),
+                        g.Any(c => Guard(() => IsComCall(c.Method.Definition), false)));
                 })
                 .OrderBy(f => f.NodeId, StringComparer.Ordinal)
                 .ToArray();
@@ -243,6 +250,21 @@ public sealed record GraphFacts(IReadOnlyList<OwnMethodFacts> Methods, IReadOnly
 
         private static IEnumerable<string> Attributes(MethodDefinition method) =>
             method.Attributes.Select(a => a.Type is IBasicType type ? CanonicalName.ClassificationKey(ModelNames.Of(type)) : null).OfType<string>();
+
+        // External but no P/Invoke or COM call: internalcall, runtime-implemented, or a concrete method with no IL. CCI's
+        // IsExternal is also true of every abstract and interface method (RVA 0), which has no body to run. A delegate's
+        // runtime methods run what the delegate was bound to, which the graph already follows from the ldftn; any other
+        // member of a delegate type, or one of those names flagged internalcall or not runtime-implemented, is not exempt.
+        private static bool IsInternalCall(MethodDefinition method) =>
+            method.IsExternal && !method.IsAbstract && !method.IsPlatformInvoke && !IsComCall(method) && !IsDelegateRuntimeMethod(method);
+
+        // A body-less member of a [ComImport] class or interface: the runtime sends the call to a COM object.
+        private static bool IsComCall(MethodDefinition method) =>
+            method.IsExternal && method.ContainingType is ClassDefinition { IsComImport: true } or InterfaceDefinition { IsComImport: true };
+
+        private static bool IsDelegateRuntimeMethod(MethodDefinition method) =>
+            method is { IsStatic: false, IsRuntimeImplemented: true, IsRuntimeInternal: false, ContainingType: ClassDefinition { IsDelegate: true } }
+            && delegateRuntimeMethods.Contains(method.Name);
 
         private static bool IsTypeInitializer(MethodDefinition method) =>
             method.IsStatic && method.Name == ".cctor" && method.Parameters.Count == 0;

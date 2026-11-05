@@ -498,6 +498,168 @@ public sealed class RootClassTests : IClassFixture<RootFixtureModel>
     }
 
     // ---------------------------------------------------------------------------------------------------
+    // InternalCall (S3): a body-less extern that is no P/Invoke, outside a delegate
+    // ---------------------------------------------------------------------------------------------------
+
+    // [MethodImpl(MethodImplOptions.InternalCall)] extern: external, no P/Invoke, so an internalcall a Mono or Unity host
+    // may bind to native code.
+    [Theory]
+    [InlineData("RootFixture.Native.NativeMethods.InternalTickCount()")]
+    [InlineData("RootFixture.Flags.Externs.InternalCall()")]
+    public void InternalCall_AnInternalCallExtern_IsSet_AndIsNoNativeImport(string method)
+    {
+        var definition = fixture.Method(method).Definition;
+        Assert.True(definition.IsExternal && !definition.IsPlatformInvoke);   // the premise
+
+        Assert.Equal((true, false), (Facts(method).InternalCall, Facts(method).NativeImport));
+    }
+
+    // A [DllImport] is external too, but it is a NativeImport, never an InternalCall.
+    [Theory]
+    [InlineData("RootFixture.Native.NativeMethods.GetTickCount()")]
+    [InlineData("RootFixture.Flags.Externs.GetTickCount()")]
+    public void InternalCall_APInvoke_IsNotSet_ItIsANativeImport(string method)
+    {
+        Assert.True(fixture.Method(method).Definition.IsExternal);   // the premise
+
+        Assert.Equal((false, true), (Facts(method).InternalCall, Facts(method).NativeImport));
+    }
+
+    // A delegate's .ctor, Invoke, BeginInvoke and EndInvoke are runtime-implemented: external, no body and no P/Invoke,
+    // exactly like an internalcall in the flags, but they run what the delegate was bound to, which the graph follows.
+    [Fact]
+    public void InternalCall_ADelegatesRuntimeImplementedMembers_AreNotSet()
+    {
+        var members = fixture.Graph.Facts.Methods.Where(f => f.DeclaringTypeId == $"{Native}.TickSource").ToArray();
+
+        Assert.Equal([".ctor", "BeginInvoke", "EndInvoke", "Invoke"], members.Select(f => fixture.Method(f.NodeId).Definition.Name).Order(StringComparer.Ordinal));
+        Assert.All(members, f =>
+        {
+            var definition = fixture.Method(f.NodeId).Definition;
+            Assert.True(definition.IsExternal && !definition.IsPlatformInvoke, $"{f.NodeId}: the premise");
+            Assert.False(f.InternalCall, f.NodeId);
+            Assert.False(f.NativeImport, f.NodeId);
+        });
+    }
+
+    // The fork's MethodImpl flags (review round 2): a C# delegate's four members are runtime-implemented and not
+    // runtime-internal; an internalcall extern is runtime-internal; a bodied method is neither.
+    [Theory]
+    [InlineData(".ctor", true, false)]
+    [InlineData("Invoke", true, false)]
+    [InlineData("BeginInvoke", true, false)]
+    [InlineData("EndInvoke", true, false)]
+    public void MethodImplFlags_ACSharpDelegatesMembers_AreRuntimeImplemented_NotRuntimeInternal(string name, bool runtimeImplemented, bool runtimeInternal)
+    {
+        var member = Assert.Single(fixture.Graph.Facts.Methods, f => f.DeclaringTypeId == $"{Native}.TickSource" && fixture.Method(f.NodeId).Definition.Name == name);
+        var definition = fixture.Method(member.NodeId).Definition;
+
+        Assert.Equal((runtimeImplemented, runtimeInternal), (definition.IsRuntimeImplemented, definition.IsRuntimeInternal));
+    }
+
+    [Theory]
+    [InlineData("RootFixture.Native.NativeMethods.InternalTickCount()", false, true)]
+    [InlineData("RootFixture.Flags.Externs.InternalCall()", false, true)]
+    [InlineData("RootFixture.Native.NativeMethods.ManagedTickCount()", false, false)]
+    [InlineData("RootFixture.Api.OpenType.PublicMethod()", false, false)]
+    public void MethodImplFlags_AnInternalCallIsRuntimeInternal_ABodiedMethodIsNeither(string method, bool runtimeImplemented, bool runtimeInternal)
+    {
+        var definition = fixture.Method(method).Definition;
+
+        Assert.Equal((runtimeImplemented, runtimeInternal), (definition.IsRuntimeImplemented, definition.IsRuntimeInternal));
+    }
+
+    // Methods with a body, managed or not reachable from native code, are not internalcalls.
+    [Theory]
+    [InlineData("RootFixture.Native.NativeMethods.ManagedTickCount()")]
+    [InlineData("RootFixture.Flags.Externs.Managed()")]
+    [InlineData("RootFixture.Api.OpenType.PublicMethod()")]
+    public void InternalCall_ABodiedMethod_IsNotSet(string method)
+    {
+        Assert.True(fixture.Method(method).Definition.HasBody);   // the premise
+
+        Assert.False(Facts(method).InternalCall);
+    }
+
+    // An abstract or interface method has no body either, but it is no extern: what it runs is an override, which CHA's
+    // Dispatch edges reach. Marking it unseen would make every call through an own interface "code we cannot see".
+    [Theory]
+    [InlineData("RootFixture.Live.AbstractBase.Run()")]
+    [InlineData("RootFixture.Flags.AbstractShape.Draw()")]
+    [InlineData("RootFixture.Api.IApi.Run()")]
+    [InlineData("RootFixture.Contract.IWidget.Spin()")]
+    public void InternalCall_AnAbstractOrInterfaceMethod_IsNotSet(string method)
+    {
+        Assert.False(fixture.Method(method).Definition.HasBody);   // the premise
+
+        Assert.False(Facts(method).InternalCall, $"{method}: an abstract method is no internalcall");
+    }
+
+    // Over the whole fixture, exactly its two internalcalls.
+    [Fact]
+    public void InternalCall_IsSetOnExactlyTheFixturesTwoInternalCalls()
+    {
+        Assert.Equal(
+            ["RootFixture.Flags.Externs.InternalCall()", "RootFixture.Native.NativeMethods.InternalTickCount()"],
+            fixture.Graph.Facts.Methods.Where(f => f.InternalCall).Select(f => f.NodeId));
+    }
+
+    // ---------------------------------------------------------------------------------------------------
+    // ComImport (S3 review W1): a body-less member of a [ComImport] class or interface is a COM call
+    // ---------------------------------------------------------------------------------------------------
+
+    // The premise: the fork records tdImport on both kinds of type, and only on [ComImport] ones.
+    [Theory]
+    [InlineData("RootFixture.Com.CoThing", true)]
+    [InlineData("RootFixture.Com.ICoThing", true)]
+    [InlineData("RootFixture.Com.IPlainThing", false)]
+    [InlineData("RootFixture.Api.OpenType", false)]
+    [InlineData("RootFixture.Api.IApi", false)]
+    public void ComImport_Premise_TheModelTypesCarryIsComImport(string type, bool expected)
+    {
+        var isComImport = fixture.Type(type) switch
+        {
+            global::Model.Types.ClassDefinition c => c.IsComImport,
+            global::Model.Types.InterfaceDefinition i => i.IsComImport,
+            var other => throw new InvalidOperationException($"{type} is a {other.GetType().Name}"),
+        };
+
+        Assert.Equal(expected, isComImport);
+    }
+
+    // C# emits a [ComImport] class's implicit constructor `runtime managed internalcall`, and an interface method is
+    // abstract: both external with no P/Invoke. Both are COM calls, never internalcalls.
+    [Theory]
+    [InlineData("RootFixture.Com.CoThing..ctor()", false)]
+    [InlineData("RootFixture.Com.ICoThing.Run()", true)]
+    public void ComImport_ABodylessMemberOfAComImportType_IsSet_AndIsNoInternalCall(string method, bool isAbstract)
+    {
+        var definition = fixture.Method(method).Definition;
+        Assert.True(definition.IsExternal && !definition.IsPlatformInvoke && definition.IsAbstract == isAbstract);   // the premise
+
+        Assert.Equal((true, false, false), (Facts(method).ComImport, Facts(method).InternalCall, Facts(method).NativeImport));
+    }
+
+    // Twin: the same shape on an ordinary own interface, and the callers themselves.
+    [Theory]
+    [InlineData("RootFixture.Com.IPlainThing.Run()")]
+    [InlineData("RootFixture.Com.ComCallers.MakesCoThing()")]
+    [InlineData("RootFixture.Com.ComCallers.CallsCoThing(RootFixture.Com.ICoThing)")]
+    public void ComImport_AMemberOfAnOrdinaryType_IsNotSet(string method)
+    {
+        Assert.Equal((false, false), (Facts(method).ComImport, Facts(method).InternalCall));
+    }
+
+    // Over the whole fixture, exactly the two COM members.
+    [Fact]
+    public void ComImport_IsSetOnExactlyTheFixturesTwoComMembers()
+    {
+        Assert.Equal(
+            ["RootFixture.Com.CoThing..ctor()", "RootFixture.Com.ICoThing.Run()"],
+            fixture.Graph.Facts.Methods.Where(f => f.ComImport).Select(f => f.NodeId));
+    }
+
+    // ---------------------------------------------------------------------------------------------------
     // Live (the RTA tier)
     // ---------------------------------------------------------------------------------------------------
 
@@ -565,6 +727,7 @@ public sealed class RootClassTests : IClassFixture<RootFixtureModel>
     private const string Contract = "RootFixture.Contract";
     private const string Slots = "RootFixture.Slots";
     private const string Statics = "RootFixture.Statics";
+    private const string Native = "RootFixture.Native";
     private const string EdgesFailure = "the edges went away (synthetic)";
 
     // The built-in map with two fixture attributes added, one per class an attribute may confer.

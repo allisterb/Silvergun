@@ -199,11 +199,94 @@ public sealed class ReachabilityGraphTests : IClassFixture<RootFixtureModel>
         });
     }
 
-    // Twin: the internalcall beside it is external but no P/Invoke, so no sink.
+    // The internalcall beside it is external but no P/Invoke: native code a Mono or Unity host may bind, which the graph
+    // cannot see. So it is an Unseen sink (S3; it read None in S2, a design change recorded in the spec): a one-hop
+    // Unseen reach with no opacity kind (there is no opacity record), no capability, and its classes Unknown for it.
     [Fact]
-    public void RootFixture_AnInternalCall_ReachesNothing()
+    public void RootFixture_AnInternalCall_ReachesUnseen_AndItsClassesAreUnknown()
     {
-        Assert.Empty(Reachability.Analyze(Alone(fixture.Graph, "RootFixture.Native.NativeMethods.InternalTickCount()")).Reaches);
+        const string internalCall = "RootFixture.Native.NativeMethods.InternalTickCount()";
+        var facts = Facts(fixture.Graph, internalCall);
+        var report = Reachability.Analyze(Alone(fixture.Graph, internalCall));
+
+        Assert.True(facts.InternalCall && !facts.NativeImport);   // the premise
+        Assert.Equal(SingleClasses(facts.Roots), report.Reaches.Select(r => r.Class));
+        Assert.All(report.Reaches, r =>
+        {
+            Assert.Equal(((Capability?)null, 1, 1, 1), (r.Capability, r.Roots, r.Bound, r.Instantiated));
+            var path = Assert.Single(r.Examples);
+            Assert.Equal((ReachEvidence.Bound, 1, false, (OpacityKind?)null), (path.Evidence, path.Length, path.Truncated, path.EndsInOpacity));
+            Assert.Equal([new ReachHop(internalCall, RootFixtureAssemblies.FixtureName, null, 0)], path.Hops);
+        });
+        Assert.All(SingleClasses(facts.Roots), c =>
+        {
+            var status = Status(report, c);
+            Assert.Equal(RootClassVerdict.Unknown, status.Verdict);
+            Assert.Contains("1 root(s) reach code the graph cannot see", status.Reasons);
+        });
+    }
+
+    // Twin: the managed method of the same shape reaches nothing.
+    [Fact]
+    public void RootFixture_TheManagedTwinOfTheInternalCall_ReachesNothing()
+    {
+        Assert.Empty(Reachability.Analyze(Alone(fixture.Graph, "RootFixture.Native.NativeMethods.ManagedTickCount()")).Reaches);
+    }
+
+    // S3 review W1: a call to a COM member (newobj of a [ComImport] class, a call through a [ComImport] interface) reaches
+    // NativeInterop at that member, Bound, one hop from the caller; never Unseen, so it makes no class Unknown.
+    [Theory]
+    [InlineData("RootFixture.Com.ComCallers.MakesCoThing()", "RootFixture.Com.CoThing..ctor()", MethodEdgeKind.NewObj)]
+    [InlineData("RootFixture.Com.ComCallers.CallsCoThing(RootFixture.Com.ICoThing)", "RootFixture.Com.ICoThing.Run()", MethodEdgeKind.CallVirt)]
+    public void RootFixture_ACallToAComMember_ReachesNativeInteropAtIt_AndNotUnseen(string caller, string com, MethodEdgeKind kind)
+    {
+        var report = Reachability.Analyze(Alone(fixture.Graph, caller));
+
+        Assert.Equal(RootClass.PublicApi, Facts(fixture.Graph, caller).Roots);   // the premise
+        var row = Assert.Single(report.Reaches);
+        Assert.Equal((RootClass.PublicApi, (Capability?)Capability.NativeInterop, 1, 1, 1), (row.Class, row.Capability, row.Roots, row.Bound, row.Instantiated));
+        var call = Assert.Single(fixture.Graph.Edges, e => e.From == caller && e.To == com && e.Kind == kind);
+        var path = Assert.Single(row.Examples);
+        Assert.Equal((ReachEvidence.Bound, 2, false, (OpacityKind?)null), (path.Evidence, path.Length, path.Truncated, path.EndsInOpacity));
+        Assert.Equal(
+            [new ReachHop(caller, RootFixtureAssemblies.FixtureName, null, 0), new ReachHop(com, RootFixtureAssemblies.FixtureName, kind, call.Offset)],
+            path.Hops);
+        var status = Status(report, RootClass.PublicApi);
+        Assert.Equal((RootClassVerdict.Reaches, 0), (status.Verdict, status.Reasons.Count));
+    }
+
+    // Twin: the same call through an ordinary own interface (bodyless, no implementor) reaches nothing, not even Unseen.
+    [Fact]
+    public void RootFixture_TheSameCallThroughAnOrdinaryInterface_ReachesNothing()
+    {
+        const string caller = "RootFixture.Com.ComCallers.CallsPlainThing(RootFixture.Com.IPlainThing)";
+        var report = Reachability.Analyze(Alone(fixture.Graph, caller));
+
+        Assert.Contains(fixture.Graph.Edges, e => e.From == caller && e.To == "RootFixture.Com.IPlainThing.Run()");   // the premise
+        Assert.Empty(report.Reaches);
+        Assert.Equal(RootClassVerdict.None, Status(report, RootClass.PublicApi).Verdict);
+    }
+
+    // A delegate's runtime-implemented members are no sinks: as roots they reach nothing.
+    [Fact]
+    public void RootFixture_ADelegatesMembers_ReachNothing()
+    {
+        var members = fixture.Graph.Facts.Methods.Where(f => f.DeclaringTypeId == "RootFixture.Native.TickSource").Select(f => f.NodeId).ToArray();
+
+        Assert.Equal(4, members.Length);
+        Assert.All(members, m => Assert.Empty(Reachability.Analyze(Alone(fixture.Graph, m)).Reaches));
+    }
+
+    // A call through an own interface reaches the abstract slot (bodyless, no internalcall) and, by Dispatch, its
+    // benign implementation: nothing, and no Unseen either.
+    [Fact]
+    public void Mechanism_ACallThroughAnOwnInterfaceToABenignImplementor_ReachesNothing_NotEvenUnseen()
+    {
+        var graph = MechanismGraphSource.Graph;
+        const string caller = "MechanismFixture.Interface.Dispatch.CallsThroughSafeInterface()";
+
+        Assert.Contains(graph.Edges, e => e.From == caller && e.To == "MechanismFixture.Interface.ISafeProbe.Run()");   // the premise
+        Assert.Empty(Reachability.Analyze(Alone(graph, caller)).Reaches);
     }
 
     [Fact]

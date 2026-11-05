@@ -72,7 +72,8 @@
     <!-- Capslock-style recall fixtures for the CHA call graph, one namespace per analysis mechanism
          (docs/agent/tasks/capslock-mechanism-fixtures-and-a1.md; ground truth in MechanismGroundTruth.cs).
          net10.0-only and Release-shaped, so a single plain reference suffices; it brings
-         ...MechanismFixture.Dependency (the CrossAssembly far side) along transitively. Both assemblies are
+         ...MechanismFixture.Dependency (the CrossAssembly far side) along transitively, and ...MechanismFixture.HostStubs
+         (the MSBuild/Roslyn host-contract stand-ins, reachability R1 S3), which is copied here but NEVER indexed. Both assemblies are
          located BY PATH next to this test assembly and read as metadata - never loaded, so the fixture's module
          initializer and type initializers never run. Its own project so nothing in it moves a pinned
          method-count baseline elsewhere. -->

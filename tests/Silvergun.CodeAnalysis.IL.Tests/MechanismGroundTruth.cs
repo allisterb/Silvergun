@@ -88,10 +88,12 @@ public static class MechanismGroundTruth
     /// type-initializer rows pending since A1 (StaticInit.TriggersInit, StaticInit.TriggersExplicitInit), S3's
     /// <c>newobj</c> pair (StaticInit.CreatesExplicitInit and its twin), S3 review W3's value-type pair
     /// (StaticInit.CallsValueMember and its twin), ExpressionTree.CompilesEnvTree (KnownGap until
-    /// the <c>ldtoken</c> edge; Present since, spec §5) and the module-initializer opacity row. Every row but the
-    /// Reachability one is active now.
+    /// the <c>ldtoken</c> edge; Present since, spec §5) and the module-initializer opacity row.
+    /// <see cref="Phase.Reachability"/> (reachability R1, S3; ADR 0037 decision 2) activated the last pending row,
+    /// Opacity.PInvokeCapability: an own P/Invoke is a <see cref="Capability.NativeInterop"/> sink
+    /// (<see cref="MechanismGraphSource.Build"/> classifies it so from this phase). Every row is active now.
     /// </summary>
-    public static Phase CurrentPhase => Phase.A2;
+    public static Phase CurrentPhase => Phase.Reachability;
 
     /// <summary>The path rows active at <see cref="CurrentPhase"/>.</summary>
     public static IReadOnlyList<MechanismPath> ActivePaths => Paths.Where(p => p.ActiveFrom <= CurrentPhase).ToArray();
@@ -394,7 +396,7 @@ public static class MechanismGroundTruth
             [Own("Opacity.Native.CallsNative()"), Own("Opacity.Native.getpid()")],
             Capability.NativeInterop, Expectation.Present, Phase.Reachability,
             "The same path WITH NativeInterop on the final node: classifying a bodyless extern belongs to the reachability ADR (the map does not classify own externs). " +
-            "Until then only CapabilityAnalysis's metadata seam (NativeImport on getpid itself) reports it."),
+            "Until then only CapabilityAnalysis's metadata seam (NativeImport on getpid itself) reported it; from Phase.Reachability (ADR 0037 decision 2) an own P/Invoke is a NativeInterop sink."),
         new("Opacity.PInvokeSafe", "Opacity", [Own("Opacity.Native.CallsManaged()")], null, Expectation.Absent, Phase.A1,
             "Twin: a managed computation (safe System.Math.Abs) in place of the native call."),
 

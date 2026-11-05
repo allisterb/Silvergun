@@ -19,8 +19,10 @@ using Xunit;
 /// (<see cref="Phase.A2StateMachine"/>, state-machine edges) the four state-machine rows and its own ten AsyncIterator
 /// and Debug rows; the whole of A2 (<see cref="Phase.A2"/>, S3: type-initializer and <c>ldtoken</c> edges, module
 /// opacity) the two type-initializer rows, S3's <c>newobj</c> pair, the promoted ExpressionTree.CompilesEnvTree and the
-/// module-initializer opacity row. The rest (today only the Reachability row) are pinned as pending, and must still FAIL
-/// on today's graph — so a row that starts passing early is noticed and promoted, and none can disappear silently.
+/// module-initializer opacity row; and <see cref="Phase.Reachability"/> (reachability R1, S3) the last one, the P/Invoke
+/// NativeInterop row. Rows tagged for a later phase are pinned as pending and must still FAIL on today's graph (none
+/// are left), so a row that starts passing early is noticed and promoted, and none can disappear silently; the
+/// per-phase "does not hold without" theories keep each tag honest now that every row is active.
 /// </summary>
 public sealed class MechanismGroundTruthTests
 {
@@ -243,6 +245,25 @@ public sealed class MechanismGroundTruthTests
         Assert.True(Holds(MechanismGraphSource.BuildWithout(unneeded)));
     }
 
+    public static TheoryData<string> ReachabilityPathRows() =>
+        Ids(MechanismGroundTruth.Paths.Where(p => p.ActiveFrom == Phase.Reachability).Select(p => p.Id));
+
+    /// <summary>
+    /// Keeps the Reachability tag honest, as the A2 theories do for theirs: every row tagged Reachability FAILS on the
+    /// same graph under the A2 classifier (<see cref="MechanismGraphSource.Build"/> at <see cref="Phase.A2"/>, which
+    /// never classifies an own node) and holds under today's, so it holds because of the extern sink rule alone.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ReachabilityPathRows))]
+    public void ReachabilityPath_HoldsOnlyWithTheOwnPInvokeSinkRule(string id)
+    {
+        var row = MechanismGroundTruth.Paths.Single(p => p.Id == id);
+        bool Holds(MechanismGraph graph) => WaypointMatcher.Evaluate(row, graph.Adjacency, graph.CapabilityOf).Holds;
+
+        Assert.False(Holds(MechanismGraphSource.Build(Phase.A2)), $"{row.Id} holds without the extern sink rule - re-tag it.");
+        Assert.True(Holds(MechanismGraphSource.Build(Phase.Reachability)));
+    }
+
     /// <summary>
     /// The <c>await foreach</c> consumer needs BOTH A2 edge kinds, as its note says: the StateMachine edges (into its own
     /// state machine, and from the iterator's <c>MoveNextAsync</c> into <c>MoveNext</c>) and the Dispatch edge (from
@@ -298,14 +319,16 @@ public sealed class MechanismGroundTruthTests
         Assert.Contains(graph.Opacities, o => site.IsMatch(o.Site) && o.Kind == row.Kind);
     }
 
+    // Reachability R1, S3 moved the ratchet from A2 to its last phase: the one row pending since A1 (the P/Invoke
+    // NativeInterop row) is active now, and so is every other.
     [Fact]
-    public void CurrentPhase_IsA2_AndActivatesEveryRowButTheReachabilityOne()
+    public void CurrentPhase_IsReachability_AndActivatesEveryRow()
     {
-        Assert.Equal(Phase.A2, MechanismGroundTruth.CurrentPhase);
-        Assert.Equal(
-            pathRowsPerPhase[Phase.A1] + pathRowsPerPhase[Phase.A2Dispatch] + pathRowsPerPhase[Phase.A2StateMachine] + pathRowsPerPhase[Phase.A2],
-            MechanismGroundTruth.ActivePaths.Count);
-        Assert.Equal(MechanismGroundTruth.Paths.Count - pathRowsPerPhase[Phase.Reachability], MechanismGroundTruth.ActivePaths.Count);
+        Assert.Equal(Phase.Reachability, MechanismGroundTruth.CurrentPhase);
+        Assert.Equal(Enum.GetValues<Phase>().Max(), MechanismGroundTruth.CurrentPhase);
+        Assert.Equal(pathRowsPerPhase.Values.Sum(), MechanismGroundTruth.ActivePaths.Count);
+        Assert.Equal(MechanismGroundTruth.Paths.Count, MechanismGroundTruth.ActivePaths.Count);
+        Assert.Contains(MechanismGroundTruth.ActivePaths, p => p.Id == "Opacity.PInvokeCapability");
         Assert.Equal(["Opacity.FunctionPointerCalli", "ModuleInit.ModuleInitializerInvisible"], MechanismGroundTruth.ActiveOpacities.Select(o => o.Id));
     }
 
@@ -379,22 +402,42 @@ public sealed class MechanismGroundTruthTests
     }
 
     /// <summary>
-    /// Only platform (External) nodes are classified, by the built-in map; an own node never is — not even the
-    /// P/Invoke extern, whose NativeInterop belongs to the reachability ADR (row Opacity.PInvokeCapability).
+    /// Before <see cref="Phase.Reachability"/> only platform (External) nodes are classified, by the built-in map; an own
+    /// node never is, not even the P/Invoke extern. From it, the own P/Invoke is NativeInterop (row
+    /// Opacity.PInvokeCapability), and every other own node still is not.
     /// </summary>
     [Theory]
-    [InlineData("System.Environment.GetEnvironmentVariable(System.String)", Capability.EnvironmentProbe)]
-    [InlineData("System.Reflection.MethodBase.Invoke(System.Object,System.Object[])", Capability.ReflectionInvocation)]
-    [InlineData("System.String.Concat(System.String,System.String)", null)]
-    [InlineData("MechanismFixture.Opacity.Native.getpid()", null)]
-    [InlineData("MechanismFixture.Direct.Probes.ReadsEnv()", null)]
-    [InlineData("No.Such.Node()", null)]
-    public void GraphSource_ClassifiesOnlyPlatformNodes(string nodeId, Capability? expected) =>
-        Assert.Equal(expected, MechanismGraphSource.Build(MechanismGroundTruth.CurrentPhase).CapabilityOf(nodeId));
+    [InlineData(Phase.A2, "System.Environment.GetEnvironmentVariable(System.String)", Capability.EnvironmentProbe)]
+    [InlineData(Phase.A2, "System.Reflection.MethodBase.Invoke(System.Object,System.Object[])", Capability.ReflectionInvocation)]
+    [InlineData(Phase.A2, "System.String.Concat(System.String,System.String)", null)]
+    [InlineData(Phase.A2, "MechanismFixture.Opacity.Native.getpid()", null)]
+    [InlineData(Phase.A2, "MechanismFixture.Direct.Probes.ReadsEnv()", null)]
+    [InlineData(Phase.A2, "No.Such.Node()", null)]
+    [InlineData(Phase.Reachability, "System.Environment.GetEnvironmentVariable(System.String)", Capability.EnvironmentProbe)]
+    [InlineData(Phase.Reachability, "System.Reflection.MethodBase.Invoke(System.Object,System.Object[])", Capability.ReflectionInvocation)]
+    [InlineData(Phase.Reachability, "System.String.Concat(System.String,System.String)", null)]
+    [InlineData(Phase.Reachability, "MechanismFixture.Opacity.Native.getpid()", Capability.NativeInterop)]
+    [InlineData(Phase.Reachability, "MechanismFixture.Opacity.Native.CallsNative()", null)]
+    [InlineData(Phase.Reachability, "MechanismFixture.Direct.Probes.ReadsEnv()", null)]
+    [InlineData(Phase.Reachability, "No.Such.Node()", null)]
+    public void GraphSource_ClassifiesPlatformNodes_AndFromReachabilityOwnPInvokes(Phase phase, string nodeId, Capability? expected) =>
+        Assert.Equal(expected, MechanismGraphSource.Build(phase).CapabilityOf(nodeId));
 
+    /// <summary>
+    /// At <see cref="Phase.Reachability"/> the own nodes classified are exactly the facts' NativeImport nodes (the
+    /// fixture's one P/Invoke), each NativeInterop; at A2 none is.
+    /// </summary>
     [Fact]
-    public void GraphSource_RefusesReachability_WhoseExternRuleItDoesNotModel() =>
-        Assert.Throws<NotSupportedException>(() => MechanismGraphSource.Build(Phase.Reachability));
+    public void GraphSource_AtReachability_ClassifiesExactlyTheOwnNativeImports()
+    {
+        var own = MechanismGraphSource.Graph.Nodes.Where(n => n.Kind != MethodNodeKind.External).Select(n => n.NodeId).ToArray();
+        var reachability = MechanismGraphSource.Build(Phase.Reachability);
+
+        Assert.Equal(["MechanismFixture.Opacity.Native.getpid()"], MechanismGraphSource.Graph.Facts.Methods.Where(f => f.NativeImport).Select(f => f.NodeId));
+        Assert.Equal(["MechanismFixture.Opacity.Native.getpid()"], own.Where(id => reachability.CapabilityOf(id) is not null));
+        Assert.Equal(Capability.NativeInterop, reachability.CapabilityOf("MechanismFixture.Opacity.Native.getpid()"));
+        Assert.DoesNotContain(own, id => MechanismGraphSource.Build(Phase.A2).CapabilityOf(id) is not null);
+    }
 
     // xUnit 2 fails a theory whose data source is empty ("No data found"), so an empty set is represented by one
     // sentinel case that asserts the emptiness itself - never by a silently passing row.

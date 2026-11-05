@@ -8,9 +8,10 @@ using System.Linq;
 /// Capability reachability over a <see cref="MethodGraph"/> (ADR 0037). Every own method is a root, tagged with its
 /// <see cref="RootClass"/>es (<see cref="MethodGraph.Facts"/>).
 /// <para>
-/// <b>Sinks.</b> A sink is an external node the map classifies as a capability, or an own P/Invoke
+/// <b>Sinks.</b> A sink is an external node the map classifies as a capability, or an own P/Invoke or COM call
 /// (<c>NativeInterop</c>). Code the graph cannot see is a sink too: an opacity site, or an external node the map marks
-/// <c>unanalyzed</c>. Own methods are never classified; their bodies are walked.
+/// <c>unanalyzed</c>, or an own body-less extern that is no P/Invoke (<see cref="OwnMethodFacts.InternalCall"/>). Own
+/// methods are never classified; their bodies are walked.
 /// </para>
 /// <para>
 /// <b>Search.</b> One multi-source backward BFS per sink and per edge set (<see cref="ReachEvidence"/>), after the map's
@@ -119,7 +120,9 @@ public static class Reachability
                         { Class: CapabilityClass.Unanalyzed } => 1 << unseenSink,
                         _ => 0,
                     }
-                    : facts.TryGetValue(nodes[i].NodeId, out var own) && own.NativeImport ? 1 << (int)Capability.NativeInterop : 0;
+                    : facts.TryGetValue(nodes[i].NodeId, out var own)
+                        ? (own.NativeImport || own.ComImport ? 1 << (int)Capability.NativeInterop : 0) | (own.InternalCall ? 1 << unseenSink : 0)
+                        : 0;
             foreach (var opacity in graph.Opacities.Where(o => unseenKinds.Contains(o.Kind)))
                 if (indexOf.TryGetValue(opacity.Site, out var site))
                 {
