@@ -7,6 +7,8 @@
 #   unspecified <pattern>                  clears an inherited type/subtree classification, keep walking
 #   unanalyzed  <pattern>                  opacity: we cannot see through it, always report
 #   ignore-edge <caller-pattern> <callee-pattern>
+#   root-attribute <attribute-type> <LoadTime|RuntimeInvoked>   a method carrying it is a reachability root (ADR 0037)
+#   host-contract  <supertype>      every method of an own type below it is a HostContract root (ADR 0037)
 #
 # Patterns are matched against a ClassificationKey (Namespace.Outer.Inner.Method, no signature):
 #
@@ -318,3 +320,28 @@ safe System.Threading.CancellationTokenSource
 safe System.Diagnostics.Stopwatch
 safe System.Diagnostics.Debug
 safe System.Diagnostics.Contracts.*
+
+# ---------------------------------------------------------------------------
+# Reachability roots (ADR 0037) — code that runs without the consumer calling it
+# ---------------------------------------------------------------------------
+# Attributes are matched by classification key; host contracts by type node id (arity suffix included, so a
+# generic contract is written Ns.Type`1). Only <Module>..cctor is invisible to the model; the C# targets it calls
+# carry ModuleInitializerAttribute and are visible.
+root-attribute System.Runtime.CompilerServices.ModuleInitializerAttribute LoadTime      # runs when the assembly loads
+root-attribute System.Runtime.InteropServices.UnmanagedCallersOnlyAttribute RuntimeInvoked   # native code calls in
+
+# MSBuild instantiates a task named by a package's .targets <UsingTask>, sets its parameters and calls Execute, on
+# the developer's or CI machine at build time.
+host-contract Microsoft.Build.Framework.ITask
+host-contract Microsoft.Build.Utilities.Task
+host-contract Microsoft.Build.Utilities.ToolTask
+host-contract Microsoft.Build.Utilities.AppDomainIsolatedTask
+
+# The compiler (and the IDE) loads every analyzer, suppressor and generator under a package's analyzers/ folder and
+# runs it inside the build; the IDE also runs code fixes and refactorings.
+host-contract Microsoft.CodeAnalysis.Diagnostics.DiagnosticAnalyzer
+host-contract Microsoft.CodeAnalysis.Diagnostics.DiagnosticSuppressor
+host-contract Microsoft.CodeAnalysis.ISourceGenerator
+host-contract Microsoft.CodeAnalysis.IIncrementalGenerator
+host-contract Microsoft.CodeAnalysis.CodeFixes.CodeFixProvider
+host-contract Microsoft.CodeAnalysis.CodeRefactorings.CodeRefactoringProvider

@@ -42,15 +42,18 @@ public sealed record PackageGraph(
 public static class PackageGraphs
 {
     #region Methods
-    /// <summary>The graphs of <paramref name="package"/>'s folders, each within <paramref name="budget"/> (default <see cref="GraphBudget.Default"/>).</summary>
-    public static IEnumerable<PackageGraph> Build(NuGetPackage package, GraphBudget? budget = null) =>
-        Build(package.Assemblies, budget);
+    /// <summary>
+    /// The graphs of <paramref name="package"/>'s folders, each within <paramref name="budget"/> (default
+    /// <see cref="GraphBudget.Default"/>), with root facts from <paramref name="map"/> (default <see cref="CapabilityMap.Default"/>).
+    /// </summary>
+    public static IEnumerable<PackageGraph> Build(NuGetPackage package, GraphBudget? budget = null, CapabilityMap? map = null) =>
+        Build(package.Assemblies, budget, map);
 
     /// <summary>
     /// The graphs of the folders <paramref name="assemblies"/> lie in. A folder is the directory an assembly was
     /// extracted to, so two entries the file system stores in one directory are one folder.
     /// </summary>
-    public static IEnumerable<PackageGraph> Build(IEnumerable<PackageAssembly> assemblies, GraphBudget? budget = null) =>
+    public static IEnumerable<PackageGraph> Build(IEnumerable<PackageAssembly> assemblies, GraphBudget? budget = null, CapabilityMap? map = null) =>
         assemblies
             .GroupBy(a => Path.GetDirectoryName(a.FullPath) ?? string.Empty, StringComparer.Ordinal)
             .Select(g => (Directory: g.Key, Members: g.OrderBy(a => a.RelativePath, StringComparer.Ordinal).ToArray()))
@@ -58,10 +61,10 @@ public static class PackageGraphs
             .OrderBy(g => g.Folder, StringComparer.Ordinal)
             .ThenBy(g => g.Directory, StringComparer.Ordinal)
             .ToArray()
-            .Select(g => BuildFolder(g.Folder, g.Members, budget ?? GraphBudget.Default));
+            .Select(g => BuildFolder(g.Folder, g.Members, budget ?? GraphBudget.Default, map ?? CapabilityMap.Default));
 
     // One folder: load each assembly, index the ones that loaded, build, and release every host before returning.
-    private static PackageGraph BuildFolder(string folder, IReadOnlyList<PackageAssembly> members, GraphBudget budget)
+    private static PackageGraph BuildFolder(string folder, IReadOnlyList<PackageAssembly> members, GraphBudget budget, CapabilityMap map)
     {
         var loaded = new List<(PackageAssembly Assembly, AssemblyDisassembler Disassembler)>();
         var failures = new List<PackageGraphLoadFailure>();
@@ -75,7 +78,7 @@ public static class PackageGraphs
                 else
                     failures.Add(new(member.RelativePath, created.Message ?? "the assembly could not be loaded"));
             }
-            var graph = loaded.Count == 0 ? null : MethodGraph.Build(MemberIndex.Build(loaded.Select(l => l.Disassembler)), budget);
+            var graph = loaded.Count == 0 ? null : MethodGraph.Build(MemberIndex.Build(loaded.Select(l => l.Disassembler)), budget, map);
             return new PackageGraph(folder, [.. loaded.Select(l => l.Assembly.RelativePath)], failures, graph);
         }
         catch (Exception ex)

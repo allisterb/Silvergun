@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Root-class and model-flag fixture for reachability R1, S1 (docs/agent/tasks/reachability-r1.md; ADR 0037
+         decision 4). One namespace per rule, every positive case beside its negative twin; the expectations live in
+         RootClassTests and ModelDefinitionFlagsTests in the test project, keyed on node ids.
+
+         Same settings as MechanismFixture: net10.0 only, Release-shaped (Optimize on), NO PackageReference. It
+         references ...RootFixture.HostStubs for the MSBuild/Roslyn contract stand-ins; the tests index THIS assembly
+         alone, so those supertypes are external, as in a real package.
+
+         It has a [ModuleInitializer], so the test host never loads it: RootFixtureAssemblies locates it by path and it
+         is read as metadata. Its own project, so nothing here perturbs a pinned method-count baseline elsewhere. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Optimize>true</Optimize>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>false</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.RootFixture.HostStubs\Silvergun.CodeAnalysis.IL.Tests.RootFixture.HostStubs.csproj" />
+    <!-- A second own assembly, indexed with this one only by the cross-assembly slot tests (S1 review N2). -->
+    <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.RootFixture.Other\Silvergun.CodeAnalysis.IL.Tests.RootFixture.Other.csproj" />
+  </ItemGroup>
+
+</Project>

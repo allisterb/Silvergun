@@ -140,6 +140,8 @@ public sealed class MemberIndex
         byShape = Group(methods, m => Key([AssemblyKey(m.Assembly), Shape(TypeParts(m.Identity.DeclaringType), m.Definition.Name, m.Identity.GenericArity, m.Identity.ParameterTypes.Count)]));
         byReturn = Group(methods, m => Key([AssemblyKey(m.Assembly), TypeParts(m.Identity.DeclaringType), m.NodeId, ModelNames.ReturnType(m.Definition, [])]));
         byImplementedShape = Group(methods, m => ImplementedShape(ImplementedName(m.Definition.Name), m.Identity.GenericArity, m.Identity.ParameterTypes.Count));
+        // Built on first use: only root tagging asks it (ImplementsExternalSlot), one probe per class ancestor.
+        slotDeclarations = new(() => Group(methods, m => Key([m.DeclaringTypeId, ImplementedShape(ImplementedName(m.Definition.Name), m.Identity.GenericArity, m.Identity.ParameterTypes.Count)])));
         // By reference: Model's MethodDefinition has no value equality worth trusting. Build removes duplicate assembly
         // instances, and the first entry wins anyway, so a definition reachable twice cannot throw here.
         ownMethods = methods.GroupBy<IndexedMethod, MethodDefinition>(m => m.Definition, ReferenceEqualityComparer.Instance)
@@ -460,6 +462,142 @@ public sealed class MemberIndex
     /// and so does every type below an open one.
     /// </summary>
     public bool IsOpen(string typeNodeId) => open.Contains(typeNodeId);
+
+    /// <summary>The indexed definitions with node id <paramref name="nodeId"/> (several when only return types differ).</summary>
+    public IReadOnlyList<IndexedMethod> Definitions(string nodeId) => byNodeId.GetValueOrDefault(nodeId) ?? [];
+
+    /// <summary>
+    /// The subtype-map keys of <paramref name="typeNodeId"/>'s base and interfaces, with the implicit platform links
+    /// (<c>System.ValueType</c> to <c>System.Object</c>, the BCL collection interfaces): own type ids and external keys alike.
+    /// </summary>
+    public IReadOnlyList<string> SupertypeKeys(string typeNodeId) => Supertypes(typeNodeId);
+
+    /// <summary>
+    /// The own types below <paramref name="rootTypeId"/>, transitively: below its bare id, and below a
+    /// <see cref="Qualified"/> one when an own type shadows it (as <see cref="StateMachineTargets"/> walks). Ordinal-sorted;
+    /// each type visited once, so linear in subtype links. Never throws.
+    /// </summary>
+    public IReadOnlyList<string> TypesBelow(string rootTypeId)
+    {
+        var qualified = $"]{rootTypeId}";
+        var seen = subtypes.Keys.Where(k => k == rootTypeId || (k.StartsWith('[') && k.EndsWith(qualified, StringComparison.Ordinal)))
+            .ToHashSet(StringComparer.Ordinal);
+        var below = new HashSet<string>(StringComparer.Ordinal);
+        var queue = new Queue<string>(seen);
+        while (queue.TryDequeue(out var type))
+            foreach (var sub in subtypes.GetValueOrDefault(type) ?? [])
+                if (seen.Add(sub))
+                {
+                    below.Add(sub);
+                    queue.Enqueue(sub);
+                }
+        return below.Order(StringComparer.Ordinal).ToArray();
+    }
+
+    /// <summary>
+    /// True when <paramref name="method"/> is virtual and the slot it fills may be declared outside the index, so code
+    /// that holds the instance as a platform or dependency type can run it (an internal type's <c>ToString</c>, its
+    /// <c>IComparer&lt;T&gt;.Compare</c>, a record's <c>Equals(object)</c>). Errs toward true: a false answer drops a root.
+    /// <list type="bullet">
+    /// <item><description>An override (not <c>newslot</c>) qualifies unless an own <em>class</em> ancestor declares a
+    /// <c>newslot</c> virtual with the same implemented name, arity and exactly the same, fully known parameter
+    /// types: only that introduces the slot inside the index.</description></item>
+    /// <item><description>A <c>newslot</c> method, or an interface's explicit (default-implementation) override,
+    /// qualifies when an external supertype that may be an interface is anywhere above its type; one method can fill an
+    /// own and an external interface's slot at once.</description></item>
+    /// <item><description>A static method that is public or explicitly named (<c>Ns.IFace.M</c>) qualifies on the same
+    /// condition: it may implement a static abstract member (<c>INumber&lt;T&gt;.op_Addition</c>) that generic platform
+    /// code calls back. Constructors never do.</description></item>
+    /// </list>
+    /// The ancestor masks only when its slot is accessible to the override: never a private one, and an assembly-only one
+    /// only from the same assembly. Every supertype step is charged to <paramref name="work"/> (a fresh
+    /// <see cref="GraphBudget.DefaultDispatchWork"/> allowance when null), and
+    /// the closure is memoized on it, so one build's answers never depend on another's; once it is exhausted the answer is
+    /// true. Never throws.
+    /// </summary>
+    public bool ImplementsExternalSlot(IndexedMethod method, DispatchWork? work = null)
+    {
+        var definition = method.Definition;
+        if (Guard(() => definition.IsConstructor, true))
+            return false;
+        var name = Guard(() => definition.Name, null);
+        var explicitName = ImplementedName(name) != name;
+        var isStatic = Guard(() => definition.IsStatic, false);
+        if (isStatic ? !explicitName && Guard(() => definition.Visibility is not (VisibilityKind.Public or VisibilityKind.Unknown), false) : !Guard(() => definition.IsVirtual, false))
+            return false;
+        var inInterface = interfaceIds.Contains(method.DeclaringTypeId);
+        // An interface's own member declares a slot; only an explicit override in one fills another's.
+        if (inInterface && !explicitName)
+            return false;
+
+        // Never unlimited: a crafted hierarchy costs minutes without a budget (S1 review round 3).
+        work ??= new DispatchWork(GraphBudget.DefaultDispatchWork);
+        try
+        {
+            if (isStatic || inInterface || Guard(() => definition.IsNewSlot, true))
+                return HasExternalInterface(method.DeclaringTypeId, work);
+
+            var shape = ImplementedShape(ImplementedName(name), method.Identity.GenericArity, method.Identity.ParameterTypes.Count);
+            var parameters = method.Identity.ParameterTypes;
+            var visited = new HashSet<string>([method.DeclaringTypeId], StringComparer.Ordinal);
+            var queue = new Queue<string>([method.DeclaringTypeId]);
+            while (queue.TryDequeue(out var type))
+                foreach (var super in Supertypes(type))
+                {
+                    // Charged before the filter: a class may list many interfaces, each a step (S1 review W1-r2).
+                    work.Charge(Units(super));
+                    if (!classIds.Contains(super) || interfaceIds.Contains(super) || !visited.Add(super))
+                        continue;
+                    if ((slotDeclarations.Value.GetValueOrDefault(Key([super, shape])) ?? []).Any(m => IntroducesSlot(m, method, parameters)))
+                        return false;
+                    queue.Enqueue(super);
+                }
+            return true;
+        }
+        catch (Exception)
+        {
+            return true;
+        }
+    }
+
+    // A class ancestor's method that opens the slot an override fills: newslot virtual, accessible to the override (a
+    // private slot, or an assembly-only one in another assembly, is not the one it overrides), and with parameters that
+    // are exactly the override's and fully known (a generic or truncated one could stand for anything, so it masks nothing).
+    private bool IntroducesSlot(IndexedMethod candidate, IndexedMethod over, IReadOnlyList<string> parameters) =>
+        Guard(() => !candidate.Definition.IsStatic && candidate.Definition.IsVirtual && candidate.Definition.IsNewSlot && candidate.Definition.Visibility switch
+        {
+            VisibilityKind.Public or VisibilityKind.Family or VisibilityKind.FamilyOrAssembly => true,
+            VisibilityKind.Assembly or VisibilityKind.FamilyAndAssembly => AssemblyKey(candidate.Assembly) == AssemblyKey(over.Assembly),
+            _ => false,
+        }, false)
+        && candidate.Identity.ParameterTypes.SequenceEqual(parameters, StringComparer.Ordinal)
+        && !parameters.Any(IsUnsettled);
+
+    // Whether an external supertype that may be an interface is anywhere above typeId, memoized on work. A false answer
+    // holds for every own type the walk passed (each one's closure is part of typeId's), so all of them are memoized; a
+    // true one only for typeId. Charged per step.
+    private bool HasExternalInterface(string typeId, DispatchWork work)
+    {
+        var memo = work.ExternalInterfaces;
+        if (memo.TryGetValue(typeId, out var known))
+            return known;
+        var visited = new HashSet<string>([typeId], StringComparer.Ordinal);
+        var queue = new Queue<string>([typeId]);
+        while (queue.TryDequeue(out var type))
+            foreach (var super in Supertypes(type))
+            {
+                work.Charge(Units(super));
+                if (!visited.Add(super))
+                    continue;
+                if (!types.ContainsKey(super) ? MayBeInterface(super) : memo.TryGetValue(super, out var above) && above)
+                    return memo[typeId] = true;
+                if (types.ContainsKey(super) && !memo.ContainsKey(super))
+                    queue.Enqueue(super);
+            }
+        foreach (var type in visited.Where(types.ContainsKey))
+            memo[type] = false;
+        return false;
+    }
 
     // Into an indexed assembly that forwards types. The CLR resolves a reference from another assembly through the
     // forwarder even when the assembly also defines the type, but binds a MethodDef token inside the assembly to that
@@ -958,6 +1096,8 @@ public sealed class MemberIndex
     private readonly ConcurrentDictionary<string, IReadOnlyList<string>> shapeCandidates = new(StringComparer.Ordinal);
     private readonly IReadOnlyDictionary<MethodDefinition, IndexedMethod> ownMethods;
     private readonly IReadOnlyDictionary<string, IReadOnlyList<IndexedMethod>> byImplementedShape;
+    // Per (declaring type id, implemented shape), for ImplementsExternalSlot.
+    private readonly Lazy<IReadOnlyDictionary<string, IReadOnlyList<IndexedMethod>>> slotDeclarations;
     private readonly HashSet<string> assemblySet;
     private readonly IReadOnlyDictionary<string, TypeForwarders> forwarders;
     private readonly TypeScope scope;
@@ -1063,6 +1203,10 @@ public sealed class MemberIndex
 
         /// <summary>True once a charge would have gone over <see cref="Limit"/>.</summary>
         public bool Exhausted { get; private set; }
+
+        // HasExternalInterface answers, per own type id. Held here, per allowance, not on the index: a memo shared across
+        // builds would make what one build pays, and so where it runs out, depend on the builds before it (S1 review W2-r2).
+        internal Dictionary<string, bool> ExternalInterfaces { get; } = new(StringComparer.Ordinal);
         #endregion
 
         #region Methods

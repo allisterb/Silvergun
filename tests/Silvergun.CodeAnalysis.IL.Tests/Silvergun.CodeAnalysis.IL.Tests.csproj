@@ -90,6 +90,11 @@
          by path in the fixture project's own bin/<configuration>/net10.0 and it is read as metadata, never loaded. -->
     <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.ShadowFixture\Silvergun.CodeAnalysis.IL.Tests.ShadowFixture.csproj"
                       ReferenceOutputAssembly="false" />
+    <!-- Root-class and model-flag fixture for reachability R1, S1 (docs/agent/tasks/reachability-r1.md). Same rules
+         as MechanismFixture: a plain reference that copies it (and, transitively, its ...RootFixture.HostStubs) here,
+         located BY PATH (RootFixtureAssemblies) and read as metadata, never loaded - it has a [ModuleInitializer]. The
+         tests index RootFixture ALONE, so the stubbed host contracts stay external. -->
+    <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.RootFixture\Silvergun.CodeAnalysis.IL.Tests.RootFixture.csproj" />
   </ItemGroup>
 
 </Project>

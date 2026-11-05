@@ -205,12 +205,13 @@ public sealed record GraphCoverage(
 public sealed class MethodGraph
 {
     #region Constructors
-    private MethodGraph(IReadOnlyList<MethodNode> nodes, IReadOnlyList<MethodEdge> edges, IReadOnlyList<GraphOpacity> opacities, GraphCoverage coverage)
+    private MethodGraph(IReadOnlyList<MethodNode> nodes, IReadOnlyList<MethodEdge> edges, IReadOnlyList<GraphOpacity> opacities, GraphCoverage coverage, GraphFacts facts)
     {
         Nodes = nodes;
         Edges = edges;
         Opacities = opacities;
         Coverage = coverage;
+        Facts = facts;
         nodesById = nodes.ToDictionary(n => n.NodeId, StringComparer.Ordinal);
         successors = edges.GroupBy(e => e.From, StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => (IReadOnlyList<MethodEdge>)g.ToArray(), StringComparer.Ordinal);
@@ -229,6 +230,9 @@ public sealed class MethodGraph
 
     /// <summary>What was and was not analysed.</summary>
     public GraphCoverage Coverage { get; }
+
+    /// <summary>Root classes, assemblies and type liveness of the own nodes, for reachability (ADR 0037).</summary>
+    public GraphFacts Facts { get; }
     #endregion
 
     #region Methods
@@ -241,9 +245,10 @@ public sealed class MethodGraph
     /// <summary>
     /// Builds the static-target graph of <paramref name="index"/>. Stops adding when the node or edge budget of
     /// <paramref name="budget"/> is reached, and only stops the Dispatch fan-out when its dispatch work budget is; either
-    /// way the result is marked truncated.
+    /// way the result is marked truncated. <paramref name="map"/> (default <see cref="CapabilityMap.Default"/>) supplies the
+    /// root-tagging entries of <see cref="Facts"/>.
     /// </summary>
-    public static MethodGraph Build(MemberIndex index, GraphBudget? budget = null)
+    public static MethodGraph Build(MemberIndex index, GraphBudget? budget = null, CapabilityMap? map = null)
     {
         var builder = new Builder(budget ?? GraphBudget.Default);
         foreach (var method in index.Methods)
@@ -252,7 +257,7 @@ public sealed class MethodGraph
             builder.Walk(index, method);
         foreach (var assembly in index.Assemblies)
             builder.AddModule(assembly, index.Module(assembly));
-        return builder.ToGraph(index.Coverage, index.Methods.Count);
+        return builder.ToGraph(index, map ?? CapabilityMap.Default);
     }
     #endregion
 
@@ -305,15 +310,18 @@ public sealed class MethodGraph
                 Visit(index, method.NodeId, instruction);
         }
 
-        public MethodGraph ToGraph(IndexCoverage index, int methodsIndexed) =>
+        public MethodGraph ToGraph(MemberIndex index, CapabilityMap map) =>
             new(
                 [.. nodes.Values.OrderBy(n => n.NodeId, StringComparer.Ordinal)],
                 [.. edges.OrderBy(e => e.From, StringComparer.Ordinal).ThenBy(e => e.To, StringComparer.Ordinal).ThenBy(e => e.Kind).ThenBy(e => e.Offset)],
                 [.. opacities.OrderBy(o => o.Site, StringComparer.Ordinal).ThenBy(o => o.Offset).ThenBy(o => o.Kind).ThenBy(o => o.Detail, StringComparer.Ordinal)],
-                new GraphCoverage(index, methodsIndexed, bodiesRead, bodiesFailed, callSites, resolutions, dispatchSites, dispatchEdges,
+                new GraphCoverage(index.Coverage, index.Methods.Count, bodiesRead, bodiesFailed, callSites, resolutions, dispatchSites, dispatchEdges,
                     dispatchWork.Spent, tokenSites, moduleInitializers, renamedImplementations, modulesUnreadable,
                     truncatedBy is not null || dispatchTruncatedBy is not null,
-                    truncatedBy is null ? dispatchTruncatedBy : dispatchTruncatedBy is null ? truncatedBy : $"{dispatchTruncatedBy}; {truncatedBy}"));
+                    truncatedBy is null ? dispatchTruncatedBy : dispatchTruncatedBy is null ? truncatedBy : $"{dispatchTruncatedBy}; {truncatedBy}"),
+                // Own nodes only: a budget-truncated build has no node, and so no facts, for what it never added.
+                GraphFacts.Collect(index, nodes.Values.Where(n => n.Kind != MethodNodeKind.External).Select(n => n.NodeId).ToHashSet(StringComparer.Ordinal),
+                    edges, map, budget.MaxDispatchWork));
 
         private void Visit(MemberIndex index, string caller, Model.IInstruction instruction)
         {

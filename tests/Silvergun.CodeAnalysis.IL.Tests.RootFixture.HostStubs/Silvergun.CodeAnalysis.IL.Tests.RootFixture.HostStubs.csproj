@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Local stand-ins for the build-host contracts the root-class fixture implements (reachability R1, S1.2;
+         ADR 0037 decision 4): Microsoft.Build.Framework.ITask and an abstract
+         Microsoft.CodeAnalysis.Diagnostics.DiagnosticAnalyzer, declared under their real names so the built-in
+         `host-contract` entries match them. Stubs, so that no Microsoft.Build or Roslyn package is referenced.
+
+         RootFixture references this project, and the tests NEVER index it: its types stay external to the index, as
+         a real package's host supertypes are. No PackageReference of any kind. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Optimize>true</Optimize>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>false</IsTestProject>
+  </PropertyGroup>
+
+</Project>

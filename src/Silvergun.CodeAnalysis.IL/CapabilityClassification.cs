@@ -46,7 +46,8 @@ public readonly record struct CapabilityVerdict(CapabilityClass Class, Capabilit
 /// Diagnostics for a loaded <see cref="CapabilityMap"/>: how many entries of each class it holds (after layering,
 /// so overridden entries are counted once) and every line that was rejected while building it. A rejected line is
 /// recorded as <c>source(lineNumber): reason</c> — a typo that silently disables an entry is the worst failure
-/// mode for a security tool, so rejects are surfaced rather than swallowed.
+/// mode for a security tool, so rejects are surfaced rather than swallowed. <see cref="RootAttributes"/> and
+/// <see cref="HostContracts"/> count the root-tagging directives (ADR 0037), which are not classification entries.
 /// </summary>
 public sealed record CapabilityMapStats(
     int CapabilityEntries,
@@ -54,7 +55,9 @@ public sealed record CapabilityMapStats(
     int UnspecifiedEntries,
     int UnanalyzedEntries,
     int IgnoredEdges,
-    IReadOnlyList<string> RejectedLines)
+    IReadOnlyList<string> RejectedLines,
+    int RootAttributes = 0,
+    int HostContracts = 0)
 {
     #region Properties
     /// <summary>Total classification entries (excluding <c>ignore-edge</c> rules).</summary>
@@ -71,14 +74,14 @@ public sealed record CapabilityMapStats(
     /// </summary>
     public bool Equals(CapabilityMapStats? other) =>
         other is not null &&
-        (CapabilityEntries, SafeEntries, UnspecifiedEntries, UnanalyzedEntries, IgnoredEdges) ==
-        (other.CapabilityEntries, other.SafeEntries, other.UnspecifiedEntries, other.UnanalyzedEntries, other.IgnoredEdges) &&
+        (CapabilityEntries, SafeEntries, UnspecifiedEntries, UnanalyzedEntries, IgnoredEdges, RootAttributes, HostContracts) ==
+        (other.CapabilityEntries, other.SafeEntries, other.UnspecifiedEntries, other.UnanalyzedEntries, other.IgnoredEdges, other.RootAttributes, other.HostContracts) &&
         RejectedLines.SequenceEqual(other.RejectedLines, StringComparer.Ordinal);
 
     /// <inheritdoc/>
     public override int GetHashCode() =>
         RejectedLines.Aggregate(
-            HashCode.Combine(CapabilityEntries, SafeEntries, UnspecifiedEntries, UnanalyzedEntries, IgnoredEdges),
+            HashCode.Combine(CapabilityEntries, SafeEntries, UnspecifiedEntries, UnanalyzedEntries, IgnoredEdges, RootAttributes, HostContracts),
             (hash, line) => HashCode.Combine(hash, StringComparer.Ordinal.GetHashCode(line)));
     #endregion
 }

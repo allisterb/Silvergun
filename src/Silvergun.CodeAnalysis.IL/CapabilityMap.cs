@@ -1,6 +1,7 @@
 namespace Silvergun.CodeAnalysis.IL;
 
 using System;
+using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -18,7 +19,15 @@ using System.Reflection;
 /// unspecified &lt;pattern&gt;
 /// unanalyzed  &lt;pattern&gt;
 /// ignore-edge &lt;caller-pattern&gt; &lt;callee-pattern&gt;
+/// root-attribute &lt;attribute-type&gt; &lt;LoadTime|RuntimeInvoked&gt;
+/// host-contract  &lt;supertype&gt;
 /// </code>
+/// <para>
+/// The last two tag graph roots (ADR 0037), not callees: a method carrying the attribute (by classification key) runs
+/// at load time or is called by the runtime, and every method of an own type below the supertype (by node id, arity
+/// suffix included) is called by a build host. Both take an exact type name, never a subtree. An override can add or
+/// reclassify entries but cannot remove a built-in one, which errs toward more roots.
+/// </para>
 /// <para>Three pattern forms, matched against a classification key:</para>
 /// <list type="bullet">
 /// <item><description><c>Ns.Type</c> — that type, all of its members.</description></item>
@@ -46,11 +55,16 @@ public sealed class CapabilityMap
         Dictionary<string, CapabilityVerdict> exact,
         Dictionary<string, CapabilityVerdict> prefixes,
         IReadOnlyList<(string Caller, string Callee)> ignoredEdges,
+        Dictionary<string, RootClass> rootAttributes,
+        HashSet<string> hostContracts,
         IReadOnlyList<string> rejectedLines)
     {
         this.exact = exact;
         this.prefixes = prefixes;
         this.ignoredEdges = ignoredEdges;
+        // Frozen: the built-in map is shared process-wide, so no caller may mutate it through a cast.
+        RootAttributes = rootAttributes.ToFrozenDictionary(StringComparer.Ordinal);
+        HostContracts = hostContracts.Order(StringComparer.Ordinal).ToArray();
 
         // Longest prefix first, so the first subtree that matches is the most specific one. Two distinct
         // prefixes of equal length can never match the same key, so the ordinal tie-break is only there to keep
@@ -68,7 +82,9 @@ public sealed class CapabilityMap
             verdicts.Count(v => v.Class == CapabilityClass.Unspecified),
             verdicts.Count(v => v.Class == CapabilityClass.Unanalyzed),
             ignoredEdges.Count,
-            rejectedLines);
+            rejectedLines,
+            rootAttributes.Count,
+            hostContracts.Count);
     }
     #endregion
 
@@ -81,6 +97,12 @@ public sealed class CapabilityMap
 
     /// <summary>Entry counts by class and the lines rejected while building this map.</summary>
     public CapabilityMapStats Stats { get; }
+
+    /// <summary><c>root-attribute</c> entries: attribute type classification key to the root class it confers.</summary>
+    public IReadOnlyDictionary<string, RootClass> RootAttributes { get; }
+
+    /// <summary><c>host-contract</c> supertype node ids, ordinal-sorted.</summary>
+    public IReadOnlyList<string> HostContracts { get; }
     #endregion
 
     #region Methods
@@ -97,6 +119,10 @@ public sealed class CapabilityMap
         var prefixes = Copy(baseMap?.prefixes);
         var edges = new List<(string Caller, string Callee)>(baseMap?.ignoredEdges ?? []);
         var edgeSet = new HashSet<(string, string)>(edges);
+        var rootAttributes = baseMap is null
+            ? new Dictionary<string, RootClass>(StringComparer.Ordinal)
+            : new Dictionary<string, RootClass>(baseMap.RootAttributes, StringComparer.Ordinal);
+        var hostContracts = new HashSet<string>(baseMap?.HostContracts ?? [], StringComparer.Ordinal);
         var rejected = new List<string>(baseMap?.Stats.RejectedLines ?? []);
 
         void Reject(string reason)
@@ -124,6 +150,10 @@ public sealed class CapabilityMap
                         if (edgeSet.Add(edge))
                             edges.Add(edge);
                     }
+                    else if (directive.Root is { } root)
+                        rootAttributes[root.Attribute] = root.Class;
+                    else if (directive.Contract is { } contract)
+                        hostContracts.Add(contract);
                     else if (directive.Pattern is { } pattern)
                         // A subtree key keeps its trailing dot; an exact key never ends in one, which is what
                         // separates the two indexes.
@@ -135,7 +165,7 @@ public sealed class CapabilityMap
                 Reject($"read failed: {ex.Message}");
             }
 
-        return new CapabilityMap(exact, prefixes, edges, rejected);
+        return new CapabilityMap(exact, prefixes, edges, rootAttributes, hostContracts, rejected);
     }
 
     /// <summary>
@@ -190,6 +220,10 @@ public sealed class CapabilityMap
         if (Key(tokens[1]) is not { } pattern)
             return Directive.Malformed($"malformed pattern '{tokens[1]}'");
 
+        // Root tagging names one type exactly: a subtree would tag whatever a package names into it.
+        if (directive is RootAttributeDirective or HostContractDirective && pattern[^1] == NestingSeparator)
+            return Directive.Malformed($"'{directive}' takes an exact type name, not a subtree");
+
         return directive switch
         {
             CapabilityDirective =>
@@ -199,6 +233,11 @@ public sealed class CapabilityMap
             SafeDirective => new Directive(pattern, new CapabilityVerdict(CapabilityClass.Safe, null)),
             UnspecifiedDirective => new Directive(pattern, new CapabilityVerdict(CapabilityClass.Unspecified, null)),
             UnanalyzedDirective => new Directive(pattern, new CapabilityVerdict(CapabilityClass.Unanalyzed, null)),
+            RootAttributeDirective =>
+                rootAttributeClasses.TryGetValue(tokens[2], out var rootClass)
+                    ? new Directive(Root: (pattern, rootClass))
+                    : Directive.Malformed($"unknown root class '{tokens[2]}' (expected LoadTime or RuntimeInvoked)"),
+            HostContractDirective => new Directive(Contract: pattern),
             _ => Key(tokens[2]) is { } callee
                     ? new Directive(Edge: (pattern, callee))
                     : Directive.Malformed($"malformed pattern '{tokens[2]}'"),
@@ -208,8 +247,8 @@ public sealed class CapabilityMap
     // The token count a directive expects (including the directive itself), or null if it is not a directive.
     private static int? Arity(string directive) => directive switch
     {
-        CapabilityDirective or IgnoreEdgeDirective => 3,
-        SafeDirective or UnspecifiedDirective or UnanalyzedDirective => 2,
+        CapabilityDirective or IgnoreEdgeDirective or RootAttributeDirective => 3,
+        SafeDirective or UnspecifiedDirective or UnanalyzedDirective or HostContractDirective => 2,
         _ => null,
     };
 
@@ -275,7 +314,7 @@ public sealed class CapabilityMap
     }
 
     private static CapabilityMap Empty(IReadOnlyList<string>? rejected = null) =>
-        new(new(StringComparer.Ordinal), new(StringComparer.Ordinal), [], rejected ?? []);
+        new(new(StringComparer.Ordinal), new(StringComparer.Ordinal), [], new(StringComparer.Ordinal), new(StringComparer.Ordinal), rejected ?? []);
 
     private static Dictionary<string, CapabilityVerdict> Copy(Dictionary<string, CapabilityVerdict>? entries) =>
         entries is null ? new(StringComparer.Ordinal) : new(entries, StringComparer.Ordinal);
@@ -300,6 +339,15 @@ public sealed class CapabilityMap
     private const string UnspecifiedDirective = "unspecified";
     private const string UnanalyzedDirective = "unanalyzed";
     private const string IgnoreEdgeDirective = "ignore-edge";
+    private const string RootAttributeDirective = "root-attribute";
+    private const string HostContractDirective = "host-contract";
+
+    // The root classes an attribute may confer; the others come from structure (visibility, contracts, .cctor).
+    private static readonly Dictionary<string, RootClass> rootAttributeClasses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        [nameof(RootClass.LoadTime)] = RootClass.LoadTime,
+        [nameof(RootClass.RuntimeInvoked)] = RootClass.RuntimeInvoked,
+    };
 
     private const string ResourceSuffix = ".Resources.capabilities.cm";
     private const string DefaultSourceName = "capabilities.cm";
@@ -311,13 +359,15 @@ public sealed class CapabilityMap
     #endregion
 
     #region Child types
-    // One parsed line: either a classification entry (Pattern + Verdict), an ignore-edge rule (Edge), a rejection
-    // (Error), or nothing at all (a blank or comment-only line).
+    // One parsed line: either a classification entry (Pattern + Verdict), an ignore-edge rule (Edge), a root attribute
+    // (Root), a host contract (Contract), a rejection (Error), or nothing at all (a blank or comment-only line).
     private readonly record struct Directive(
         string? Pattern = null,
         CapabilityVerdict Verdict = default,
         (string Caller, string Callee)? Edge = null,
-        string? Error = null)
+        string? Error = null,
+        (string Attribute, RootClass Class)? Root = null,
+        string? Contract = null)
     {
         #region Properties
         public static Directive Ignored => default;

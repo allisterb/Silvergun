@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- The second OWN assembly of the root-class fixture (reachability R1, S1 review N2): a public base whose
+         `internal new virtual` slot hides Object's, overridden from RootFixture (another assembly, so the override binds
+         to Object's slot) and from here (same assembly, so it binds to the internal one). Indexed TOGETHER with
+         RootFixture only by RootClassCrossAssemblyTests; RootFixture's other tests index RootFixture alone, where this
+         assembly is external. Same settings as RootFixture. No PackageReference of any kind. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Optimize>true</Optimize>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>false</IsTestProject>
+  </PropertyGroup>
+
+</Project>

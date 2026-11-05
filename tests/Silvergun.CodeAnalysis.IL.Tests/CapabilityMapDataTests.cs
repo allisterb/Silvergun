@@ -66,10 +66,12 @@ public sealed class CapabilityMapDataTests
         // junk line - precisely the input the parser's reject machinery exists to absorb - would make the
         // projection below die with IndexOutOfRangeException instead of producing the failure message this test
         // was written to produce. Under-length lines are asserted on separately, immediately below.
+        // root-attribute and host-contract (ADR 0037) tag graph roots; they are not classification entries and are
+        // counted against their own Stats below.
         var patterns = DirectiveLines()
             .Where(tokens => tokens.Length >= 2)
             .Select(tokens => (Directive: tokens[0].ToLowerInvariant(), Pattern: tokens[1]))
-            .Where(entry => entry.Directive != "ignore-edge")
+            .Where(entry => entry.Directive is not ("ignore-edge" or RootAttributeDirective or HostContractDirective))
             .ToArray();
 
         var duplicates = patterns
@@ -90,6 +92,76 @@ public sealed class CapabilityMapDataTests
         Assert.Equal(patterns.Count(e => e.Directive == "unspecified"), stats.UnspecifiedEntries);
         Assert.Equal(patterns.Count(e => e.Directive == "unanalyzed"), stats.UnanalyzedEntries);
         Assert.Equal(patterns.Length, stats.TotalEntries);
+    }
+
+    // The same silent-override guard for the two root-tagging directives (ADR 0037). Each is stored keyed by its
+    // type name (root-attribute in a dictionary, host-contract in a set), so a repeated line collapses exactly as a
+    // repeated classification pattern does - and a repeated root-attribute whose second line names a DIFFERENT root
+    // class silently changes what the first one confers. Counted from the embedded file, per directive.
+    [Theory]
+    [InlineData(RootAttributeDirective)]
+    [InlineData(HostContractDirective)]
+    public void Default_RootDirectiveCount_MatchesTheEmbeddedFileWithNoSilentlyCollapsedDuplicates(string directive)
+    {
+        var names = DirectiveLines()
+            .Where(tokens => tokens.Length >= 2 && tokens[0].ToLowerInvariant() == directive)
+            .Select(tokens => tokens[1])
+            .ToArray();
+
+        var duplicates = names
+            .GroupBy(name => name, StringComparer.Ordinal)
+            .Where(group => group.Count() > 1)
+            .Select(group => $"'{group.Key}' x{group.Count()}")
+            .ToArray();
+
+        Assert.True(
+            duplicates.Length == 0,
+            $"Resources/capabilities.cm repeats a '{directive}' type; the later line silently replaces the earlier "
+                + $"one: {string.Join(", ", duplicates)}");
+
+        var stats = CapabilityMap.Default.Stats;
+        Assert.NotEmpty(names);
+        Assert.Equal(names.Length, directive == RootAttributeDirective ? stats.RootAttributes : stats.HostContracts);
+        Assert.Equal(names.Length, directive == RootAttributeDirective ? CapabilityMap.Default.RootAttributes.Count : CapabilityMap.Default.HostContracts.Count);
+    }
+
+    // The built-in root entries the R1 spec (S1.3) names, each with the class it confers. Pinned as names, not a
+    // count, so a dropped or mistyped host is named.
+    [Fact]
+    public void Default_ShipsTheSpecifiedRootAttributesAndHostContracts()
+    {
+        Assert.Equal(
+            new Dictionary<string, RootClass>
+            {
+                ["System.Runtime.CompilerServices.ModuleInitializerAttribute"] = RootClass.LoadTime,
+                ["System.Runtime.InteropServices.UnmanagedCallersOnlyAttribute"] = RootClass.RuntimeInvoked,
+            },
+            CapabilityMap.Default.RootAttributes.OrderBy(p => p.Key, StringComparer.Ordinal).ToDictionary());
+
+        Assert.Equal(
+            [
+                "Microsoft.Build.Framework.ITask",
+                "Microsoft.Build.Utilities.AppDomainIsolatedTask",
+                "Microsoft.Build.Utilities.Task",
+                "Microsoft.Build.Utilities.ToolTask",
+                "Microsoft.CodeAnalysis.CodeFixes.CodeFixProvider",
+                "Microsoft.CodeAnalysis.CodeRefactorings.CodeRefactoringProvider",
+                "Microsoft.CodeAnalysis.Diagnostics.DiagnosticAnalyzer",
+                "Microsoft.CodeAnalysis.Diagnostics.DiagnosticSuppressor",
+                "Microsoft.CodeAnalysis.IIncrementalGenerator",
+                "Microsoft.CodeAnalysis.ISourceGenerator",
+            ],
+            CapabilityMap.Default.HostContracts);
+    }
+
+    // A root-tagging entry must not leak into classification: neither an attribute nor a host type is a capability.
+    [Theory]
+    [InlineData("System.Runtime.CompilerServices.ModuleInitializerAttribute..ctor")]
+    [InlineData("Microsoft.Build.Framework.ITask.Execute")]
+    [InlineData("Microsoft.CodeAnalysis.Diagnostics.DiagnosticAnalyzer.Initialize")]
+    public void Default_RootEntries_DoNotClassifyTheirTypes(string key)
+    {
+        Assert.Equal(CapabilityVerdict.None, CapabilityMap.Default.Classify(key));
     }
 
     // The arity precondition the count comparison above now filters on, asserted in its own right rather than
@@ -586,5 +658,10 @@ public sealed class CapabilityMapDataTests
 
     private static string Describe(CapabilityVerdict verdict) =>
         verdict.Capability is { } capability ? $"{verdict.Class}/{capability}" : verdict.Class.ToString();
+    #endregion
+
+    #region Fields
+    private const string RootAttributeDirective = "root-attribute";
+    private const string HostContractDirective = "host-contract";
     #endregion
 }

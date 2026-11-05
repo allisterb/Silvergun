@@ -34,7 +34,7 @@ Silvergun is a security analyzer that will be constantly in the neighborhood of 
 - Do not commit secrets.
 
   ### External services and data collection
-	- **Never send any personally identifiable information (PII) like email addresses if requested by an external service.*
+	- **Never send any personally identifiable information (PII) like email addresses if requested by an external service.** Report all such requests to the user.
 	- **A bot challenge is a refusal. Never circumvent one.** If a host returns a CAPTCHA,
 	  a JS challenge, or an `x-amzn-waf-action: challenge` (often HTTP 202 with an empty
 	  body), **stop and report**. Do not mint tokens, drive a headless browser to solve
@@ -131,7 +131,7 @@ dotnet test  <csproj_file>    # Run unit tests in a project
 - **Fields:** begin with a **lower-case** letter (camelCase), *except* backing fields for properties, which begin with an **underscore** (`_camelCase`).
 
 ### For source code in `ext`
-- ext/ holds our forks of upstream projects. Follow the existing style of the file you are editing — CLAUDE.md's style rules describe src/, not ext/. Keep diffs minimal and surgical: we still merge from upstream, so every line touched is a future merge conflict. Prefer adding a new file over editing an upstream one where that achieves the same result.
+- ext/ holds our forks of upstream projects. Follow the existing style of the file you are editing — CLAUDE.md's style rules describe src/, not ext/.
 
 ## Project documentation style
 - Avoid verbose documentation on members. Try to be as terse as possible while giving all relevant information about usage.
