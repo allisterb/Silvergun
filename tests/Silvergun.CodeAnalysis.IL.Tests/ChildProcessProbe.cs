@@ -1,6 +1,7 @@
 namespace Silvergun.CodeAnalysis.IL.Tests;
 
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 
 /// <summary>
@@ -27,7 +28,15 @@ public static class ChildProcessProbe
     /// or timed-out child — those are all reported through <see cref="ProbeResult"/>; only a failure to start
     /// the process at all throws.
     /// </summary>
-    public static ProbeResult Run(string executablePath, TimeSpan timeout, params string[] arguments)
+    public static ProbeResult Run(string executablePath, TimeSpan timeout, params string[] arguments) =>
+        Run(executablePath, timeout, null, arguments);
+
+    /// <summary>
+    /// As <see cref="Run(string, TimeSpan, string[])"/>, with <paramref name="environment"/> applied over the inherited
+    /// environment first: a null value removes the variable, so a probe can be pinned to a mode whatever the developer's
+    /// shell sets (the CCI assertion-mode tests, ADR 0022 Stage 1).
+    /// </summary>
+    public static ProbeResult Run(string executablePath, TimeSpan timeout, IReadOnlyDictionary<string, string?>? environment, params string[] arguments)
     {
         var psi = new ProcessStartInfo(executablePath)
         {
@@ -38,6 +47,13 @@ public static class ChildProcessProbe
         };
         foreach (var argument in arguments)
             psi.ArgumentList.Add(argument);
+        foreach (var (name, value) in environment ?? new Dictionary<string, string?>())
+        {
+            if (value is null)
+                psi.Environment.Remove(name);
+            else
+                psi.Environment[name] = value;
+        }
 
         using var process = Process.Start(psi)
             ?? throw new InvalidOperationException($"Could not start probe process '{executablePath}'.");

@@ -69,13 +69,16 @@ public sealed record MethodResolution(
 /// counts assemblies whose type forwarders could not be read: no reference into one resolves to own code.
 /// <see cref="SupertypesUnresolved"/> counts base-type and interface references that did not land on one known place
 /// (an unreadable assembly, a forwarder cycle, a type missing from the indexed assembly that should define it); each
-/// is kept under its bare id as well, so CHA over-approximates rather than loses the subtype.
+/// is kept under its bare id as well, so CHA over-approximates rather than loses the subtype. <see cref="ReaderAssertions"/>
+/// counts the CCI assertions that failed while the assemblies were loaded or indexed (ADR 0022 Stage 1): each was recorded
+/// and the read went on, so the model may be degraded.
 /// </summary>
-public sealed record IndexCoverage(int AssembliesUnreadable, int TypesSkipped, int MethodsSkipped, int ForwardersUnreadable = 0, int SupertypesUnresolved = 0)
+public sealed record IndexCoverage(int AssembliesUnreadable, int TypesSkipped, int MethodsSkipped, int ForwardersUnreadable = 0, int SupertypesUnresolved = 0, int ReaderAssertions = 0)
 {
     #region Properties
-    /// <summary>True when every assembly, type, method, forwarder table and supertype was read.</summary>
-    public bool IsComplete => AssembliesUnreadable == 0 && TypesSkipped == 0 && MethodsSkipped == 0 && ForwardersUnreadable == 0 && SupertypesUnresolved == 0;
+    /// <summary>True when every assembly, type, method, forwarder table and supertype was read, and no reader assertion failed.</summary>
+    public bool IsComplete =>
+        AssembliesUnreadable == 0 && TypesSkipped == 0 && MethodsSkipped == 0 && ForwardersUnreadable == 0 && SupertypesUnresolved == 0 && ReaderAssertions == 0;
     #endregion
 }
 
@@ -182,9 +185,15 @@ public sealed class MemberIndex
     #endregion
 
     #region Methods
-    /// <summary>Indexes the loaded assemblies of <paramref name="assemblies"/>, with the forwarders and module metadata read from their files.</summary>
-    public static MemberIndex Build(IEnumerable<AssemblyDisassembler> assemblies) =>
-        Build(assemblies.Where(d => d is not null).Select(d => (d.Assembly, d.Forwarders, d.Module)));
+    /// <summary>
+    /// Indexes the loaded assemblies of <paramref name="assemblies"/>, with the forwarders and module metadata read from
+    /// their files, and the reader assertions that failed while they were loaded.
+    /// </summary>
+    public static MemberIndex Build(IEnumerable<AssemblyDisassembler> assemblies)
+    {
+        var loaded = assemblies.Where(d => d is not null).Distinct().ToArray();
+        return Build(loaded.Select(d => (d.Assembly, d.Forwarders, d.Module)), loaded.Sum(d => d.ReaderAssertions));
+    }
 
     // With ModuleMetadata.None for each: for tests over synthetic or emitted assemblies only. Internal, since a real file
     // indexed this way would read as having no module initializer, which is never assumed (S3 review W4).
@@ -198,8 +207,13 @@ public sealed class MemberIndex
     /// own and counted in <see cref="Coverage"/>, and so is a forwarder table that is unreadable or missing (null). Module
     /// metadata that is missing counts as unreadable (<see cref="Module"/>).
     /// </summary>
-    public static MemberIndex Build(IEnumerable<(Model.Assembly Assembly, TypeForwarders Forwarders, ModuleMetadata Module)> assemblies)
+    public static MemberIndex Build(IEnumerable<(Model.Assembly Assembly, TypeForwarders Forwarders, ModuleMetadata Module)> assemblies) =>
+        Build(assemblies, 0);
+
+    // loadAssertions: those already recorded while the assemblies were loaded; any raised while indexing are added.
+    private static MemberIndex Build(IEnumerable<(Model.Assembly Assembly, TypeForwarders Forwarders, ModuleMetadata Module)> assemblies, int loadAssertions)
     {
+        using var reads = Microsoft.Cci.CciAssertions.BeginScope();
         var inputs = assemblies.Where(a => a.Assembly is not null).DistinctBy(a => (object)a.Assembly, ReferenceEqualityComparer.Instance).ToArray();
         var loaded = inputs.Select(a => a.Assembly).ToArray();
         var typeLists = loaded
@@ -257,7 +271,8 @@ public sealed class MemberIndex
             typeCandidates.Count(t => t.NodeId is null) + indexedTypes.Count(t => t is null) + methodCandidates.Count(x => x.Methods is null),
             indexedMethods.Count(m => m is null),
             inputs.Count(a => a.Forwarders is not { IsReadable: true }),
-            indexedTypes.Sum(t => t?.Unresolved ?? 0));
+            indexedTypes.Sum(t => t?.Unresolved ?? 0),
+            loadAssertions + reads.Count);
 
         return new MemberIndex(assemblyNames, typesById, methods, subtypes, forwarders, modules, scope, OpenTypes(typesById, scope), coverage);
     }

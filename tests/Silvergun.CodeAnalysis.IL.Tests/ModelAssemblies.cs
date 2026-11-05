@@ -12,7 +12,9 @@ using Silvergun.CodeAnalysis.IL;
 /// allows), ready to be indexed by <see cref="MemberIndex"/> and walked by <see cref="MethodGraph"/>. The same path
 /// may be given twice: each load is an independent host, which is how the ambiguity tests put two definitions with one
 /// node id into one index. <b>Fails loudly</b>: a load failure throws naming the path, and anything already loaded is
-/// released first.
+/// released first. So does a load on which a CCI assertion failed (<see cref="AssemblyDisassembler.ReaderAssertions"/>,
+/// ADR 0022 Stage 1): no fixture of this suite trips one, and since such a load now continues on a possibly degraded
+/// model instead of killing the host, every test built on it would otherwise be testing that model unawares.
 /// </summary>
 public sealed class ModelAssemblies : IDisposable
 {
@@ -38,6 +40,8 @@ public sealed class ModelAssemblies : IDisposable
                 loaded.Add(created.IsSuccess
                     ? created.Value
                     : throw new InvalidOperationException($"Failed to load '{path}': {created.Message}", created.Exception));
+                if (loaded[^1].ReaderAssertions > 0)
+                    throw new InvalidOperationException($"Loading '{path}' failed {loaded[^1].ReaderAssertions} CCI assertion(s): the model may be degraded (ADR 0022 Stage 1).");
             }
         }
         catch (Exception)

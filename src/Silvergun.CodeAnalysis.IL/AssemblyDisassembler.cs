@@ -29,7 +29,7 @@ using Backend.Transformations;
 public sealed class AssemblyDisassembler : Runtime, IDisposable
 {
     #region Constructors
-    private AssemblyDisassembler(Model.Host host, Loader loader, Model.Assembly assembly, string assemblyPath, TypeForwarders forwarders, ModuleMetadata module)
+    private AssemblyDisassembler(Model.Host host, Loader loader, Model.Assembly assembly, string assemblyPath, TypeForwarders forwarders, ModuleMetadata module, int readerAssertions)
     {
         Host = host;
         this.loader = loader;
@@ -37,6 +37,7 @@ public sealed class AssemblyDisassembler : Runtime, IDisposable
         AssemblyPath = assemblyPath;
         Forwarders = forwarders;
         Module = module;
+        ReaderAssertions = readerAssertions;
     }
     #endregion
 
@@ -61,6 +62,12 @@ public sealed class AssemblyDisassembler : Runtime, IDisposable
     /// carries neither (see <see cref="ModuleMetadata"/>).
     /// </summary>
     public ModuleMetadata Module { get; }
+
+    /// <summary>
+    /// The CCI assertions that failed while the assembly was loaded (ADR 0022 Stage 1). They no longer kill the process;
+    /// each is recorded and the read continues, so more than 0 means the model may be degraded.
+    /// </summary>
+    public int ReaderAssertions { get; }
 
     /// <summary>All type definitions in the assembly's root namespace, recursively.</summary>
     public IEnumerable<ITypeDefinition> Types => Assembly.RootNamespace.GetAllTypes();
@@ -94,12 +101,16 @@ public sealed class AssemblyDisassembler : Runtime, IDisposable
             // Model.Types.PlatformTypes instances), so concurrent loads corrupt those collections.
             lock (loadLock)
             {
+                // CCIProvider extracts the whole model here, so this is where CCI reads the file and may fail an assertion.
+                using var reads = Microsoft.Cci.CciAssertions.BeginScope();
                 var host = new Model.Host();
                 PlatformTypes.Resolve(host);
                 loader = new Loader(host);
                 var assembly = loader.LoadAssembly(fullPath);
+                if (reads.Count > 0)
+                    Warn("Loading {0}: {1} CCI assertion(s) failed and were recorded; the model may be degraded. First: {2}", fullPath, reads.Count, reads.Records[0]);
                 op.Complete();
-                return Result.Success(new AssemblyDisassembler(host, loader, assembly, fullPath, forwarders, module));
+                return Result.Success(new AssemblyDisassembler(host, loader, assembly, fullPath, forwarders, module, reads.Count));
             }
         }
         catch (Exception ex)

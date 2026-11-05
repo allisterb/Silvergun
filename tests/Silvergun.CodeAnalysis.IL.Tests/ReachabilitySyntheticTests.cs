@@ -822,6 +822,7 @@ public sealed class ReachabilitySyntheticTests
     [InlineData(UnknownCause.SupertypesUnresolved, "member index is incomplete")]
     [InlineData(UnknownCause.RenamedImplementations, "2 MethodImpl row(s)")]
     [InlineData(UnknownCause.ModulesUnreadable, "3 module(s) unreadable")]
+    [InlineData(UnknownCause.ReaderAssertions, "the metadata reader failed 2 assertion(s): the model may be degraded")]
     public void Classes_EachUnknownCauseAlone_TurnsANoneClassUnknown(UnknownCause cause, string reason)
     {
         var parts = new Parts().Own("App.a", RootClass.PublicApi).Ext(Safe).Edge("App.a", Safe);
@@ -841,6 +842,7 @@ public sealed class ReachabilitySyntheticTests
     [InlineData(UnknownCause.MethodsSkipped)]
     [InlineData(UnknownCause.RenamedImplementations)]
     [InlineData(UnknownCause.ModulesUnreadable)]
+    [InlineData(UnknownCause.ReaderAssertions)]
     public void Classes_EachUnknownCauseAlone_TurnsAReachesClassUnknown(UnknownCause cause)
     {
         var parts = new Parts().Own("App.a", RootClass.PublicApi).Ext(Env).Edge("App.a", Env);
@@ -855,11 +857,57 @@ public sealed class ReachabilitySyntheticTests
     [InlineData(UnknownCause.AssembliesUnreadable)]
     [InlineData(UnknownCause.RenamedImplementations)]
     [InlineData(UnknownCause.ModulesUnreadable)]
+    [InlineData(UnknownCause.ReaderAssertions)]
     public void Classes_AGraphWideCause_TurnsEveryClassUnknown(UnknownCause cause)
     {
         var report = Apply(new Parts().Own("App.a", RootClass.PublicApi), cause).Analyze();
 
         Assert.All(report.Classes, c => Assert.Equal(RootClassVerdict.Unknown, c.Verdict));
+    }
+
+    // ADR 0022 Stage 1: reader assertions alone give every class, the empty ones included, the reader reason and only it:
+    // the "member index is incomplete" reason is for the index's other counts, which are all 0 here.
+    [Fact]
+    public void Classes_ReaderAssertionsAlone_GiveEveryClassTheReaderReason_AndNotTheIncompleteIndexReason()
+    {
+        var report = Apply(new Parts().Own("App.a", RootClass.PublicApi).Own("App.h", RootClass.Hidden), UnknownCause.ReaderAssertions).Analyze();
+
+        Assert.Equal(allClasses, report.Classes.Select(c => c.Class));
+        Assert.All(report.Classes, c =>
+        {
+            Assert.Equal(RootClassVerdict.Unknown, c.Verdict);
+            Assert.Equal(["the metadata reader failed 2 assertion(s): the model may be degraded"], c.Reasons);
+        });
+    }
+
+    // ...and beside another index gap, both reasons: the incomplete index first, then the reader.
+    [Fact]
+    public void Classes_ReaderAssertionsWithASkippedType_GiveBothReasons()
+    {
+        var parts = new Parts().Own("App.a", RootClass.PublicApi);
+        parts.Coverage = complete with { Index = new IndexCoverage(0, 1, 0, ReaderAssertions: 2) };
+
+        var report = parts.Analyze();
+
+        Assert.All(report.Classes, c =>
+        {
+            Assert.Equal(RootClassVerdict.Unknown, c.Verdict);
+            Assert.Equal(
+                [
+                    "the member index is incomplete: some assemblies, types, methods, forwarders or supertypes could not be read",
+                    "the metadata reader failed 2 assertion(s): the model may be degraded",
+                ],
+                c.Reasons);
+        });
+    }
+
+    // Twin: a skipped type alone gives the incomplete-index reason and no reader reason.
+    [Fact]
+    public void Classes_ASkippedTypeAlone_GivesNoReaderReason()
+    {
+        var report = Apply(new Parts().Own("App.a", RootClass.PublicApi), UnknownCause.TypesSkipped).Analyze();
+
+        Assert.All(report.Classes, c => Assert.DoesNotContain(c.Reasons, r => r.Contains("metadata reader", StringComparison.Ordinal)));
     }
 
     // A gap covers the classes its mask overlaps, and only those.
@@ -1138,6 +1186,7 @@ public sealed class ReachabilitySyntheticTests
             case UnknownCause.SupertypesUnresolved: copy.Coverage = complete with { Index = new IndexCoverage(0, 0, 0, SupertypesUnresolved: 1) }; break;
             case UnknownCause.RenamedImplementations: copy.Coverage = complete with { RenamedImplementations = 2 }; break;
             case UnknownCause.ModulesUnreadable: copy.Coverage = complete with { ModulesUnreadable = 3 }; break;
+            case UnknownCause.ReaderAssertions: copy.Coverage = complete with { Index = new IndexCoverage(0, 0, 0, ReaderAssertions: 2) }; break;
         }
         return copy;
     }
@@ -1259,7 +1308,8 @@ public sealed class ReachabilitySyntheticTests
 
     public enum UnknownCause
     {
-        GapOnTheClass, UnseenReach, Truncated, AssembliesUnreadable, TypesSkipped, MethodsSkipped, ForwardersUnreadable, SupertypesUnresolved, RenamedImplementations, ModulesUnreadable
+        GapOnTheClass, UnseenReach, Truncated, AssembliesUnreadable, TypesSkipped, MethodsSkipped, ForwardersUnreadable, SupertypesUnresolved, RenamedImplementations, ModulesUnreadable,
+        ReaderAssertions
     }
 
     // The parts of a hand-made graph, built fluently. Own nodes are in assembly "App" and get facts; types are facts only.

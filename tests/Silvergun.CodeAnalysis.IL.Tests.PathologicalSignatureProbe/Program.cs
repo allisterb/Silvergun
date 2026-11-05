@@ -92,8 +92,12 @@ public static class PathologicalShapes
 /// </summary>
 public static class Program
 {
-    public static int Main()
+    public static int Main(string[] args)
     {
+        // A separate mode with its own contract (AssertionProbe); without arguments, this probe is exactly what it was.
+        if (args is [AssertionProbe.Verb])
+            return AssertionProbe.Run();
+
         try
         {
             var path = typeof(Program).Assembly.Location;

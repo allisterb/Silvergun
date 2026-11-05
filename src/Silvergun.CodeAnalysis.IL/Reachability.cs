@@ -242,8 +242,10 @@ public static class Reachability
             var coverage = graph.Coverage;
             if (coverage.Truncated)
                 reasons.Add($"the graph is truncated: {coverage.TruncatedBy}");
-            if (!coverage.Index.IsComplete)
+            if (!(coverage.Index with { ReaderAssertions = 0 }).IsComplete)
                 reasons.Add("the member index is incomplete: some assemblies, types, methods, forwarders or supertypes could not be read");
+            if (coverage.Index.ReaderAssertions > 0)
+                reasons.Add($"the metadata reader failed {coverage.Index.ReaderAssertions} assertion(s): the model may be degraded");
             if (coverage.ModulesUnreadable > 0)
                 reasons.Add($"{coverage.ModulesUnreadable} module(s) unreadable: whether they have renamed implementations that CHA does not follow is unknown");
             if (coverage.RenamedImplementations > 0)
