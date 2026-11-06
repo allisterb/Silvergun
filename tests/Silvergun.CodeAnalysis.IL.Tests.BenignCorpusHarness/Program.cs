@@ -48,6 +48,8 @@ public static class Program
             return ChildScan.Execute(args);
         if (args.Length > 0 && string.Equals(args[0], ReachabilityChild.Verb, StringComparison.Ordinal))
             return ReachabilityChild.Execute(args);
+        if (args.Length > 0 && string.Equals(args[0], WorkerParityChild.Verb, StringComparison.Ordinal))
+            return WorkerParityChild.Execute(args);
 
         try
         {
@@ -59,6 +61,8 @@ public static class Program
 
             if (args.Contains(ReachabilityFlag))
                 return RunReachability(args);
+            if (args.Contains(WorkerParityFlag))
+                return RunWorkerParity(args);
 
             var options = Parse(args);
             var manifest = CorpusManifest.Load(options.Manifest, options.Take);
@@ -163,6 +167,59 @@ public static class Program
         }
     }
 
+    // --worker-parity (graph worker S3): offline like --reachability, never constructs a PackageCache. Needs the CLI apphost
+    // beside the harness (its ProjectReference), or every folder would only be NotRun.
+    private static int RunWorkerParity(string[] args)
+    {
+        string? Value(string name)
+        {
+            var index = Array.IndexOf(args, name);
+            return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
+        }
+
+        var common = Parse(args);
+        if (Value("--take") is null)
+            common = common with { Take = 0 };
+        if (Value("--timeout") is null)
+            common = common with { ChildTimeout = TimeSpan.FromSeconds(DefaultReachabilityTimeoutSeconds) };
+        var date = Value("--date") is { } text
+            ? DateOnly.ParseExact(text, "yyyy-MM-dd", CultureInfo.InvariantCulture)
+            : DateOnly.FromDateTime(DateTime.UtcNow);
+
+        var cli = Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "Silvergun.CLI.exe" : "Silvergun.CLI");
+        if (!File.Exists(cli))
+        {
+            Console.Error.WriteLine($"--worker-parity needs the graph worker beside the harness, and there is no {cli}.");
+            return 1;
+        }
+
+        var manifest = CorpusManifest.Load(common.Manifest, common.Take);
+        Console.WriteLine($"manifest {manifest.Path}");
+        Console.WriteLine($"manifest-hash {manifest.Hash} ({manifest.Entries.Count} package(s))");
+        Console.WriteLine($"cache {common.CacheRoot} (read only)");
+        Console.WriteLine($"worker {cli}");
+
+        // Null logging, as in the children: the TSV carries every folder's outcome and reason.
+        Silvergun.Runtime.Initialize("Silvergun", "CORPUS");
+        var (paths, mismatches, measured, notCached) = WorkerParity.Run(manifest, common.CacheRoot, HarnessExecutable(), common.ChildTimeout, common.OutputDirectory, date, Console.Out);
+        foreach (var path in paths)
+            Console.WriteLine($"wrote {path}");
+        if (mismatches > 0)
+        {
+            Console.Error.WriteLine($"MISMATCH {mismatches} folder(s) differ between the in-process pass and the worker; see the report.");
+            return ParityMismatchExitCode;
+        }
+        // A run that measured nothing, or skipped part of the manifest, proves nothing about parity (review round 2, W-B):
+        // the report is written, but no verdict may be read off it, as with --reachability.
+        if (measured == 0 || notCached > 0)
+        {
+            Console.Error.WriteLine("NOT-COMPARABLE " + (measured == 0 ? "no package was measured" : $"{notCached} manifest entr(ies) not cached; nothing was downloaded"));
+            return NotComparableExitCode;
+        }
+        Console.WriteLine("PARITY every folder agrees");
+        return 0;
+    }
+
     private static ReachabilityOptions? ParseReachability(string[] args)
     {
         string? Value(string name)
@@ -249,6 +306,11 @@ public static class Program
 
     private const string ReachabilityFlag = "--reachability";
 
+    private const string WorkerParityFlag = "--worker-parity";
+
+    /// <summary><c>--worker-parity</c> wrote its report, and some folder differs between the in-process pass and the worker.</summary>
+    public const int ParityMismatchExitCode = 4;
+
     private const int DefaultReachabilityTimeoutSeconds = 600;
 
     /// <summary><c>--reachability</c> wrote its report, but the population is not comparable, so it carries no verdict.</summary>
@@ -278,6 +340,16 @@ public static class Program
           --date          the date in the report's file name. Default today (UTC).
           Once every entry has a result, writes reachability-benign-<date>.md, .tsv and -cost.md into --out.
           Exit 3 after writing it when the population is not comparable (oracle not a full MATCH, or not-cached).
+
+          <harness> --worker-parity [--date <yyyy-MM-dd>] [common options]
+          <harness> parity-inproc <nupkg> <out-json>  (child mode - the in-process graph pass of one package)
+
+          Graph worker S3 (docs/agent/tasks/graph-worker.md). OFFLINE, the same cache and manifest as --reachability
+          (--take defaults to 0, the child timeout to 600 s). Per cached package: the in-process PackageGraphs.Build +
+          Reachability.Analyze in a child, then PackageReachability.Analyze through the Silvergun.CLI worker beside the
+          harness. Writes worker-parity-<date>.tsv (per folder), -packages.tsv (per package, wall times) and .md into --out.
+          Exit 4 after writing them when any folder differs; else exit 3 when no package was measured or any entry was
+          not cached (not comparable).
         """;
     #endregion
 }

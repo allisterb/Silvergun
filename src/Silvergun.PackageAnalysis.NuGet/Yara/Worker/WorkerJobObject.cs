@@ -21,8 +21,12 @@ internal sealed partial class WorkerJobObject : IDisposable
     #endregion
 
     #region Methods
-    /// <summary>A new, unnamed job that kills its processes when closed. Throws <see cref="Win32Exception"/> on failure.</summary>
-    internal static WorkerJobObject Create()
+    /// <summary>
+    /// A new, unnamed job that kills its processes when closed, and, when <paramref name="processMemoryLimit"/> is not 0,
+    /// caps each process's committed memory at that many bytes (<c>JOB_OBJECT_LIMIT_PROCESS_MEMORY</c>: an allocation past
+    /// it fails). Throws <see cref="Win32Exception"/> on failure.
+    /// </summary>
+    internal static WorkerJobObject Create(ulong processMemoryLimit = 0)
     {
         var job = CreateJobObjectW(0, null);
         if (job.IsInvalid)
@@ -32,7 +36,11 @@ internal sealed partial class WorkerJobObject : IDisposable
             throw new Win32Exception(error, "CreateJobObject failed");
         }
 
-        var limits = new ExtendedLimitInformation { BasicLimitInformation = new() { LimitFlags = KillOnJobClose } };
+        var limits = new ExtendedLimitInformation
+        {
+            BasicLimitInformation = new() { LimitFlags = KillOnJobClose | (processMemoryLimit > 0 ? ProcessMemory : 0) },
+            ProcessMemoryLimit = (nuint)processMemoryLimit,
+        };
         if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, ref limits, (uint)Marshal.SizeOf<ExtendedLimitInformation>()))
         {
             var error = Marshal.GetLastPInvokeError();
@@ -72,6 +80,7 @@ internal sealed partial class WorkerJobObject : IDisposable
     #region Fields
     private const int JobObjectExtendedLimitInformation = 9;
     private const uint KillOnJobClose = 0x2000;   // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    private const uint ProcessMemory = 0x100;     // JOB_OBJECT_LIMIT_PROCESS_MEMORY
 
     private readonly SafeJobHandle handle;
     #endregion

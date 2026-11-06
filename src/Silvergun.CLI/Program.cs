@@ -15,6 +15,7 @@ using Silvergun.CLI.Reports;
 using Silvergun.CodeAnalysis.IL;
 using Silvergun.Intel;
 using Silvergun.PackageAnalysis.NuGet;
+using Silvergun.PackageAnalysis.NuGet.Graph;
 using Silvergun.PackageAnalysis.NuGet.Squats;
 using Silvergun.PackageAnalysis.NuGet.Yara;
 using Silvergun.PackageAnalysis.NuGet.Yara.Worker;
@@ -283,9 +284,20 @@ internal static class Program
         workerYaraCommand.SetAction(parse => RunYaraWorker(
             parse.GetValue(protocolOption),
             parse.GetResult(timeoutOption) is { } timeout ? timeout.Tokens.FirstOrDefault()?.Value ?? string.Empty : null));
+        // `__worker graph --protocol 1` speaks graph worker protocol v1 (docs/agent/tasks/graph-worker.md): the graph
+        // pass over one package's folders, out of process (ADR 0021 Tier 2). The same string-typed --protocol posture.
+        var graphProtocolOption = new Option<string?>("--protocol")
+        {
+            Description = "Worker protocol version (only 1 is supported)."
+        };
+        var workerGraphCommand = new Command("graph", "Internal: the out-of-process call graph and reachability worker.")
+        {
+            graphProtocolOption
+        };
+        workerGraphCommand.SetAction(parse => RunGraphWorker(parse.GetValue(graphProtocolOption)));
         var workerCommand = new Command("__worker", "Internal: worker processes started by Silvergun itself.")
         {
-            workerYaraCommand
+            workerYaraCommand, workerGraphCommand
         };
         workerCommand.Hidden = true;
 
@@ -295,13 +307,16 @@ internal static class Program
         };
 
         // Worker mode keeps stdout protocol-only even for a command line that does not parse (FR2.3): System.CommandLine
-        // would print help to stdout and exit 1, so anything under `__worker` that does not resolve to the yara worker's
-        // own action (a parse error such as a repeated --timeout, help, a directive) is one `fatal` record and exit 3.
+        // would print help to stdout and exit 1, so anything under `__worker` that does not resolve to a worker's own
+        // action (a parse error such as a repeated --timeout, help, a directive) is one `fatal` record and exit 3: in the
+        // graph protocol when the verb is `__worker graph`, otherwise in the yara protocol, as before.
         var parse = root.Parse(args);
-        return ((args is [var verb, ..] && verb == workerCommand.Name) || IsWithin(parse.CommandResult, workerCommand))
-            && !ReferenceEquals(parse.Action, workerYaraCommand.Action)
-            ? RunYaraWorkerArgumentError(parse.Errors.Count)
-            : parse.Invoke();
+        var inWorker = (args is [var verb, ..] && verb == workerCommand.Name) || IsWithin(parse.CommandResult, workerCommand);
+        return !inWorker || ReferenceEquals(parse.Action, workerYaraCommand.Action) || ReferenceEquals(parse.Action, workerGraphCommand.Action)
+            ? parse.Invoke()
+            : IsWithin(parse.CommandResult, workerGraphCommand) || (args is [_, var worker, ..] && worker == workerGraphCommand.Name)
+            ? RunGraphWorkerArgumentError(parse.Errors.Count)
+            : RunYaraWorkerArgumentError(parse.Errors.Count);
     }
 
     private static int RunAnalyze(string assemblyPath, bool json, bool rich, string? output, bool strict, bool debug, bool noResolve, bool allowIncomplete, string? snapshot)
@@ -984,6 +999,30 @@ internal static class Program
             Runtime.Error("yara worker: cannot write to stdout ({0}).", ex.GetType().Name);
         }
         return WorkerProtocol.ExitFatal;
+    }
+
+    // The hidden `__worker graph` verb (docs/agent/tasks/graph-worker.md). The yara worker's posture: stderr-only, capped
+    // logging, and raw stdin/stdout. When stdin ends or carries anything after the request, the parent is gone or has given
+    // up, and the process exits at once.
+    private static int RunGraphWorker(string? protocol)
+    {
+        Runtime.WithStderrLogging("Silvergun", "worker-graph");
+        // stdin is not disposed: the watchdog thread may still be reading it as the process ends (review N1).
+        var stdin = Console.OpenStandardInput();
+        using var stdout = Console.OpenStandardOutput();
+        Console.SetOut(TextWriter.Null);
+        return GraphWorker.Run(protocol, stdin, stdout, () => Environment.Exit(GraphWorkerProtocol.ExitParentGone));
+    }
+
+    // A `__worker graph` command line that did not parse: one graph-protocol `fatal`, exit 3. The parser's messages can
+    // quote argument tokens, so the reason is fixed text.
+    private static int RunGraphWorkerArgumentError(int errors)
+    {
+        Runtime.WithStderrLogging("Silvergun", "worker-graph");
+        using var stdout = Console.OpenStandardOutput();
+        Console.SetOut(TextWriter.Null);
+        return GraphWorker.Refuse(stdout, (errors > 0 ? $"the worker's arguments did not parse ({errors} error(s))" : "the worker's arguments asked for something other than a worker session")
+            + $"; expected __worker graph --protocol {GraphWorkerProtocol.Version}");
     }
 
     // Whether `result` is `command`'s, or lies under it in the parse tree.

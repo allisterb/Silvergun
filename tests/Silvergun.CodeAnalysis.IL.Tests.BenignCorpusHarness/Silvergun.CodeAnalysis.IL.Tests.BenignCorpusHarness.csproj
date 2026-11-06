@@ -16,6 +16,11 @@
     <!-- Reachability R2 (docs/agent/tasks/reachability-r2.md): NuGetPackage.Open and PackageGraphs.Build for the
          offline reachability mode. A project, not a package; it resolves to its net10.0 flavour. -->
     <ProjectReference Include="..\..\src\Silvergun.PackageAnalysis.NuGet\Silvergun.PackageAnalysis.NuGet.csproj" />
+    <!-- Graph worker S3 (docs/agent/tasks/graph-worker.md, the worker-parity mode): an Exe, so this copies the CLI apphost and its
+         dependencies next to the harness, where PackageReachability.Analyze resolves its graph worker (the apphost in
+         AppContext.BaseDirectory). It resolves to the CLI's net10.0 flavour; nothing compiles against it. ProjectReference
+         only: no packages. -->
+    <ProjectReference Include="..\..\src\Silvergun.CLI\Silvergun.CLI.csproj" />
   </ItemGroup>
 
   <ItemGroup>

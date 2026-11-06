@@ -69,8 +69,9 @@ internal static class FakeWorker
         return 0;
     }
 
-    // Run numbers are 1-based and per script; the scanner under test runs its workers one at a time.
-    private static int NextRun(string script)
+    // Run numbers are 1-based and per script; the scanner under test runs its workers one at a time. Shared with
+    // FakeGraphWorker, as are Section, Split and Count.
+    internal static int NextRun(string script)
     {
         var counter = script + ".runs";
         var run = (File.Exists(counter) ? int.Parse(File.ReadAllText(counter)) : 0) + 1;
@@ -78,7 +79,7 @@ internal static class FakeWorker
         return run;
     }
 
-    private static IReadOnlyList<string> Section(string[] lines, int run)
+    internal static IReadOnlyList<string> Section(string[] lines, int run)
     {
         List<string>? exact = null, fallback = null, current = null;
         foreach (var line in lines)
@@ -99,13 +100,13 @@ internal static class FakeWorker
         return exact ?? fallback ?? [];
     }
 
-    private static (string Verb, string Argument) Split(string command)
+    internal static (string Verb, string Argument) Split(string command)
     {
         var space = command.IndexOf(' ');
         return space < 0 ? (command, string.Empty) : (command[..space], command[(space + 1)..]);
     }
 
-    private static int Count(string rest) => rest.Length == 0 ? int.MaxValue : int.Parse(rest);
+    internal static int Count(string rest) => rest.Length == 0 ? int.MaxValue : int.Parse(rest);
 
     // \n, \e (ESC) and \uXXXX in an `err` line, so a script can stage control and bidi characters on stderr.
     private static string Decode(string text)

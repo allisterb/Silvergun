@@ -33,6 +33,10 @@ using Silvergun.PackageAnalysis.NuGet.Yara;
 /// <c>silvergun __worker yara</c> so the parent backend's handling of every worker behaviour can be driven exactly; see
 /// <see cref="FakeWorker"/>.</para>
 ///
+/// <para><b>Role 5 — a scripted fake graph worker (<c>--fake-graph-worker &lt;script&gt;</c>).</b> Stands in for
+/// <c>silvergun __worker graph</c> (<c>docs/agent/tasks/graph-worker.md</c>); see <see cref="FakeGraphWorker"/>. Its only
+/// analysis is the real graph worker loop it delegates a genuine answer to.</para>
+///
 /// <para>This fixture never scans anything for real and contains no rule logic; it is deliberately inert.</para>
 /// </summary>
 internal static class Program
@@ -44,6 +48,7 @@ internal static class Program
         ["--scan-file", var file, ..] => FileHarness(file, args),
         ["--stderr-logging", var logName, var mode] => StderrLogging(logName, mode),
         ["--fake-worker", var script] => FakeWorker.Run(script),
+        ["--fake-graph-worker", var script] => FakeGraphWorker.Run(script),
         [var source, var compiled] when IsYaracCall(source, compiled) => FakeYarac(source, compiled),
         _ => FakeYara(args),
     };

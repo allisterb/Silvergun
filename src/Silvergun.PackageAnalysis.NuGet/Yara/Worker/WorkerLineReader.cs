@@ -82,6 +82,25 @@ public sealed class WorkerLineReader
         }
     }
 
+    /// <summary>
+    /// Blocks until there is anything past the last line read: bytes already buffered, bytes newly read (consumed), the end
+    /// of the stream, or a read failure. Returns how many bytes were there, 0 for the end or a failure. For a watchdog that
+    /// only needs to know the stream did not stay silent; the reader must not be used for lines afterwards.
+    /// </summary>
+    internal int WaitForMore()
+    {
+        if (start < end)
+            return end - start;
+        try
+        {
+            return stream.Read(buffer, 0, buffer.Length);
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException or OperationCanceledException)
+        {
+            return 0;
+        }
+    }
+
     /// <summary>A short, escaped, lossily decoded excerpt of <paramref name="bytes"/>, safe to put in a log line.</summary>
     internal static string Excerpt(ReadOnlySpan<byte> bytes) =>
         WorkerProtocol.Safe(Encoding.UTF8.GetString(bytes[..Math.Min(bytes.Length, ExcerptBytes)]), ExcerptChars);
