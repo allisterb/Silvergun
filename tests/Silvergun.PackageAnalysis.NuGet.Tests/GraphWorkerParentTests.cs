@@ -879,6 +879,47 @@ public sealed class GraphWorkerParentTests : IDisposable
         Assert.Equal($"its record would take the package's folder records over {limit} bytes, so it was not kept", report.Folders[2].Reason);
     }
 
+    /// <summary>
+    /// Final review, fix 1: a <c>fatal</c> is exempt from the report limit. With room for one record and 10 bytes more,
+    /// folder a is answered; folder b's worker sends a <c>fatal</c> far longer than the 10 bytes left. b is Crashed with the
+    /// worker's reason, not NotRun, and a restart follows. The restarted worker's record for c does not fit in the 10 bytes:
+    /// c, the folder in flight, is NotRun for the limit, and d, never started, is NotRun because the limit was reached.
+    /// </summary>
+    [Fact]
+    public void AFatal_IsExemptFromTheReportLimit_SoItsFolderIsCrashed_AndARestartFollows()
+    {
+        var record = EmptyRecordBytes();
+        var limit = record + 10;
+        var reason = new string('r', 200);
+        using var script = new FakeGraphScript("reports-fatal")
+            .Run(1, "request", "ready", "empty 1", $"out {{\"type\":\"fatal\",\"reason\":\"{reason}\"}}", "exit 3")
+            .Otherwise("request", "ready", "empty", "done");
+
+        var report = Analyze(script, Options() with { MaxReportBytes = limit }, stage.Small("lib/a"), stage.Small("lib/b"), stage.Small("lib/c"), stage.Small("lib/d"));
+
+        Assert.Equal([FolderOutcome.NothingLoaded, FolderOutcome.Crashed, FolderOutcome.NotRun, FolderOutcome.NotRun], report.Folders.Select(f => f.Outcome));
+        Assert.Equal($"the graph worker failed while building it: {reason}", report.Folders[1].Reason);
+        Assert.Equal($"its record would take the package's folder records over {limit} bytes, so it was not kept", report.Folders[2].Reason);
+        Assert.Equal($"the package's folder records reached their limit of {limit} bytes before it was started", report.Folders[3].Reason);
+        Assert.Equal(Runs(["lib/a", "lib/b", "lib/c", "lib/d"], ["lib/c", "lib/d"]), script.RequestedFolders);
+        script.AssertNoOrphans();
+    }
+
+    /// <summary>Fix 1, one run directly: a <c>fatal</c> line longer than the bytes left is Crashed, never ReportsSpent.</summary>
+    [Fact]
+    public void OneRun_AFatalLongerThanTheBytesLeft_IsCrashed_NotReportsSpent()
+    {
+        using var script = new FakeGraphScript("reports-fatal-run")
+            .Otherwise("request", "ready", $"out {{\"type\":\"fatal\",\"reason\":\"{new string('f', 100)}\"}}", "exit 3");
+        var request = GraphJson.Request(("lib/a", stage.Small("lib/a")));
+
+        var run = GraphWorkerProcess.Run(script.Launch(), request, TimeSpan.FromSeconds(60), long.MaxValue, maxReportBytes: 5);
+
+        Assert.Equal(GraphWorkerFailureKind.Crashed, run.Failure);
+        Assert.Equal($"the graph worker failed while building it: {new string('f', 100)}", run.Reason);
+        Assert.Empty(run.Answered);
+    }
+
     /// <summary>W-A (c): MaxReportBytes 0, or below, means no limit: every record is kept.</summary>
     [Theory]
     [InlineData(0L)]

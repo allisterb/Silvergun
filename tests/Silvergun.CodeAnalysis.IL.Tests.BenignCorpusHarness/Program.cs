@@ -201,7 +201,7 @@ public static class Program
 
         // Null logging, as in the children: the TSV carries every folder's outcome and reason.
         Silvergun.Runtime.Initialize("Silvergun", "CORPUS");
-        var (paths, mismatches, measured, notCached) = WorkerParity.Run(manifest, common.CacheRoot, HarnessExecutable(), common.ChildTimeout, common.OutputDirectory, date, Console.Out);
+        var (paths, mismatches, measured, notCached, incomplete) = WorkerParity.Run(manifest, common.CacheRoot, HarnessExecutable(), common.ChildTimeout, common.OutputDirectory, date, Console.Out);
         foreach (var path in paths)
             Console.WriteLine($"wrote {path}");
         if (mismatches > 0)
@@ -211,9 +211,13 @@ public static class Program
         }
         // A run that measured nothing, or skipped part of the manifest, proves nothing about parity (review round 2, W-B):
         // the report is written, but no verdict may be read off it, as with --reachability.
-        if (measured == 0 || notCached > 0)
+        // So does a package where either half did not finish (status not ok), even if neither half produced a folder row.
+        if (measured == 0 || notCached > 0 || incomplete.Count > 0)
         {
-            Console.Error.WriteLine("NOT-COMPARABLE " + (measured == 0 ? "no package was measured" : $"{notCached} manifest entr(ies) not cached; nothing was downloaded"));
+            if (measured == 0 || notCached > 0)
+                Console.Error.WriteLine("NOT-COMPARABLE " + (measured == 0 ? "no package was measured" : $"{notCached} manifest entr(ies) not cached; nothing was downloaded"));
+            foreach (var package in incomplete)
+                Console.Error.WriteLine($"NOT-COMPARABLE {package}");
             return NotComparableExitCode;
         }
         Console.WriteLine("PARITY every folder agrees");

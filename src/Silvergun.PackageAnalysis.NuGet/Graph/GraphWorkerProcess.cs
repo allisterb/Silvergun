@@ -57,6 +57,11 @@ internal sealed record GraphWorkerLaunch(string? Executable, string? Problem, IR
 /// </summary>
 internal static class GraphWorkerProcess
 {
+    #region Properties
+    // How every `fatal` record's line begins.
+    private static ReadOnlySpan<byte> FatalPrefix => "{\"type\":\"fatal\""u8;
+    #endregion
+
     #region Methods
     /// <summary>
     /// Runs one child over <paramref name="request"/>. Each folder gets <paramref name="folderTimeout"/> from the record
@@ -141,8 +146,10 @@ internal static class GraphWorkerProcess
                     : Stop(GraphWorkerFailureKind.TimedOut, $"it was not built within {Seconds(folderTimeout)} s, so the worker was killed");
             if (line.Status != WorkerLineStatus.Line)
                 return Stop(GraphWorkerFailureKind.Crashed, $"the graph worker stopped while building it: {Ending(line.Status)}{ExitNote(process)}");
-            // Checked before parsing, which roughly doubles a record's size in memory (review round 2, W-A).
-            if (line.Bytes.Length > maxReportBytes - used)
+            // Checked before parsing, which roughly doubles a record's size in memory (review round 2, W-A). A `fatal` is
+            // not kept, so it is exempt: a package cannot turn its Crashed folder into NotRun by spending the limit first.
+            // The discriminator must come first (GraphWorkerJsonContext), so the prefix is exact.
+            if (!line.Bytes.AsSpan().StartsWith(FatalPrefix) && line.Bytes.Length > maxReportBytes - used)
                 return Stop(GraphWorkerFailureKind.ReportsSpent, $"its record would take this run's folder records over {maxReportBytes} bytes, so it was not kept");
             var (message, problem) = Parse(line);
             if (message is GraphWorkerFatal fatal)

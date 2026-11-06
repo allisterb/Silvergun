@@ -62,8 +62,9 @@ public sealed record PackageReachabilityReport(IReadOnlyList<FolderReachability>
 /// what one folder may take; <see cref="PackageBudget"/> what every folder together may take, across worker restarts;
 /// <see cref="MaxFolders"/> how many distinct folders are built at all; <see cref="WorkerMemoryBytes"/> each worker
 /// process's memory limit (0 for none); <see cref="Graph"/> each folder's graph budget; <see cref="MaxReportBytes"/>
-/// how many bytes of folder records this process keeps. A negative time is zero. A run can outlast
-/// <see cref="PackageBudget"/> by its fixed ending waits (for <c>done</c>, the exit, a kill), about 17 s at most per worker.
+/// how many bytes of folder records one package's pass keeps (a caller holding several packages' reports holds that
+/// many). A negative time is zero. A run can outlast <see cref="PackageBudget"/> by its fixed ending waits (for
+/// <c>done</c>, the exit, a kill), about 17 s at most per worker.
 /// </summary>
 public sealed record PackageReachabilityOptions(
     TimeSpan FolderTimeout,

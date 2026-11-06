@@ -105,12 +105,13 @@ public static class WorkerParity
     /// <summary>A report as both halves serialize it for comparison (compact, camelCase, enum names, computed properties left out), or null.</summary>
     public static string? Serialize(ReachabilityReport? report) => report is null ? null : JsonSerializer.Serialize(report, ReportOptions);
 
-    public static (IReadOnlyList<string> Paths, int Mismatches, int Measured, int NotCached) Run(
+    public static (IReadOnlyList<string> Paths, int Mismatches, int Measured, int NotCached, IReadOnlyList<string> Incomplete) Run(
         CorpusManifest manifest, string cacheRoot, string harness, TimeSpan childTimeout, string outputDirectory, DateOnly date, TextWriter progress)
     {
         var folderRows = new List<string> { string.Join('\t', FolderColumns) };
         var packageRows = new List<string> { string.Join('\t', PackageColumns) };
         var mismatches = new List<string>();
+        var incomplete = new List<string>();
         var totals = new Totals();
 
         foreach (var (entry, number) in manifest.Entries.Select((e, i) => (e, i + 1)))
@@ -132,6 +133,9 @@ public static class WorkerParity
             totals.InProcessBuildMs += inProcess.Payload?.BuildMs ?? 0;
             totals.WorkerWallMs += worker.WallMs;
             totals.WorkerAnalyzeMs += worker.AnalyzeMs;
+            // A half that did not finish compares nothing, even when neither half yielded a folder row (final review).
+            if (inProcess.Status != "ok" || worker.Status != "ok")
+                incomplete.Add($"{Clean(name)} (in-process {Clean(inProcess.Status)}, worker {Clean(worker.Status)})");
 
             var mine = inProcess.Payload?.Folders ?? [];
             var theirs = worker.Report?.Folders ?? [];
@@ -171,8 +175,8 @@ public static class WorkerParity
         var stem = Path.Combine(outputDirectory, $"worker-parity-{date:yyyy-MM-dd}");
         PackageReachResult.WriteAtomically(stem + ".tsv", string.Join("\n", folderRows) + "\n");
         PackageReachResult.WriteAtomically(stem + "-packages.tsv", string.Join("\n", packageRows) + "\n");
-        PackageReachResult.WriteAtomically(stem + ".md", Summary(manifest, cacheRoot, date, totals, mismatches));
-        return ([stem + ".tsv", stem + "-packages.tsv", stem + ".md"], mismatches.Count, totals.Packages, totals.NotCached);
+        PackageReachResult.WriteAtomically(stem + ".md", Summary(manifest, cacheRoot, date, totals, mismatches, incomplete));
+        return ([stem + ".tsv", stem + "-packages.tsv", stem + ".md"], mismatches.Count, totals.Packages, totals.NotCached, incomplete);
     }
 
     // Which of a folder's other fields differ between the two passes: assemblies (in order), load failures (paths and
@@ -254,7 +258,7 @@ public static class WorkerParity
         return ("ok", report, clock.ElapsedMilliseconds, analyze.ElapsedMilliseconds);
     }
 
-    private static string Summary(CorpusManifest manifest, string cacheRoot, DateOnly date, Totals totals, List<string> mismatches)
+    private static string Summary(CorpusManifest manifest, string cacheRoot, DateOnly date, Totals totals, List<string> mismatches, List<string> incomplete)
     {
         var text = new StringBuilder();
         text.AppendLine($"# Graph worker parity, {date:yyyy-MM-dd}");
@@ -270,6 +274,8 @@ public static class WorkerParity
         text.AppendLine($"- mismatches: {mismatches.Count}");
         if (totals.Packages == 0 || totals.NotCached > 0)
             text.AppendLine($"- **NOT COMPARABLE**: {(totals.Packages == 0 ? "no package was measured" : $"{totals.NotCached} manifest entr(ies) not cached")}, so this run is no evidence of parity.");
+        if (incomplete.Count > 0)
+            text.AppendLine($"- **NOT COMPARABLE**: {incomplete.Count} package(s) where a half did not finish: {string.Join("; ", incomplete.Take(MaxListed))}");
         text.AppendLine();
         text.AppendLine("| Wall time (sum over packages) | ms |");
         text.AppendLine("|---|---:|");
