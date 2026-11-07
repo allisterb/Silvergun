@@ -7,6 +7,9 @@ manifest's hash. A report describes the code and the package versions of its dat
 - **Written by:** the benign-corpus harness (`tests/Silvergun.CodeAnalysis.IL.Tests.BenignCorpusHarness`, whose
   default `--out` is this folder), the YARA timing probe (`tests/Silvergun.PackageAnalysis.NuGet.Tests.YaraTimingProbe`),
   and the measurement tasks each report names.
+- **`c-build/`:** the reachability report over the build-time corpus (`../corpus/c-build.manifest`), whose file names
+  would otherwise collide with the C100 report of the same date. `reachability-combine-<date>.md` judges the two
+  together.
 - **Third-party data:** package ids, versions, entry names and finding counts derived from public nuget.org packages,
   each under its own licence. No package file is stored here.
 - **Redaction (2026-11-07):** these files were moved from the project's internal notes, and in moving them local
