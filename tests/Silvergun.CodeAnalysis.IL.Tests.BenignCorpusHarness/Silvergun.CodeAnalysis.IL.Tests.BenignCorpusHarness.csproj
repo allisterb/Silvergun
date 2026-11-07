@@ -27,8 +27,13 @@
     <!-- The pinned corpus. Lives in the repo (it IS the experiment definition); the .nupkg files it names are
          cached outside the repo and never committed. -->
     <Content Include="benign-corpus.manifest" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Corpus data lives in data/corpus; each is linked so it still lands next to the executable, where the defaults look. -->
     <!-- The 2026-08-21 P-lib presence baseline as data, R2's regression oracle; its header names its source. -->
-    <Content Include="presence-oracle-2026-08-21.tsv" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\data\corpus\presence-oracle-2026-08-21.tsv" Link="presence-oracle-2026-08-21.tsv" CopyToOutputDirectory="PreserveNewest" />
+    <!-- R2b's regression oracle (the S2 map), the oracle option's default; its header names its source. -->
+    <Content Include="..\..\data\corpus\presence-oracle-2026-11-06.tsv" Link="presence-oracle-2026-11-06.tsv" CopyToOutputDirectory="PreserveNewest" />
+    <!-- R2b S3's build-time corpus, the combine mode's default C-build manifest; provenance in data/corpus/c-build.provenance.md. -->
+    <Content Include="..\..\data\corpus\c-build.manifest" Link="c-build.manifest" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

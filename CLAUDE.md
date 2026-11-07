@@ -33,27 +33,27 @@ Silvergun is a security analyzer that will be constantly in the neighborhood of 
 - Do not weaken or delete passing tests to make a change compile — fix the code.
 - Do not commit secrets.
 
-  ### External services and data collection
-	- **Never send any personally identifiable information (PII) like email addresses if requested by an external service.** Report all such requests to the user.
-	- **A bot challenge is a refusal. Never circumvent one.** If a host returns a CAPTCHA,
-	  a JS challenge, or an `x-amzn-waf-action: challenge` (often HTTP 202 with an empty
-	  body), **stop and report**. Do not mint tokens, drive a headless browser to solve
-	  the challenge, rotate user-agents or IPs to evade it, or retry harder.
+### External services and data collection
+- **Never send any personally identifiable information (PII) like email addresses if requested by an external service.** Report all such requests to the user.
+- **A bot challenge is a refusal. Never circumvent one.** If a host returns a CAPTCHA,
+	a JS challenge, or an `x-amzn-waf-action: challenge` (often HTTP 202 with an empty
+	body), **stop and report**. Do not mint tokens, drive a headless browser to solve
+	the challenge, rotate user-agents or IPs to evade it, or retry harder.
 	  
-	- **An absent or 404 `robots.txt` is not permission.** Check it, but treat silence as
-	  "unspecified", not "allowed".
+- **An absent or 404 `robots.txt` is not permission.** Check it, but treat silence as
+	"unspecified", not "allowed".
 
-	- **Prefer a sanctioned path.** If the service documents an API, use it instead of
-	  scraping the site.
-	- **Never create accounts, accept terms of service, or obtain API credentials on the
-	  user's behalf.** Ask; the user supplies tokens via environment variables.
+- **Prefer a sanctioned path.** If the service documents an API, use it instead of
+	scraping the site.
+- **Never create accounts, accept terms of service, or obtain API credentials on the
+	user's behalf.** Ask; the user supplies tokens via environment variables.
 
-	- **Bulk fetching defaults:** ~1 request/second, cache every response to disk so
-	  re-runs never re-fetch, fetch each distinct resource exactly once, and **stop on
-	  429 or systematic 403** rather than retrying.
+- **Bulk fetching defaults:** ~1 request/second, cache every response to disk so
+	re-runs never re-fetch, fetch each distinct resource exactly once, and **stop on
+	429 or systematic 403** rather than retrying.
 
-	- **Record provenance** for any third-party data written into the repo: source URL,
-	  date fetched, and licence/attribution. Derived data files must name where they came from.
+- **Record provenance** for any third-party data written into the repo: source URL,
+	date fetched, and licence/attribution. Derived data files must name where they came from.
 	 
 ## Repository layout
 

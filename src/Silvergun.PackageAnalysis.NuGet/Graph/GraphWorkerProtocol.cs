@@ -42,8 +42,10 @@ public static class GraphWorkerProtocol
     /// <summary>
     /// Max bytes in one worker record, excluding its <c>\n</c> (16 MiB). <see cref="Reachability"/> bounds a report's
     /// counts (paths of at most <see cref="Reachability.MaxPathHops"/> hops, three examples per class and sink, 64 profiles
-    /// per class), not its names, which come from package metadata: a report over this is not sent, and the worker sends
-    /// <c>fatal</c> instead, so that folder is Crashed, never silently cut.
+    /// per class) and each name (<see cref="Reachability.MaxNameChars"/>), which bounds a report but not under this
+    /// limit (8 classes × 12 sinks × 3 examples × 64 hops of two bounded names is ~40 M chars), nor the record's
+    /// assembly and load-failure lists: a record over this is not sent, and the worker sends <c>fatal</c> instead, so
+    /// that folder is Crashed, never silently cut.
     /// </summary>
     public const int MaxRecordLineBytes = 16 * 1024 * 1024;
 

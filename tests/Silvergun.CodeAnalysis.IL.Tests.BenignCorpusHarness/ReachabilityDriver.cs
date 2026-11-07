@@ -9,6 +9,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
+using global::NuGet.Packaging;
+
 /// <summary>
 /// Where a pinned package sits in the benign-corpus cache: <c>&lt;cache&gt;/packages/&lt;Id&gt;.&lt;Version&gt;.nupkg</c>.
 /// One rule for both modes; <see cref="PackageCache.AcquireAsync"/> downloads to this path, <c>--reachability</c> only
@@ -175,8 +177,27 @@ public sealed class ReachabilityDriver(
         return new ReachabilityRun(results, pending, children);
     }
 
-    // The cached result of one entry, or null. A result of another build, or naming another package, refuses the run.
-    private PackageReachResult? Load(ManifestEntry entry)
+    // The cached result of one entry, or null (none, or of another schema: re-measured). A result of another build, or
+    // naming another package, refuses the run.
+    private PackageReachResult? Load(ManifestEntry entry) =>
+        CachedResults.Load(resultsDir, entry) is not { } result ? null
+        : result.Identity == identity ? result
+        : throw new MixedBuildException(
+            $"Refusing to mix builds: {PackageReachResult.PathOf(resultsDir, entry)} was measured by {result.Identity}, but this harness is {identity}. " +
+            "Use a fresh --results directory, or delete the stale results.");
+    #endregion
+}
+
+/// <summary>
+/// Reads a cached result of <c>--results</c>, for <see cref="ReachabilityDriver"/> and <see cref="ReachabilityCombine"/>
+/// alike. A missing file, or one of another <see cref="PackageReachResult.Schema"/>, is <b>not cached</b> (null): its
+/// schema is read before the rest, so an older result is never misread as this schema (R2b, d). One that is not a result,
+/// or names another package, is a <see cref="MixedBuildException"/>. The build identity is the caller's to check.
+/// </summary>
+public static class CachedResults
+{
+    #region Methods
+    public static PackageReachResult? Load(string resultsDir, ManifestEntry entry)
     {
         var path = PackageReachResult.PathOf(resultsDir, entry);
         if (!File.Exists(path))
@@ -185,21 +206,29 @@ public sealed class ReachabilityDriver(
         PackageReachResult result;
         try
         {
-            result = PackageReachResult.FromJson(File.ReadAllText(path));
+            var text = File.ReadAllText(path);
+            if (SchemaOf(text) != PackageReachResult.CurrentSchema)
+                return null;
+            result = PackageReachResult.FromJson(text);
         }
-        catch (JsonException ex)
+        catch (Exception ex) when (ex is JsonException or InvalidDataException)
         {
             throw new MixedBuildException($"{path} is not a reachability result ({ex.Message}); delete it to re-measure the package.");
         }
-        if (!string.Equals(result.Id, entry.Id, StringComparison.Ordinal) || !string.Equals(result.Version, entry.Version, StringComparison.Ordinal))
-            throw new MixedBuildException($"{path} holds {result.Id} {result.Version}, not {entry.Id} {entry.Version}.");
-        if (result.Schema != PackageReachResult.CurrentSchema)
-            throw new MixedBuildException($"{path} has result schema {result.Schema}; this harness writes {PackageReachResult.CurrentSchema}.");
-        return result.Identity == identity
+        return string.Equals(result.Id, entry.Id, StringComparison.Ordinal) && string.Equals(result.Version, entry.Version, StringComparison.Ordinal)
             ? result
-            : throw new MixedBuildException(
-                $"Refusing to mix builds: {path} was measured by {result.Identity}, but this harness is {identity}. " +
-                "Use a fresh --results directory, or delete the stale results.");
+            : throw new MixedBuildException($"{path} holds {result.Id} {result.Version}, not {entry.Id} {entry.Version}.");
+    }
+
+    // The integer Schema property of a result's JSON object; a JsonException when there is none.
+    private static int SchemaOf(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.ValueKind == JsonValueKind.Object
+            && document.RootElement.TryGetProperty(nameof(PackageReachResult.Schema), out var schema)
+            && schema.ValueKind == JsonValueKind.Number && schema.TryGetInt32(out var value)
+                ? value
+                : throw new JsonException("no integer Schema property");
     }
     #endregion
 }
@@ -240,9 +269,9 @@ public static class ReachabilityChildRunner
             process.WaitForExit(10_000);
             File.Delete(payloadPath);
             RemoveExtraction(stderr.Wait(10_000) ? stderr.Result : string.Empty);
-            return PackageReachResult.Without(entry, PackageReachResult.Timeout,
+            return WithLibTfm(PackageReachResult.Without(entry, PackageReachResult.Timeout,
                 $"child timed out after {timeout.TotalSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)} s and was killed", null, identity,
-                PackageCost.None with { ChildWallMs = clock.ElapsedMilliseconds });
+                PackageCost.None with { ChildWallMs = clock.ElapsedMilliseconds }), nupkg);
         }
         var wallMs = clock.ElapsedMilliseconds;
 
@@ -252,7 +281,36 @@ public static class ReachabilityChildRunner
         File.Delete(payloadPath);
         if (result.Status is not (PackageReachResult.Scanned or PackageReachResult.GraphFailed or PackageReachResult.NoAssemblies))
             RemoveExtraction(errors);
-        return result;
+        return WithLibTfm(result, nupkg);
+    }
+
+    /// <summary>
+    /// An <see cref="PackageReachResult.UnmeasuredFloor"/> result with the lib TFM <see cref="TfmSelection"/> picks over
+    /// <paramref name="nupkg"/>'s file list, so it is a P-lib floor exactly when the package has a P-lib folder; any other
+    /// result unchanged. Reads the archive's file names only: nothing is extracted or loaded. An unreadable archive keeps
+    /// <see cref="PackageReachResult.LibTfmUnknown"/> (a floor in P-lib as well as P-all) and says so in the detail.
+    /// <para>
+    /// <b>The listing is unbounded</b> and runs in the parent, outside any child: the child already performed the same
+    /// read first (<see cref="ReachabilityChild.Measure"/>), in a process under the guard, so an archive whose central
+    /// directory is too costly to list has already shown itself there. No cap is applied. <b>Do not replace this with a
+    /// TFM line the child prints on stderr:</b> zip entry names may contain LF, and the child echoes package-derived text
+    /// (exception messages, paths) to stderr, so a crafted entry name could forge such a marker line and steer P-lib
+    /// membership. The parent reads the archive itself.
+    /// </para>
+    /// </summary>
+    public static PackageReachResult WithLibTfm(PackageReachResult result, string nupkg)
+    {
+        if (!result.UnmeasuredFloor)
+            return result;
+        try
+        {
+            using var reader = new PackageArchiveReader(nupkg);
+            return result.WithLibTfm(TfmSelection.Choose(reader.GetFiles()));
+        }
+        catch (Exception ex)
+        {
+            return result with { LibTfm = null, LibTfms = [], LibTfmUnknown = true, Detail = $"{result.Detail}; lib TFM unknown, the .nupkg file list is unreadable ({ex.GetType().Name}: {ex.Message})" };
+        }
     }
 
     /// <summary><paramref name="timeout"/> as <see cref="Process.WaitForExit(int)"/> takes it: clamped to [1, int.MaxValue] ms.</summary>

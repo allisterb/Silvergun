@@ -191,9 +191,22 @@ public sealed class AnalyzeFindingCountTests
     /// <c>f528fe8</c>, CHA begin) and <c>ModuleMetadata.Read</c> (<c>994a097</c>, A2 S3), both classified by
     /// <c>capability System.IO.File FileSystem</c>. The pin had not been updated since <c>4e092e0</c>, before either.
     /// </para>
+    /// <para>
+    /// <c>System.Security.Cryptography.SHA256.HashData</c> (13 findings, re-measured 2026-11-06) is reachability R2b S1's
+    /// name bounding (ADR 0037 amendment a5): <c>Reachability.BoundName</c> ends a name cut at <c>MaxNameChars</c> with the
+    /// first 8 hex of its SHA-256, a Cryptography call by the map's <c>System.Security.Cryptography.*</c> entry. The S2 map
+    /// moves nothing here: the library calls no <c>Marshal</c>, <c>GCHandle</c> or <c>Directory.GetParent</c>.
+    /// </para>
+    /// <para>
+    /// <c>System.Runtime.InteropServices.MemoryMarshal.AsBytes</c> (14 findings, re-measured 2026-11-06) is the S0-S3 review's
+    /// Nit 1: <c>Reachability.BoundName</c> now hashes the name's UTF-16 code units, read as bytes through
+    /// <c>MemoryMarshal.AsBytes</c>, instead of its UTF-8. UnsafeMemory by the map's <c>System.Runtime.InteropServices.MemoryMarshal</c>
+    /// entry; the only call of it in the library.
+    /// </para>
     /// </summary>
     private static readonly string[] MeasuredIlLibraryFindings =
     [
+        "Cryptography Call System.Security.Cryptography.SHA256.HashData",
         "FileSystem Call System.IO.Directory.EnumerateFiles",
         "FileSystem Call System.IO.Directory.Exists",
         "FileSystem Call System.IO.File.Exists",
@@ -206,6 +219,7 @@ public sealed class AnalyzeFindingCountTests
         "FileSystem Call System.IO.FileSystemInfo.get_FullName",
         "FileSystem Construct System.IO.FileInfo..ctor",
         "FileSystem Construct System.IO.StreamReader..ctor",
+        "UnsafeMemory Call System.Runtime.InteropServices.MemoryMarshal.AsBytes",
     ];
 
     private const int TimeoutMs = 120_000;

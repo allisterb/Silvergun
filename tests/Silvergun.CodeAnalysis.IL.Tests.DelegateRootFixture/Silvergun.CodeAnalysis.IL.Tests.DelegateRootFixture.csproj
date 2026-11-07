@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Runtime-class and Direct-label fixture for reachability R2b, S1 (docs/agent/tasks/reachability-r2b.md; ADR 0037
+         amendment a1/a2). Malware-SHAPED, for a defensive analyzer: type initializers that only create a delegate to a
+         payload and hand it to something that runs it later (Task.Run, a Thread, a Timer, AssemblyLoadContext.Resolving,
+         an own helper), or that only build an expression tree over it (an ldtoken, never compiled), each beside a benign
+         twin of the same shape; plus a finalizer and an [UnmanagedCallersOnly] export. The payloads are INERT capability references (File.Exists on a relative dummy name, an HttpClient built
+         with no address): no URL, host or real path. Expectations live in DelegateRootTests in the test project.
+
+         Same settings as RootFixture: net10.0 only, Release-shaped (Optimize on), NO PackageReference. Its type
+         initializers must never run, so the test host never loads it: DelegateRootFixtureAssembly locates it by path
+         and it is read as metadata. Its own project, so nothing here moves a pinned presence or method-count baseline
+         of the mechanism or root fixtures. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Optimize>true</Optimize>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>false</IsTestProject>
+  </PropertyGroup>
+
+</Project>

@@ -8,9 +8,10 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 
-/// <summary>What the report is rendered from, besides the results.</summary>
+/// <summary>What the report is rendered from, besides the results. <see cref="OracleName"/>: the oracle file's name (<c>--oracle</c>).</summary>
 public sealed record ReachabilityReportContext(
-    DateOnly Date, CorpusManifest Manifest, string CacheRoot, BuildIdentity Identity, TimeSpan ChildTimeout, PresenceOracle Oracle);
+    DateOnly Date, CorpusManifest Manifest, string CacheRoot, BuildIdentity Identity, TimeSpan ChildTimeout, PresenceOracle Oracle,
+    string OracleName = Program.OracleFileName);
 
 /// <summary>
 /// Renders reachability R2's artifacts: <c>reachability-benign-&lt;date&gt;.md</c> (sections 1-12 of the spec) and
@@ -60,12 +61,12 @@ public static class ReachabilityCorpusReport
         var lines = new List<string>();
 
         lines.AddRange([
-            $"# Reachability R2 - the benign-corpus measurement ({context.Date:yyyy-MM-dd})",
+            $"# Reachability R2b - the benign-corpus measurement ({context.Date:yyyy-MM-dd})",
             string.Empty,
-            "**A measurement, not a feature** (`docs/agent/tasks/reachability-r2.md`). It changes no CLI, report, gate or",
-            "map. The expectations it judges (E1, E2) and their thresholds were pre-registered in the spec before any corpus",
-            "run. A reachable capability is possible, not proven; a benign package's label is \"overwhelmingly not malware\" by",
-            "download count, not by audit.",
+            "**A measurement, not a feature** (`docs/agent/tasks/reachability-r2.md`, `reachability-r2b.md`). It changes no CLI,",
+            "report, gate or map. The expectations it judges (E1, E2) and their thresholds were pre-registered in the specs before",
+            "any corpus run. A reachable capability is possible, not proven; a benign package's label is \"overwhelmingly not",
+            "malware\" by download count, not by audit.",
             string.Empty,
         ]);
 
@@ -86,20 +87,20 @@ public static class ReachabilityCorpusReport
 
     /// <summary>
     /// The classified data, one record per line, ordinal: <c>status</c> per package, <c>roots</c> per folder and class,
-    /// <c>reach</c> per folder, class and sink, <c>presence</c> per folder assembly, capability and kind.
+    /// <c>reach</c> per folder, class and sink (with its Direct count), <c>presence</c> per folder assembly, capability and kind.
     /// </summary>
     public static IReadOnlyList<string> Tsv(IReadOnlyList<PackageReachResult> results)
     {
         string Row(params object?[] fields) => string.Join('\t', fields.Select(f => Tab(Convert.ToString(f, CultureInfo.InvariantCulture) ?? "-")));
         var rows = results.SelectMany(r =>
-            new[] { Row("status", r.Id, r.Version, "-", "-", "-", "-", "-", r.Status, "-", "-", "-") }
+            new[] { Row("status", r.Id, r.Version, "-", "-", "-", "-", "-", r.Status, "-", "-", "-", "-") }
             .Concat(r.Folders.SelectMany(f =>
-                f.RootCounts.Select(c => Row("roots", r.Id, r.Version, f.Folder, f.Role, f.IsPlib ? "yes" : "no", c.Class, "-", "-", c.Roots, "-", "-"))
-                .Concat(f.Reaches.Select(x => Row("reach", r.Id, r.Version, f.Folder, f.Role, f.IsPlib ? "yes" : "no", x.Class, SinkName(x.Capability), "-", x.Roots, x.Bound, x.Instantiated)))
+                f.RootCounts.Select(c => Row("roots", r.Id, r.Version, f.Folder, f.Role, f.IsPlib ? "yes" : "no", c.Class, "-", "-", c.Roots, "-", "-", "-"))
+                .Concat(f.Reaches.Select(x => Row("reach", r.Id, r.Version, f.Folder, f.Role, f.IsPlib ? "yes" : "no", x.Class, SinkName(x.Capability), "-", x.Roots, x.Bound, x.Instantiated, x.Direct)))
                 .Concat(f.Presence.SelectMany(p => p.Findings.Select(n =>
-                    Row("presence", r.Id, r.Version, f.Folder, f.Role, f.IsPlib ? "yes" : "no", p.Assembly, n.Capability, n.Kind, n.Findings, "-", "-")))))))
+                    Row("presence", r.Id, r.Version, f.Folder, f.Role, f.IsPlib ? "yes" : "no", p.Assembly, n.Capability, n.Kind, n.Findings, "-", "-", "-")))))))
             .Order(StringComparer.Ordinal);
-        return [Row("Record", "Package", "Version", "Folder", "Role", "PLib", "ClassOrAssembly", "Capability", "KindOrStatus", "Count", "Bound", "Instantiated"), .. rows];
+        return [Row("Record", "Package", "Version", "Folder", "Role", "PLib", "ClassOrAssembly", "Capability", "KindOrStatus", "Count", "Bound", "Instantiated", "Direct"), .. rows];
     }
 
     /// <summary>The cost file: every time and working set. Not deterministic, and not part of the determinism check.</summary>
@@ -174,10 +175,17 @@ public static class ReachabilityCorpusReport
             $"{Status(PackageReachResult.GraphFailed)} / {Status(PackageReachResult.NoAssemblies)} / " +
             $"{Status(PackageReachResult.Crashed)} / {Status(PackageReachResult.Timeout)} / {Status(PackageReachResult.Incomplete)} / {Status(PackageReachResult.NotCached)} |",
             $"| Measured packages with a lib TFM (`TfmSelection`) | {withTfm} |",
+            $"| Unmeasured floor packages (crashed / timeout / incomplete): in P-all / in P-lib (a lib TFM by `TfmSelection` over the `.nupkg`, or unknown) | " +
+            $"{pall.Units.Count(u => u.Result.UnmeasuredFloor)} / {plib.Units.Count(u => u.Result.UnmeasuredFloor)} |",
             $"| **P-lib denominator** (the P-lib folder is one either side read: graph or presence) | **{plib.Denominator}** |",
             $"| **P-all denominator** (some folder is one either side read: graph or presence) | **{pall.Denominator}** |",
+            $"| Names cut at {Reachability.MaxNameChars} chars (amendment a5; distinct per folder, summed over every folder; per folder in section 12) | {NamesCutText(NamesCutTotal(results))} |",
             $"| Signal capabilities | {string.Join(", ", ReachabilityChild.SignalCapabilities)} |",
             $"| Trigger classes | {string.Join(", ", ReachabilityChild.TriggerClasses)} |",
+            $"| Judged in this run (P-lib and P-all, both must pass) | {string.Join(", ", ReachabilityAggregation.RuntimeClasses)} |",
+            $"| Judged by `--combine` only (P-all over C100 and C-build) | {string.Join(", ", ReachabilityAggregation.CombineClasses)} |",
+            $"| Labels (each (class, label) its own verdict) | {string.Join(", ", ReachabilityAggregation.Labels)} |",
+            $"| Presence oracle (`--oracle`) | `{Escape(context.OracleName)}` |",
             $"| Judged when presence is at least | {ReachabilityAggregation.MinimumJudgedPresence} packages in the population |",
             "| E1 | per judged signal capability: reach share (ChaOnly) <= 0.5 x presence share |",
             "| E2 | packages with a class profile holding >= 2 distinct signal capabilities (Unseen-inclusive) <= 10% |",
@@ -185,9 +193,12 @@ public static class ReachabilityCorpusReport
             "**Populations.** P-lib: per package, the folder `lib/<TfmSelection.Choose>` (highest `net<x>.<y>`, else",
             "`netstandard2.0`), the presence baseline's folder. P-all: every folder either side read (a built graph, or a",
             "graph-failed folder presence scanned, which makes its package a floor package); a package counts",
-            "for (class, capability) when any of its folders does. Presence is the raw-CCI `CapabilityAnalysis`, all finding",
+            "for (class, capability) when any of its folders does. A crashed, timed-out or incomplete package is a floor",
+            "package with unmeasured presence and reach: in P-all always, in P-lib when its `.nupkg` has a lib TFM (or its file",
+            "list is unreadable, so that is unknown), and in no role table. Presence is the raw-CCI `CapabilityAnalysis`, all finding",
             "kinds, over each folder's assemblies, recomputed in the same child. Reach share = packages where a root of the",
-            "class reaches the capability at ChaOnly (`CapabilityReach.Roots > 0`); Bound share uses `Bound > 0`.",
+            "class reaches the capability at ChaOnly (`CapabilityReach.Roots > 0`); Bound share uses `Bound > 0`; Direct share",
+            "uses `Direct > 0`, the roots reaching it with no `Ldftn`, `Ldvirtftn` or `LoadToken` edge (ADR 0037 amendment a2).",
             string.Empty,
             "### Per package",
             string.Empty,
@@ -208,12 +219,15 @@ public static class ReachabilityCorpusReport
         var nonDll = plib.Units.SelectMany(u => u.Folders.SelectMany(f => f.Presence.Where(p => !p.Assembly.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
             .Select(p => $"{u.Id}: {p.Assembly}"))).ToArray();
         lines.AddRange([
-            "## 2. Regression oracle (P-lib presence against 2026-08-21)",
+            $"## 2. Regression oracle (P-lib presence against `{Escape(context.OracleName)}`)",
             string.Empty,
-            "P-lib presence, every finding kind, over the P-lib folders' `.dll` assemblies (the baseline's rule), against",
-            "`benign-corpus-top100-2026-08-21.md`: the denominator, assemblies, methods analysed, findings, the per-capability",
-            "package counts and totals, and per package its TFM, assemblies, methods and findings per capability. The expected",
-            "numbers are the harness's `presence-oracle-2026-08-21.tsv`, copied from that report.",
+            "P-lib presence, every finding kind, over the P-lib folders' `.dll` assemblies (the baseline's rule), against the",
+            "presence oracle (`--oracle`; the file's header names the report it was copied from): the denominator, assemblies,",
+            "methods analysed, findings, the per-capability package counts and totals, and per package its TFM, assemblies,",
+            "methods and findings per capability. R2 used `presence-oracle-2026-08-21.tsv`; R2b's default, on the S2 map, is",
+            "`presence-oracle-2026-11-06.tsv`. A crashed, timed-out or",
+            "incomplete package in P-lib (a lib TFM, or an unknown one) has no measured presence, so it always makes the oracle",
+            "a MISMATCH, and the run then gives no verdict (by design: R2's pre-registered rule, the conservative direction).",
             string.Empty,
             comparison.Full
                 ? $"**Result: {(comparison.Match ? "MATCH" : "MISMATCH")}** ({comparison.PackagesCompared} packages compared, totals included)."
@@ -241,53 +255,81 @@ public static class ReachabilityCorpusReport
 
     private static void E1Section(List<string> lines, PopulationView plib, PopulationView pall, string? notComparable)
     {
-        string Judge(Outcome outcome) => notComparable ?? Render(outcome);
         lines.AddRange([
             "## 3. E1 - trigger reach shares against presence",
             string.Empty,
             "Judged symmetrically. A floor package has Partial reachability, an assembly only presence saw (graph-failed folders",
-            "included), or an assembly only the graph loaded; it stays in the denominator. A cell **fails** only in its best",
+            "included), or an assembly only the graph loaded, or its child crashed, timed out or stopped short (presence and",
+            "reach unmeasured); it stays in the denominator. A cell **fails** only in its best",
             "case: reach from built graphs, against presence from every scoped folder plus each floor package whose presence",
             "could not be measured. It **passes** only in its worst case: every floor package not already reaching counted as",
             "reaching, against presence from the graph-loaded assemblies only. Otherwise it is **Floor**, not a pass.",
             string.Empty,
+            "**Unmeasured packages and the verdict.** A crashed, timed-out or incomplete package in P-lib (its `.nupkg` has a",
+            "lib TFM, or whether it has one is unknown) makes the regression oracle a MISMATCH (section 2), so no verdict is",
+            "given at all. Of the unmeasured packages, therefore, only the P-all floors of packages with no lib TFM ever feed a",
+            "verdict; the P-lib floor rule is applied, but cannot decide one.",
+            string.Empty,
+            "**Labels and populations (R2b).** Each trigger class is judged at two labels, each (class, label) its own verdict:",
+            "**ChaOnly**, R2's cell (reach = `CapabilityReach.Roots > 0`), and **Direct** (reach counts only the roots reaching",
+            "the capability without a deferred edge (Ldftn, Ldvirtftn, LoadToken), `CapabilityReach.Direct > 0`; E2 counts only the profiles' Direct sets).",
+            $"{string.Join(", ", ReachabilityAggregation.RuntimeClasses)} are judged on this run, in P-lib and P-all: a (class,",
+            $"label) passes only if it passes in both. {string.Join(" and ", ReachabilityAggregation.CombineClasses)} are judged on P-all only, over C100",
+            $"and C-build as one population, by `--combine` alone: here their cells are data and read \"{ClassVerdict.JudgedByCombine}\",",
+            "never a verdict.",
+            string.Empty,
         ]);
         foreach (var view in new[] { plib, pall })
         {
-            var results = ReachabilityChild.TriggerClasses.Select(k => ReachabilityAggregation.E1(view, k)).ToArray();
-            lines.AddRange([
-                $"### {view.Name} (denominator {view.Denominator}; floor packages {view.Units.Count(u => u.Floor)})",
-                string.Empty,
-                "| Signal capability | Presence | " + string.Join(" | ", results.Select(r => $"{r.Class} reach | {r.Class} Bound | {r.Class} E1")) + " |",
-                "| --- | ---: |" + string.Concat(results.Select(_ => " ---: | ---: | --- |")),
-            ]);
-            foreach (var capability in ReachabilityChild.SignalCapabilities)
-            {
-                var cells = results.Select(r => r.Cells.Single(c => c.Capability == capability)).ToArray();
-                lines.Add($"| {capability} | {cells[0].Presence} | " + string.Join(" | ", cells.Zip(results).Select(x =>
-                    $"{x.First.Reach} | {x.First.Bound} | " +
-                    (notComparable ?? (x.Second.Outcome == Outcome.NoData ? "no data"
-                        : x.First.PossiblyJudged ? (x.First.WorstCasePasses ? "Pass (may be judged)" : "Floor (may be judged)")
-                        : !x.First.Judged ? "too rare to judge"
-                        : x.First.Outcome == Outcome.Floor ? $"Floor ({x.First.FloorPackages} floor package(s); presence best {x.First.PresenceBest}, seen {x.First.PresenceSeen})"
-                        : Render(x.First.Outcome))))) + " |");
-            }
-            lines.AddRange([
-                string.Empty,
-                "| Class | Roots | E1 |",
-                "| --- | ---: | --- |",
-                .. results.Select(r => $"| {r.Class} | {r.Roots} | {Judge(r.Outcome)} |"),
-                string.Empty,
-            ]);
+            lines.AddRange([$"### {view.Name} (denominator {view.Denominator}; floor packages {view.Units.Count(u => u.Floor)})", string.Empty]);
+            foreach (var label in ReachabilityAggregation.Labels)
+                E1Table(lines, view, label, ReachabilityChild.TriggerClasses, (k, text) => ReachabilityAggregation.JudgedInSingleRun(k) ? notComparable ?? text : ClassVerdict.JudgedByCombine);
         }
 
+        string Cell(RootClass k, Outcome? outcome) => !ReachabilityAggregation.JudgedInSingleRun(k) ? ClassVerdict.JudgedByCombine : notComparable ?? Render(outcome!.Value);
         lines.AddRange([
             "### Per-class verdict (a fail of E1 or E2 in either population = does not discriminate; any Floor = undecided)",
             string.Empty,
-            "| Class | P-lib E1 | P-lib E2 | P-all E1 | P-all E2 | Verdict |",
-            "| --- | --- | --- | --- | --- | --- |",
-            .. ReachabilityAggregation.Verdicts(plib, pall).Select(v =>
-                $"| {v.Class} | {Judge(v.PlibE1)} | {Judge(v.PlibE2)} | {Judge(v.PallE1)} | {Judge(v.PallE2)} | {notComparable ?? v.Verdict} |"),
+            "| Class | Label | P-lib E1 | P-lib E2 | P-all E1 | P-all E2 | Verdict |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
+            .. ReachabilityChild.TriggerClasses.SelectMany(k => ReachabilityAggregation.Labels.Select(l => ReachabilityAggregation.Verdicts(plib, pall, l).Single(v => v.Class == k)))
+                .Select(v => $"| {v.Class} | {v.Label} | {Cell(v.Class, v.PlibE1)} | {Cell(v.Class, v.PlibE2)} | {Cell(v.Class, v.PallE1)} | {Cell(v.Class, v.PallE2)} | " +
+                    $"{(ReachabilityAggregation.JudgedInSingleRun(v.Class) ? notComparable ?? v.Verdict : ClassVerdict.JudgedByCombine)} |"),
+            string.Empty,
+        ]);
+    }
+
+    /// <summary>
+    /// One E1 table at <paramref name="label"/> over <paramref name="classes"/>: per signal capability, presence and per class
+    /// its reach (ChaOnly also its Bound share) and cell; then each class's roots and outcome. <paramref name="judge"/> turns a
+    /// rendered cell or outcome of a class into what the report may show (a not-comparable reason, "judged by --combine").
+    /// </summary>
+    internal static void E1Table(List<string> lines, PopulationView view, ReachLabel label, IReadOnlyList<RootClass> classes, Func<RootClass, string, string> judge)
+    {
+        var results = classes.Select(k => ReachabilityAggregation.E1(view, k, label)).ToArray();
+        var bound = label == ReachLabel.ChaOnly;
+        lines.AddRange([
+            $"#### {view.Name} - {label}",
+            string.Empty,
+            "| Signal capability | Presence | " + string.Join(" | ", results.Select(r => bound ? $"{r.Class} reach | {r.Class} Bound | {r.Class} E1" : $"{r.Class} Direct reach | {r.Class} E1")) + " |",
+            "| --- | ---: |" + string.Concat(results.Select(_ => bound ? " ---: | ---: | --- |" : " ---: | --- |")),
+        ]);
+        foreach (var capability in ReachabilityChild.SignalCapabilities)
+        {
+            var cells = results.Select(r => r.Cells.Single(c => c.Capability == capability)).ToArray();
+            lines.Add($"| {capability} | {cells[0].Presence} | " + string.Join(" | ", cells.Zip(results).Select(x =>
+                $"{x.First.Reach} | {(bound ? $"{x.First.Bound} | " : string.Empty)}" +
+                judge(x.Second.Class, x.Second.Outcome == Outcome.NoData ? "no data"
+                    : x.First.PossiblyJudged ? (x.First.WorstCasePasses ? "Pass (may be judged)" : "Floor (may be judged)")
+                    : !x.First.Judged ? "too rare to judge"
+                    : x.First.Outcome == Outcome.Floor ? $"Floor ({x.First.FloorPackages} floor package(s); presence best {x.First.PresenceBest}, seen {x.First.PresenceSeen})"
+                    : Render(x.First.Outcome)))) + " |");
+        }
+        lines.AddRange([
+            string.Empty,
+            "| Class | Roots | E1 |",
+            "| --- | ---: | --- |",
+            .. results.Select(r => $"| {r.Class} | {r.Roots} | {judge(r.Class, Render(r.Outcome))} |"),
             string.Empty,
         ]);
     }
@@ -300,23 +342,27 @@ public static class ReachabilityCorpusReport
             "Packages with a profile (`ReachProfile`) of the class holding two or more distinct signal capabilities. The judged",
             "column counts every such profile; the next two split it by whether the profile also reaches Unseen. Floor packages",
             "are those not counted whose class profiles were cut at 64, or whose reaches are a floor; E2 fails when",
-            "`10 x counted > denominator`, passes only when `10 x (counted + floor) <= denominator`, and is otherwise Floor.",
+            "`10 x counted > denominator`, passes only when `10 x (counted + floor) <= denominator`, and is otherwise Floor. At",
+            "Direct a profile counts by its Direct capability set (`ReachProfile.DirectCapabilities`, `DirectUnseen`).",
             string.Empty,
         ]);
         foreach (var view in new[] { plib, pall })
-        {
-            lines.AddRange([
-                $"### {view.Name} (denominator {view.Denominator})",
-                string.Empty,
-                "| Class | Roots | >= 2 signals (Unseen-inclusive, judged) | Without Unseen | With Unseen | Class profiles cut at 64 (packages) | Floor packages | E2 |",
-                "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
-                .. ReachabilityChild.TriggerClasses.Select(k => ReachabilityAggregation.E2(view, k)).Select(e =>
-                    $"| {e.Class} | {e.Roots} | {e.Inclusive} | {e.Exclusive} | {e.WithUnseen} | " +
-                    $"{(e.TruncatedPackages > 0 ? $"**{e.TruncatedPackages}**" : "0")} | {e.FloorPackages} | {notComparable ?? Render(e.Outcome)} |"),
-                string.Empty,
-            ]);
-        }
+            E2Table(lines, view, ReachabilityChild.TriggerClasses,
+                (k, text) => ReachabilityAggregation.JudgedInSingleRun(k) ? notComparable ?? text : ClassVerdict.JudgedByCombine);
     }
+
+    /// <summary>One E2 table over <paramref name="classes"/>, a row per (class, label); <paramref name="judge"/> as in <see cref="E1Table"/>.</summary>
+    internal static void E2Table(List<string> lines, PopulationView view, IReadOnlyList<RootClass> classes, Func<RootClass, string, string> judge) =>
+        lines.AddRange([
+            $"### {view.Name} (denominator {view.Denominator})",
+            string.Empty,
+            "| Class | Label | Roots | >= 2 signals (Unseen-inclusive, judged) | Without Unseen | With Unseen | Class profiles cut at 64 (packages) | Floor packages | E2 |",
+            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+            .. classes.SelectMany(k => ReachabilityAggregation.Labels.Select(l => ReachabilityAggregation.E2(view, k, l))).Select(e =>
+                $"| {e.Class} | {e.Label} | {e.Roots} | {e.Inclusive} | {e.Exclusive} | {e.WithUnseen} | " +
+                $"{(e.TruncatedPackages > 0 ? $"**{e.TruncatedPackages}**" : "0")} | {e.FloorPackages} | {judge(e.Class, Render(e.Outcome))} |"),
+            string.Empty,
+        ]);
 
     private static void Matrix(List<string> lines, IReadOnlyList<PackageReachResult> results, PopulationView plib, PopulationView pall, IReadOnlyList<string> roles)
     {
@@ -324,21 +370,28 @@ public static class ReachabilityCorpusReport
             "## 5. Class x capability reach shares",
             string.Empty,
             "Cells are `share (packages)` over the stated denominator. Presence has no Unseen column. A role table counts only",
-            "that role's folders, over the packages that have one.",
+            "that role's folders, over the packages that have one. \"Unmeasured\" is how many packages of the denominator",
+            "crashed, timed out or stopped short: they are counted in it, but contribute no presence or reach. Direct counts",
+            "`CapabilityReach.Direct > 0`: a root reaching the sink with no deferred edge (Ldftn, Ldvirtftn, LoadToken).",
             string.Empty,
         ]);
         var sinks = Enum.GetValues<Capability>().Select(c => (Capability?)c).Append(null).ToArray();
         foreach (var view in new[] { plib, pall }.Concat(roles.Select(r => ReachabilityAggregation.View(results, Population.Pall, r))))
-            foreach (var tier in new[] { Tier.ChaOnly, Tier.Bound })
+            foreach (var (name, reach) in new (string, Func<RootClass, Capability?, Share>)[]
+            {
+                (nameof(Tier.ChaOnly), (k, s) => ReachabilityAggregation.Reach(view, k, s, Tier.ChaOnly)),
+                (nameof(Tier.Bound), (k, s) => ReachabilityAggregation.Reach(view, k, s, Tier.Bound)),
+                (nameof(ReachLabel.Direct), (k, s) => ReachabilityAggregation.Reach(view, k, s, ReachLabel.Direct)),
+            })
             {
                 lines.AddRange([
-                    $"### {Escape(view.Name)} - {tier} (denominator {view.Denominator})",
+                    $"### {Escape(view.Name)} - {name} (denominator {view.Denominator}; unmeasured {view.Unmeasured})",
                     string.Empty,
                     "| Row | " + string.Join(" | ", sinks.Select(SinkName)) + " |",
                     "| --- |" + string.Concat(sinks.Select(_ => " ---: |")),
                     "| presence | " + string.Join(" | ", sinks.Select(s => s is { } c ? Cell(ReachabilityAggregation.Presence(view, c)) : "-")) + " |",
                     .. ReachabilityChild.AllClasses.Select(k =>
-                        $"| {k} | " + string.Join(" | ", sinks.Select(s => Cell(ReachabilityAggregation.Reach(view, k, s, tier)))) + " |"),
+                        $"| {k} | " + string.Join(" | ", sinks.Select(s => Cell(reach(k, s)))) + " |"),
                     string.Empty,
                 ]);
             }
@@ -357,7 +410,7 @@ public static class ReachabilityCorpusReport
         {
             var own = view.Units.Sum(u => u.Folders.Sum(f => f.OwnMethods));
             lines.AddRange([
-                $"### {view.Name} (denominator {view.Denominator}; {own} own methods; " +
+                $"### {view.Name} (denominator {view.Denominator}; unmeasured {view.Unmeasured}; {own} own methods; " +
                 $"{view.Units.Sum(u => u.Folders.Sum(f => f.PublicContractOnly))} PublicContract-only, {view.Units.Sum(u => u.Folders.Sum(f => f.HiddenOnly))} Hidden)",
                 string.Empty,
                 "| Class | Packages | Median share of own methods | p90 |",
@@ -404,7 +457,8 @@ public static class ReachabilityCorpusReport
             "Unknown = packages with a folder whose verdict for the class is `Unknown`. Reasons count the packages with an",
             "Unknown folder giving each reason. `unseen` is split by how the class's Unseen example paths (up to three per",
             "folder) end: at an opacity site (by kind), an own InternalCall, or an external the map marks `unanalyzed`. Load",
-            "failures are not in any verdict yet (R3 carry) and are counted separately.",
+            "failures are not in any verdict yet (R3 carry) and are counted separately. A crashed, timed-out or incomplete",
+            $"package is Unknown for every class, with the reason `{ReachabilityAggregation.UnmeasuredReason}`.",
             string.Empty,
         ]);
         foreach (var view in new[] { plib, pall })
@@ -520,6 +574,9 @@ public static class ReachabilityCorpusReport
             string.Empty,
             "Every trigger-class x signal-capability reach of every loaded folder, with its first example path (strongest",
             "tier first, at most 64 hops: the first 62 and the last two). This is the list a human reads to judge each hit.",
+            "\"Direct path\": the example has no deferred edge. \"Direct reach\": the folder's row counts a Direct root, so the",
+            "reach is in the Direct cells. They can differ: the Direct pass is over ChaOnly edges, while the example is the",
+            "strongest tier's path (R2b S1, known limit), so a Direct reach can show a delegate path.",
             string.Empty,
         ]);
         if (evidence.Count == 0)
@@ -528,11 +585,12 @@ public static class ReachabilityCorpusReport
             return;
         }
         lines.AddRange([
-            "| Class | Capability | Package | Version | Folder | P-lib | Root | Evidence | Length | Path |",
-            "| --- | --- | --- | --- | --- | --- | --- | --- | ---: | --- |",
+            "| Class | Capability | Package | Version | Folder | P-lib | Root | Evidence | Direct path | Direct reach | Length | Path |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | ---: | --- |",
             .. evidence.Select(e =>
                 $"| {e.Example.Class} | {e.Example.Capability} | {e.Package} | {e.Version} | {Escape(e.Folder)} | {(e.IsPlib ? "yes" : "no")} | {Escape(e.Example.Root)} | " +
-                $"{e.Example.Evidence} | {e.Example.Length}{(e.Example.Truncated ? " (truncated)" : string.Empty)} | {Escape(PathText(e.Example))} |"),
+                $"{e.Example.Evidence} | {(e.Example.Direct ? "yes" : "no")} | {(e.DirectReach ? "yes" : "no")} | " +
+                $"{e.Example.Length}{(e.Example.Truncated ? " (truncated)" : string.Empty)} | {Escape(PathText(e.Example))} |"),
             string.Empty,
         ]);
     }
@@ -555,11 +613,26 @@ public static class ReachabilityCorpusReport
                 "| --- | --- | --- | --- |",
                 .. rows.Select(x => $"| {x.Package} | {x.Version} | {Escape(x.Folder)} | {Escape(Deterministic(x.Why))} |"),
             ]);
+        lines.AddRange([
+            string.Empty,
+            $"Names cut at {Reachability.MaxNameChars} chars (amendment a5), over every folder: {NamesCutText(NamesCutTotal(results))}. A folder that cut",
+            "any is listed above with its count; a cut changes the names reported, never a count.",
+        ]);
     }
+
+    /// <summary>The distinct names cut (<see cref="FolderResult.NamesCut"/>), summed over every folder of <paramref name="results"/>.</summary>
+    public static int NamesCutTotal(IEnumerable<PackageReachResult> results) => results.SelectMany(r => r.Folders).Sum(f => f.NamesCut);
+
+    /// <summary>A names-cut total as the reports show it: <c>0</c>, or bold with a note, so a nonzero total is never missed.</summary>
+    public static string NamesCutText(int total) =>
+        total == 0 ? "0" : $"**{total.ToString(CultureInfo.InvariantCulture)}** (some reported names are bounded, not whole)";
 
     private static IEnumerable<(string Package, string Version, string Folder, string Why)> Floors(PackageReachResult r)
     {
-        if (r.Status != PackageReachResult.Scanned)
+        if (r.UnmeasuredFloor)
+            yield return (r.Id, r.Version, r.LibTfm is { } tfm ? $"lib/{tfm}" : "-",
+                $"{r.Status}: {r.Detail ?? "-"}; {UnmeasuredFloorText(r.LibTfmState)}");
+        else if (r.Status != PackageReachResult.Scanned)
             yield return (r.Id, r.Version, "-", $"{r.Status}: {r.Detail ?? "-"}");
         if (!r.Measured)
             yield break;
@@ -595,15 +668,26 @@ public static class ReachabilityCorpusReport
                 why.Add($"presence scan failed for {f.Presence.Count(p => !p.Ok)} assembl(ies)");
             if (f.Presence.Sum(p => p.MethodsSkipped) is var skipped and > 0)
                 why.Add($"presence skipped {skipped} method(s)");
+            if (f.NamesCut > 0)
+                why.Add($"{f.NamesCut} name(s) cut at {Reachability.MaxNameChars} chars (amendment a5): reported names bounded, counts whole");
             if (why.Count > 0)
                 yield return (r.Id, r.Version, f.Folder, string.Join("; ", why));
         }
     }
 
+    /// <summary>Section 12's wording for a crashed, timed-out or incomplete package, by its <c>.nupkg</c>'s lib TFM state.</summary>
+    public static string UnmeasuredFloorText(LibTfmState libTfm) =>
+        "floor package, presence and reach unmeasured (E1 and E2 floor package): in P-all" + libTfm switch
+        {
+            LibTfmState.Chosen => " and P-lib",
+            LibTfmState.Unknown => " and P-lib, since whether it has a lib TFM is unknown",
+            _ => "; not in P-lib, TfmSelection over the .nupkg finds no lib TFM",
+        };
+
     private static string PathText(ExampleRecord example) =>
         string.Join(" ", example.Hops.Select((h, i) => i == 0 ? h.NodeId : $"-{h.Via}-> {h.NodeId}"));
 
-    private static string Render(Outcome outcome) => outcome switch
+    internal static string Render(Outcome outcome) => outcome switch
     {
         Outcome.Pass => "pass",
         Outcome.Fail => "**FAIL**",
@@ -685,7 +769,7 @@ public static class ReachabilityCorpusReport
         Rune.GetUnicodeCategory(rune) is UnicodeCategory.Control or UnicodeCategory.Format or UnicodeCategory.LineSeparator
             or UnicodeCategory.ParagraphSeparator or UnicodeCategory.OtherNotAssigned;
 
-    private static void WriteLines(string path, IEnumerable<string> lines) =>
+    internal static void WriteLines(string path, IEnumerable<string> lines) =>
         File.WriteAllText(path, string.Join('\n', lines) + '\n', new UTF8Encoding(false));
     #endregion
 

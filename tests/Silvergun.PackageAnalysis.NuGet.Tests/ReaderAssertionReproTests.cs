@@ -69,7 +69,13 @@ public sealed class ReaderAssertionReproTests : IClassFixture<ReaderAssertionRep
             var coverage = graph.Graph!.Coverage.Index;
             var report = Reachability.Analyze(graph.Graph);
 
-            Assert.Equal(6, report.Classes.Count);
+            // One status per single root class: eight since ADR 0037 amendment a1 split RuntimeInvoked three ways.
+            Assert.Equal(
+                [
+                    RootClass.LoadTime, RootClass.HostContract, RootClass.TypeInitializer, RootClass.Finalizer, RootClass.NativeEntry,
+                    RootClass.PublicApi, RootClass.PublicContract, RootClass.Hidden,
+                ],
+                report.Classes.Select(c => c.Class));
             Assert.All(report.Classes, c =>
             {
                 Assert.Equal(RootClassVerdict.Unknown, c.Verdict);

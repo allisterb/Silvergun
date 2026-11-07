@@ -177,7 +177,10 @@ public sealed class RootGroundTruthTests
     [InlineData("Roots.Host.EnvTask.Execute()", RootClass.HostContract | RootClass.PublicApi)]
     [InlineData("Roots.Host.EnvAnalyzer..ctor()", RootClass.HostContract | RootClass.PublicApi)]
     [InlineData("Roots.Host.EnvAnalyzer.Initialize(System.Object)", RootClass.HostContract | RootClass.PublicApi)]
-    [InlineData("Roots.Runtime.Exports.ExportsEnv()", RootClass.RuntimeInvoked | RootClass.PublicApi)]
+    [InlineData("Roots.Runtime.Exports.ExportsEnv()", RootClass.NativeEntry | RootClass.PublicApi)]
+    [InlineData("Roots.Runtime.Exports.ExportsSafe()", RootClass.NativeEntry | RootClass.PublicApi)]
+    [InlineData("StaticInit.FieldInit..cctor()", RootClass.TypeInitializer)]
+    [InlineData("StaticInit.SafeFieldInit..cctor()", RootClass.TypeInitializer)]
     [InlineData("Roots.Tiers.UnmadeProbe.Run()", RootClass.Hidden)]
     [InlineData("Roots.Tiers.MadeProbe.Run()", RootClass.Hidden)]
     [InlineData("Roots.Tiers.Callers.CallsUnmade(System.Object)", RootClass.PublicApi)]
@@ -186,15 +189,17 @@ public sealed class RootGroundTruthTests
         Assert.Equal(expected, Facts(MechanismGraphSource.Graph, Fixture(method)).Roots);
     }
 
-    // A protected finalizer of a sealed public type is no PublicApi (Family on a sealed type), but it is RuntimeInvoked.
+    // A protected finalizer of a sealed public type is no PublicApi (Family on a sealed type), but it is a Finalizer, and
+    // neither of the other two runtime classes (amendment a1).
     [Theory]
     [InlineData("Roots.Runtime.EnvFinalized.Finalize()")]
     [InlineData("Roots.Runtime.SafeFinalized.Finalize()")]
-    public void Premise_AFinalizer_IsRuntimeInvoked_AndNoPublicApi(string method)
+    public void Premise_AFinalizer_IsFinalizer_AndNoPublicApi_TypeInitializerOrNativeEntry(string method)
     {
         var roots = Facts(MechanismGraphSource.Graph, Fixture(method)).Roots;
 
-        Assert.True(roots.HasFlag(RootClass.RuntimeInvoked) && !roots.HasFlag(RootClass.PublicApi), roots.ToString());
+        Assert.True(roots.HasFlag(RootClass.Finalizer), roots.ToString());
+        Assert.Equal(RootClass.None, roots & (RootClass.PublicApi | RootClass.TypeInitializer | RootClass.NativeEntry));
     }
 
     // The tier cases' types: UnmadeProbe is dead (internal, never newobj'd), MadeProbe live only by its newobj, and
@@ -237,7 +242,8 @@ public sealed class RootGroundTruthTests
     // The whole graph
     // ---------------------------------------------------------------------------------------------------
 
-    // Analysed whole, every root class reaches a capability: HostContract and RuntimeInvoked are no longer empty classes.
+    // Analysed whole, every root class reaches a capability: HostContract and the three runtime classes are no longer
+    // empty classes.
     [Fact]
     public void WholeGraph_EveryRootClassHasRoots_AndReachesACapability()
     {
@@ -296,6 +302,9 @@ public sealed class RootGroundTruthTests
 
     #region Fields
     private static readonly RootClass[] allClasses =
-        [RootClass.LoadTime, RootClass.HostContract, RootClass.RuntimeInvoked, RootClass.PublicApi, RootClass.PublicContract, RootClass.Hidden];
+    [
+        RootClass.LoadTime, RootClass.HostContract, RootClass.TypeInitializer, RootClass.Finalizer, RootClass.NativeEntry,
+        RootClass.PublicApi, RootClass.PublicContract, RootClass.Hidden,
+    ];
     #endregion
 }

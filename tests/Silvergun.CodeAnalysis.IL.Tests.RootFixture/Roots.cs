@@ -39,7 +39,7 @@ namespace RootFixture.LoadTime
 
     internal sealed class CustomInstance
     {
-        // LoadTime needs a static method; RuntimeInvoked does not.
+        // LoadTime needs a static method; NativeEntry does not.
         [CustomLoad]
         internal void InstanceLoad() { }
 
@@ -109,7 +109,8 @@ namespace RootFixture.Host
     }
 }
 
-// RuntimeInvoked: a .cctor, a Finalize override, a `root-attribute ... RuntimeInvoked` method.
+// The runtime classes (ADR 0037 amendment a1): a .cctor (TypeInitializer), a Finalize override (Finalizer), a
+// `root-attribute ... NativeEntry` method (NativeEntry).
 namespace RootFixture.Runtime
 {
     using System;

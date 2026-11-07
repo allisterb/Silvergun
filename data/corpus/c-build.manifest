@@ -1,0 +1,55 @@
+# C-build corpus (reachability R2b, S3) - pinned manifest (id,version), one package per line.
+# Build-time packages: each ships a .dll under analyzers/, build/, buildTransitive/, tasks/ or tools/.
+# Selected 2026-11-06 from the NuGet V3 search API; provenance and the rule: c-build.provenance.md.
+# Benign by assumption (download counts), not by proof - see ADR-0021.
+
+Microsoft.EntityFrameworkCore.Analyzers,10.0.14
+Microsoft.CodeAnalysis.Analyzers,5.9.0
+xunit.analyzers,2.2.0
+Microsoft.AspNetCore.Components.Analyzers,10.0.14
+StyleCop.Analyzers,1.1.118
+coverlet.msbuild,10.1.0
+Microsoft.AspNetCore.Razor.Design,2.3.13
+Microsoft.Azure.WebJobs.Script.ExtensionsMetadataGenerator,4.0.1
+NUnit.Analyzers,4.15.0
+Microsoft.NET.ILLink.Tasks,10.0.14
+Microsoft.AspNetCore.Mvc.Analyzers,2.3.13
+Microsoft.Azure.Functions.Analyzers,1.0.0
+Microsoft.VisualStudio.Threading.Analyzers,18.12.1
+Microsoft.Build.Tasks.Git,10.0.403
+StyleCop.Analyzers.Unstable,1.2.0.556
+Microsoft.SourceLink.Common,10.0.403
+Microsoft.Net.Compilers,4.2.0
+dotnet-reportgenerator-globaltool,5.5.12
+SonarAnalyzer.CSharp,10.35.0.4138
+Microsoft.Azure.Functions.Worker.Sdk.Generators,1.4.0
+NSwag.MSBuild,14.7.1
+Microsoft.Azure.Functions.Worker.Sdk.Analyzers,1.2.2
+Microsoft.SourceLink.GitHub,10.0.403
+MessagePackAnalyzer,3.1.12
+Microsoft.CodeAnalysis.NetAnalyzers,10.0.403
+SpecFlow.Tools.MsBuild.Generation,3.9.74
+MSTest.Analyzers,4.5.2
+dotnet-sonarscanner,12.1.0
+Microsoft.CodeQuality.Analyzers,3.3.2
+Microsoft.NetCore.Analyzers,3.3.2
+Microsoft.NetFramework.Analyzers,3.3.2
+Roslynator.Analyzers,5.0.1
+ReportGenerator,5.5.12
+Microsoft.CodeAnalysis.VersionCheckAnalyzer,3.3.2
+Microsoft.Azure.Functions.Worker.Extensions.Http.AspNetCore.Analyzers,1.0.4
+Microsoft.CodeAnalysis.BannedApiAnalyzers,5.6.0
+Microsoft.Extensions.ApiDescription.Client,10.0.14
+NSubstitute.Analyzers.CSharp,1.0.17
+Riok.Mapperly,4.3.1
+Microsoft.Azure.WebJobs.Extensions.DurableTask.Analyzers,0.5.0
+Aspire.Hosting.AppHost,13.6.4
+GraphQL.Analyzers,8.8.5
+OpenCover,4.7.1221
+Meziantou.Analyzer,3.0.321
+Reqnroll.Tools.MsBuild.Generation,3.3.4
+Xamarin.Build.Download,0.11.6
+Xamarin.AndroidX.Migration,1.0.10
+AsyncFixer,2.1.0
+Microsoft.Maui.Controls.Build.Tasks,10.0.120
+Microsoft.SourceLink.AzureRepos.Git,10.0.403

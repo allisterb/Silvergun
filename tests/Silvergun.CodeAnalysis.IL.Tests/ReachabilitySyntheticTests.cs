@@ -675,12 +675,12 @@ public sealed class ReachabilitySyntheticTests
     // ---------------------------------------------------------------------------------------------------
 
     // One row per single class × reached sink: classes strongest first, sinks in Capability order, then Unseen (null).
-    // A PublicApi|RuntimeInvoked root counts in both classes.
+    // A PublicApi|TypeInitializer root counts in both classes.
     [Fact]
     public void Rows_OnePerSingleClassAndReachedSink_InClassThenSinkOrder_AMultiClassRootCountingInEach()
     {
         var report = new Parts()
-            .Own("App.Multi", RootClass.PublicApi | RootClass.RuntimeInvoked)
+            .Own("App.Multi", RootClass.PublicApi | RootClass.TypeInitializer)
             .Own("App.Load", RootClass.LoadTime)
             .Ext(Env, File, Dyn, Net)
             .Edge("App.Multi", Env)
@@ -692,12 +692,28 @@ public sealed class ReachabilitySyntheticTests
         Assert.Equal(
             [
                 (RootClass.LoadTime, (Capability?)Capability.Network),
-                (RootClass.RuntimeInvoked, Capability.FileSystem), (RootClass.RuntimeInvoked, Capability.EnvironmentProbe), (RootClass.RuntimeInvoked, null),
+                (RootClass.TypeInitializer, Capability.FileSystem), (RootClass.TypeInitializer, Capability.EnvironmentProbe), (RootClass.TypeInitializer, null),
                 (RootClass.PublicApi, Capability.FileSystem), (RootClass.PublicApi, Capability.EnvironmentProbe), (RootClass.PublicApi, null),
             ],
             report.Reaches.Select(r => (r.Class, r.Capability)));
         Assert.All(report.Reaches, r => Assert.Equal((1, 1, 1), (r.Roots, r.Bound, r.Instantiated)));
-        Assert.Equal("App.Multi", Assert.Single(Row(report, RootClass.RuntimeInvoked, Capability.FileSystem).Examples).Root);
+        Assert.Equal("App.Multi", Assert.Single(Row(report, RootClass.TypeInitializer, Capability.FileSystem).Examples).Root);
+    }
+
+    // The three runtime classes come in their own order between HostContract and PublicApi (amendment a1): one root of
+    // all three is a row in each, TypeInitializer, then Finalizer, then NativeEntry.
+    [Fact]
+    public void Rows_TheThreeRuntimeClasses_ComeInOrder_BetweenHostContractAndPublicApi()
+    {
+        var report = new Parts()
+            .Own("App.All", RootClass.NativeEntry | RootClass.Finalizer | RootClass.TypeInitializer | RootClass.PublicApi | RootClass.HostContract)
+            .Ext(Env)
+            .Edge("App.All", Env)
+            .Analyze();
+
+        Assert.Equal(
+            [RootClass.HostContract, RootClass.TypeInitializer, RootClass.Finalizer, RootClass.NativeEntry, RootClass.PublicApi],
+            report.Reaches.Select(r => r.Class));
     }
 
     // ---------------------------------------------------------------------------------------------------
@@ -781,19 +797,22 @@ public sealed class ReachabilitySyntheticTests
 
     // Every class is present, strongest first, with its root count, including the empty ones.
     [Fact]
-    public void Classes_AllSixArePresent_InOrder_WithTheirRootCounts()
+    public void Classes_AllEightArePresent_InOrder_WithTheirRootCounts()
     {
         var report = new Parts()
             .Own("App.a", RootClass.PublicApi)
             .Own("App.b", RootClass.PublicApi)
-            .Own("App.c", RootClass.PublicApi | RootClass.RuntimeInvoked)
+            .Own("App.c", RootClass.PublicApi | RootClass.TypeInitializer)
             .Own("App.d", RootClass.Hidden)
+            .Own("App.e", RootClass.Finalizer | RootClass.PublicContract)
+            .Own("App.f", RootClass.NativeEntry)
+            .Own("App.g", RootClass.NativeEntry)
             .Analyze();
 
         Assert.Equal(
             [
-                (RootClass.LoadTime, 0), (RootClass.HostContract, 0), (RootClass.RuntimeInvoked, 1),
-                (RootClass.PublicApi, 3), (RootClass.PublicContract, 0), (RootClass.Hidden, 1),
+                (RootClass.LoadTime, 0), (RootClass.HostContract, 0), (RootClass.TypeInitializer, 1), (RootClass.Finalizer, 1), (RootClass.NativeEntry, 2),
+                (RootClass.PublicApi, 3), (RootClass.PublicContract, 1), (RootClass.Hidden, 1),
             ],
             report.Classes.Select(c => (c.Class, c.Roots)));
         Assert.All(report.Classes, c => Assert.Equal(RootClassVerdict.None, c.Verdict));
@@ -914,20 +933,24 @@ public sealed class ReachabilitySyntheticTests
     [Fact]
     public void Classes_AGap_CoversExactlyTheClassesItsMaskOverlaps()
     {
-        var parts = new Parts().Own("App.a", RootClass.PublicApi).Own("App.h", RootClass.Hidden).Own("App.r", RootClass.RuntimeInvoked);
+        var parts = new Parts().Own("App.a", RootClass.PublicApi).Own("App.h", RootClass.Hidden).Own("App.r", RootClass.TypeInitializer)
+            .Own("App.f", RootClass.Finalizer).Own("App.n", RootClass.NativeEntry);
         parts.Gaps.Add(new RootGap(Assembly, RootClass.PublicApi | RootClass.Hidden, "visibility"));
         parts.Gaps.Add(new RootGap("Other", RootClass.LoadTime, "module"));
+        parts.Gaps.Add(new RootGap("Native", RootClass.Finalizer, "finalizers"));
 
         var report = parts.Analyze();
 
         Assert.Equal(
             [
-                (RootClass.LoadTime, RootClassVerdict.Unknown), (RootClass.HostContract, RootClassVerdict.None), (RootClass.RuntimeInvoked, RootClassVerdict.None),
+                (RootClass.LoadTime, RootClassVerdict.Unknown), (RootClass.HostContract, RootClassVerdict.None), (RootClass.TypeInitializer, RootClassVerdict.None),
+                (RootClass.Finalizer, RootClassVerdict.Unknown), (RootClass.NativeEntry, RootClassVerdict.None),
                 (RootClass.PublicApi, RootClassVerdict.Unknown), (RootClass.PublicContract, RootClassVerdict.None), (RootClass.Hidden, RootClassVerdict.Unknown),
             ],
             report.Classes.Select(c => (c.Class, c.Verdict)));
         Assert.Equal(["Other: module"], Status(report, RootClass.LoadTime).Reasons);
         Assert.Equal(["App: visibility"], Status(report, RootClass.Hidden).Reasons);
+        Assert.Equal(["Native: finalizers"], Status(report, RootClass.Finalizer).Reasons);
     }
 
     // An Unseen reach is the reaching root's class's uncertainty only; Unseen is never a capability for Reaches.
@@ -1107,8 +1130,696 @@ public sealed class ReachabilitySyntheticTests
     }
 
     // ---------------------------------------------------------------------------------------------------
+    // The Direct label (ADR 0037 amendment a2)
+    // ---------------------------------------------------------------------------------------------------
+
+    public static TheoryData<MethodEdgeKind> EdgeKinds() => [.. Enum.GetValues<MethodEdgeKind>()];
+
+    // Exactly the deferred edges, which make a method value without calling it - Ldftn and Ldvirtftn (a delegate or a
+    // function pointer) and LoadToken (a method handle; ADR a2's clarification, review W3) - take the label away. Every
+    // other kind (a new one included, since the theory enumerates the enum) keeps the path Direct, Dispatch to a dead
+    // type too: ChaOnly, yet Direct.
+    [Theory]
+    [MemberData(nameof(EdgeKinds))]
+    public void Direct_APath_IsDirectExactlyWhenNoEdgeOnItIsLdftnLdvirtftnOrLoadToken(MethodEdgeKind kind)
+    {
+        var direct = kind is not (MethodEdgeKind.Ldftn or MethodEdgeKind.Ldvirtftn or MethodEdgeKind.LoadToken);
+
+        var row = Row(DispatchCase(DispatchTarget.DeadInstance, kind).Analyze(), RootClass.PublicApi, Capability.EnvironmentProbe);
+
+        Assert.Equal((1, direct ? 1 : 0), (row.Roots, row.Direct));
+        var path = Assert.Single(row.Examples);
+        Assert.Equal(direct, path.Direct);
+        Assert.Equal(kind == MethodEdgeKind.Dispatch ? ReachEvidence.ChaOnly : ReachEvidence.Bound, path.Evidence);
+    }
+
+    // A deferred edge anywhere on the path takes the label away: the root's own edge, one in the middle, or the last
+    // one, an ldftn (or ldtoken) of the sink itself. The reach is still reported, Bound (a deferred edge is in every tier).
+    [Theory]
+    [InlineData(MethodEdgeKind.Ldftn, 0)]
+    [InlineData(MethodEdgeKind.Ldftn, 1)]
+    [InlineData(MethodEdgeKind.Ldftn, 2)]
+    [InlineData(MethodEdgeKind.Ldvirtftn, 0)]
+    [InlineData(MethodEdgeKind.Ldvirtftn, 1)]
+    [InlineData(MethodEdgeKind.Ldvirtftn, 2)]
+    [InlineData(MethodEdgeKind.LoadToken, 0)]
+    [InlineData(MethodEdgeKind.LoadToken, 1)]
+    [InlineData(MethodEdgeKind.LoadToken, 2)]
+    public void Direct_ADeferredEdgeAnywhereOnThePath_MakesItNotDirect(MethodEdgeKind kind, int at)
+    {
+        MethodEdgeKind KindAt(int i) => i == at ? kind : MethodEdgeKind.Call;
+        var report = new Parts()
+            .Own("App.A", RootClass.PublicApi)
+            .Own("App.B", RootClass.None)
+            .Own("App.C", RootClass.None)
+            .Ext(Env)
+            .Edge("App.A", "App.B", KindAt(0), 1)
+            .Edge("App.B", "App.C", KindAt(1), 2)
+            .Edge("App.C", Env, KindAt(2), 3)
+            .Analyze();
+
+        var row = Row(report, RootClass.PublicApi, Capability.EnvironmentProbe);
+        Assert.Equal((1, 1, 1, 0), (row.Roots, row.Bound, row.Instantiated, row.Direct));
+        var path = Assert.Single(row.Examples);
+        Assert.False(path.Direct);
+        AssertPath(path, "App.A", ReachEvidence.Bound, null,
+            OwnHop("App.A"), OwnHop("App.B", KindAt(0), 1), OwnHop("App.C", KindAt(1), 2), new ReachHop(Env, null, KindAt(2), 3));
+        Assert.Empty(Assert.Single(report.Profiles).DirectCapabilities);
+    }
+
+    // CapabilityReach.Direct counts every root with a delegate-free path, whichever path its example shows: R0 only through
+    // a delegate, R1 only directly, R2 both (its shortest path, so its Bound example, being the delegate one).
+    [Fact]
+    public void Direct_TheRowCountsEveryRootWithADelegateFreePath()
+    {
+        var report = new Parts()
+            .Own("App.R0", RootClass.PublicApi)
+            .Own("App.R1", RootClass.PublicApi)
+            .Own("App.R2", RootClass.PublicApi)
+            .Own("App.M", RootClass.None)
+            .Ext(Env)
+            .Edge("App.R0", Env, MethodEdgeKind.Ldftn, 1)
+            .Edge("App.R1", Env, MethodEdgeKind.Call, 1)
+            .Edge("App.R2", Env, MethodEdgeKind.Ldftn, 1)
+            .Edge("App.R2", "App.M", MethodEdgeKind.Call, 2)
+            .Edge("App.M", Env, MethodEdgeKind.Call, 3)
+            .Analyze();
+
+        var row = Row(report, RootClass.PublicApi, Capability.EnvironmentProbe);
+        Assert.Equal((3, 3, 3, 2), (row.Roots, row.Bound, row.Instantiated, row.Direct));
+        Assert.Equal([("App.R1", true), ("App.R0", false), ("App.R2", false)], row.Examples.Select(e => (e.Root, e.Direct)));
+    }
+
+    // Example choice, evidence first: a Bound path through a delegate is kept over a ChaOnly Direct path of the same root,
+    // which the row still counts as Direct.
+    [Fact]
+    public void Examples_ABoundPathThroughADelegate_IsKeptOverAChaOnlyDirectPath()
+    {
+        var report = new Parts()
+            .Own("App.R", RootClass.PublicApi)
+            .Own("App.P", RootClass.None)
+            .Own("App.Dead.M", RootClass.None, type: "App.Dead")
+            .Type("App.Dead", live: false)
+            .Ext(Env)
+            .Edge("App.R", "App.P", MethodEdgeKind.Ldftn, 1)
+            .Edge("App.P", Env, MethodEdgeKind.Call, 2)
+            .Edge("App.R", "App.Dead.M", MethodEdgeKind.Dispatch, 3)
+            .Edge("App.Dead.M", Env, MethodEdgeKind.Call, 4)
+            .Analyze();
+
+        var row = Row(report, RootClass.PublicApi, Capability.EnvironmentProbe);
+        Assert.Equal((1, 1, 1), (row.Roots, row.Bound, row.Direct));
+        var path = Assert.Single(row.Examples);
+        Assert.False(path.Direct);
+        AssertPath(path, "App.R", ReachEvidence.Bound, null, OwnHop("App.R"), OwnHop("App.P", MethodEdgeKind.Ldftn, 1), new ReachHop(Env, null, MethodEdgeKind.Call, 2));
+    }
+
+    // At ChaOnly, a Direct path wins over a shorter one through a delegate: R's ChaOnly-shortest path (3 hops) ends in an
+    // ldftn, so the example is its Direct path (4 hops), still ChaOnly.
+    [Fact]
+    public void Examples_AtChaOnly_ADirectPath_BeatsAShorterOneThroughADelegate()
+    {
+        var path = Assert.Single(Row(ChaOnlyDelegateCase(withDirectPath: true).Analyze(), RootClass.PublicApi, Capability.EnvironmentProbe).Examples);
+
+        Assert.True(path.Direct);
+        AssertPath(path, "App.R", ReachEvidence.ChaOnly, null,
+            OwnHop("App.R"), new ReachHop("App.D2.M", Assembly, MethodEdgeKind.Dispatch, 2), OwnHop("App.X", MethodEdgeKind.Call, 4), new ReachHop(Env, null, MethodEdgeKind.Call, 5));
+    }
+
+    // The same with an ldtoken of the sink in place of the ldftn (review W3): the 3-hop LoadToken path is not Direct, so
+    // the 4-hop Direct path is the example; without that path, the LoadToken one stays and the row has no Direct root.
+    [Fact]
+    public void Examples_AtChaOnly_ALoadTokenPathIsNotDirect_SoADirectPathBeatsIt()
+    {
+        var withDirect = Row(ChaOnlyDelegateCase(withDirectPath: true, MethodEdgeKind.LoadToken).Analyze(), RootClass.PublicApi, Capability.EnvironmentProbe);
+        var without = Row(ChaOnlyDelegateCase(withDirectPath: false, MethodEdgeKind.LoadToken).Analyze(), RootClass.PublicApi, Capability.EnvironmentProbe);
+
+        Assert.Equal((1, 1), (withDirect.Roots, withDirect.Direct));
+        var path = Assert.Single(withDirect.Examples);
+        Assert.True(path.Direct);
+        AssertPath(path, "App.R", ReachEvidence.ChaOnly, null,
+            OwnHop("App.R"), new ReachHop("App.D2.M", Assembly, MethodEdgeKind.Dispatch, 2), OwnHop("App.X", MethodEdgeKind.Call, 4), new ReachHop(Env, null, MethodEdgeKind.Call, 5));
+        Assert.Equal((1, 0), (without.Roots, without.Direct));
+        Assert.False(Assert.Single(without.Examples).Direct);
+        AssertPath(without.Examples[0], "App.R", ReachEvidence.ChaOnly, null,
+            OwnHop("App.R"), new ReachHop("App.D1.M", Assembly, MethodEdgeKind.Dispatch, 1), new ReachHop(Env, null, MethodEdgeKind.LoadToken, 3));
+    }
+
+    // Twin: without a Direct path the ChaOnly example is the shortest, through the delegate, and the row has no Direct root.
+    [Fact]
+    public void Examples_AtChaOnly_WithoutADirectPath_TheShortestPathThroughTheDelegateStays()
+    {
+        var row = Row(ChaOnlyDelegateCase(withDirectPath: false).Analyze(), RootClass.PublicApi, Capability.EnvironmentProbe);
+
+        Assert.Equal((1, 0, 0, 0), (row.Roots, row.Bound, row.Instantiated, row.Direct));
+        var path = Assert.Single(row.Examples);
+        Assert.False(path.Direct);
+        AssertPath(path, "App.R", ReachEvidence.ChaOnly, null,
+            OwnHop("App.R"), new ReachHop("App.D1.M", Assembly, MethodEdgeKind.Dispatch, 1), new ReachHop(Env, null, MethodEdgeKind.Ldftn, 3));
+    }
+
+    // Across roots, examples order by evidence, then Direct first, then length, then node order: R2 (Bound, Direct, 2
+    // hops), R1 (Bound, Direct, 3), then R0 (Bound, via a delegate, 2) before R3 (the same, later in node order), and the
+    // Instantiated Direct R4 last, cut. Without length R1 would lead R2; without Direct R0 would lead R1.
+    [Fact]
+    public void Examples_OrderByEvidence_ThenDirectFirst_ThenLength_ThenNodeOrder()
+    {
+        var report = new Parts()
+            .Own("App.R0", RootClass.PublicApi)
+            .Own("App.R1", RootClass.PublicApi)
+            .Own("App.R2", RootClass.PublicApi)
+            .Own("App.R3", RootClass.PublicApi)
+            .Own("App.R4", RootClass.PublicApi)
+            .Own("App.M1", RootClass.None)
+            .Own("App.Live.M", RootClass.None, type: "App.Live")
+            .Type("App.Live", live: true)
+            .Ext(Env)
+            .Edge("App.R0", Env, MethodEdgeKind.Ldftn, 1)
+            .Edge("App.R1", "App.M1", MethodEdgeKind.Call, 1)
+            .Edge("App.M1", Env, MethodEdgeKind.Call, 2)
+            .Edge("App.R2", Env, MethodEdgeKind.Call, 1)
+            .Edge("App.R3", Env, MethodEdgeKind.Ldvirtftn, 1)
+            .Edge("App.R4", "App.Live.M", MethodEdgeKind.Dispatch, 1)
+            .Edge("App.Live.M", Env, MethodEdgeKind.Call, 2)
+            .Analyze();
+
+        var row = Row(report, RootClass.PublicApi, Capability.EnvironmentProbe);
+        Assert.Equal((5, 4, 5, 3), (row.Roots, row.Bound, row.Instantiated, row.Direct));
+        Assert.Equal(
+            [("App.R2", ReachEvidence.Bound, true, 2), ("App.R1", ReachEvidence.Bound, true, 3), ("App.R0", ReachEvidence.Bound, false, 2)],
+            row.Examples.Select(e => (e.Root, e.Evidence, e.Direct, e.Length)));
+    }
+
+    // Evidence beats Direct across roots: a Bound root through a delegate, then an Instantiated Direct one, then a ChaOnly
+    // Direct one.
+    [Fact]
+    public void Examples_ABoundRootThroughADelegate_LeadsInstantiatedAndChaOnlyDirectRoots()
+    {
+        var report = new Parts()
+            .Own("App.Q0", RootClass.PublicApi)
+            .Own("App.Q1", RootClass.PublicApi)
+            .Own("App.Q2", RootClass.PublicApi)
+            .Own("App.Live.M", RootClass.None, type: "App.Live")
+            .Own("App.Dead.M", RootClass.None, type: "App.Dead")
+            .Type("App.Live", live: true)
+            .Type("App.Dead", live: false)
+            .Ext(Env)
+            .Edge("App.Q2", Env, MethodEdgeKind.Ldftn, 1)
+            .Edge("App.Q1", "App.Live.M", MethodEdgeKind.Dispatch, 1)
+            .Edge("App.Live.M", Env, MethodEdgeKind.Call, 2)
+            .Edge("App.Q0", "App.Dead.M", MethodEdgeKind.Dispatch, 1)
+            .Edge("App.Dead.M", Env, MethodEdgeKind.Call, 2)
+            .Analyze();
+
+        Assert.Equal(
+            [("App.Q2", ReachEvidence.Bound, false), ("App.Q1", ReachEvidence.Instantiated, true), ("App.Q0", ReachEvidence.ChaOnly, true)],
+            Row(report, RootClass.PublicApi, Capability.EnvironmentProbe).Examples.Select(e => (e.Root, e.Evidence, e.Direct)));
+    }
+
+    // Profiles group by the ChaOnly mask AND the Direct mask: a and b (Env direct, Network only through a delegate) are one
+    // profile, c and f (both direct) another with the same ChaOnly mask, ordered after it by Direct mask; Unseen through a
+    // delegate (d) and directly (e) differ in DirectUnseen alone.
+    [Fact]
+    public void Profiles_GroupByTheChaOnlyMaskAndTheDirectMask_WithTheDirectCapabilitiesAndUnseen()
+    {
+        var parts = new Parts()
+            .Own("App.P", RootClass.None)
+            .Own("App.Q", RootClass.None)
+            .Ext(Env, Net, Dyn)
+            .Edge("App.P", Net)
+            .Edge("App.Q", Net);
+        foreach (var root in new[] { "App.a", "App.b" })
+            parts.Own(root, RootClass.PublicApi).Edge(root, Env).Edge(root, "App.P", MethodEdgeKind.Ldftn);
+        foreach (var root in new[] { "App.c", "App.f" })
+            parts.Own(root, RootClass.PublicApi).Edge(root, Env).Edge(root, "App.Q");
+        parts.Own("App.d", RootClass.PublicApi).Edge("App.d", Dyn, MethodEdgeKind.Ldvirtftn);
+        parts.Own("App.e", RootClass.PublicApi).Edge("App.e", Dyn);
+
+        var report = parts.Analyze();
+
+        Assert.Equal(
+            [
+                "PublicApi [Network,EnvironmentProbe] False [EnvironmentProbe] False 2 App.a",
+                "PublicApi [Network,EnvironmentProbe] False [Network,EnvironmentProbe] False 2 App.c",
+                "PublicApi [] True [] False 1 App.d",
+                "PublicApi [] True [] True 1 App.e",
+            ],
+            report.Profiles.Select(DescribeDirect));
+        Assert.Equal(2, Row(report, RootClass.PublicApi, null).Roots);
+        Assert.Equal(1, Row(report, RootClass.PublicApi, null).Direct);
+        Assert.Equal(2, Row(report, RootClass.PublicApi, Capability.Network).Direct);
+        Assert.Equal(4, Row(report, RootClass.PublicApi, Capability.EnvironmentProbe).Direct);
+    }
+
+    // An Unseen sink reached only through a delegate is not Direct: unanalyzed external, and an opacity site, whose
+    // example still names its opacity. The class is still Unknown: Direct changes the claim, never the verdict.
+    [Fact]
+    public void Direct_AnUnseenSinkReachedThroughADelegate_IsNotDirect_AndTheClassIsStillUnknown()
+    {
+        var report = new Parts()
+            .Own("App.A", RootClass.PublicApi)
+            .Own("App.Opaque", RootClass.None)
+            .Ext(Dyn)
+            .Edge("App.A", Dyn, MethodEdgeKind.Ldftn, 1)
+            .Edge("App.A", "App.Opaque", MethodEdgeKind.Ldftn, 2)
+            .Opacity("App.Opaque", OpacityKind.IndirectCall, 7)
+            .Analyze();
+
+        var row = Row(report, RootClass.PublicApi, null);
+        Assert.Equal((1, 1, 0), (row.Roots, row.Bound, row.Direct));
+        var path = Assert.Single(row.Examples);
+        Assert.False(path.Direct);
+        AssertPath(path, "App.A", ReachEvidence.Bound, OpacityKind.IndirectCall, OwnHop("App.A"), OwnHop("App.Opaque", MethodEdgeKind.Ldftn, 2));
+        var profile = Assert.Single(report.Profiles);
+        Assert.Equal((true, false), (profile.Unseen, profile.DirectUnseen));
+        Assert.Equal(RootClassVerdict.Unknown, Status(report, RootClass.PublicApi).Verdict);
+    }
+
+    // Twin: the same Unseen sinks called directly are Direct.
+    [Fact]
+    public void Direct_AnUnseenSinkCalledDirectly_IsDirect()
+    {
+        var report = new Parts()
+            .Own("App.A", RootClass.PublicApi)
+            .Own("App.Opaque", RootClass.None)
+            .Ext(Dyn)
+            .Edge("App.A", Dyn, MethodEdgeKind.Call, 1)
+            .Edge("App.A", "App.Opaque", MethodEdgeKind.Call, 2)
+            .Opacity("App.Opaque", OpacityKind.IndirectCall, 7)
+            .Analyze();
+
+        var row = Row(report, RootClass.PublicApi, null);
+        Assert.Equal((1, 1), (row.Roots, row.Direct));
+        Assert.True(Assert.Single(row.Examples).Direct);
+        Assert.True(Assert.Single(report.Profiles).DirectUnseen);
+    }
+
+    // A root that is itself a sink has a one-hop path, which crosses no edge: Direct.
+    [Fact]
+    public void Direct_ARootThatIsItselfASink_IsDirect()
+    {
+        var report = new Parts().Own("App.Native", RootClass.PublicApi, native: true).Analyze();
+
+        var row = Row(report, RootClass.PublicApi, Capability.NativeInterop);
+        Assert.Equal(1, row.Direct);
+        Assert.True(Assert.Single(row.Examples).Direct);
+    }
+
+    // The Direct label against a forward oracle on the seeded random graphs, each root alone: the row's Direct count is
+    // whether a ChaOnly path free of deferred edges exists; a path's label is whether its hops cross one; a ChaOnly
+    // example is Direct whenever a Direct path exists, and then is the shortest such; a Bound or Instantiated example is
+    // its tier's shortest path, Direct or not.
+    [Theory]
+    [InlineData(1)]
+    [InlineData(7)]
+    [InlineData(2026)]
+    public void Direct_PerRoot_AgreesWithAForwardOracle(int seed)
+    {
+        var parts = RandomParts(seed);
+        var oracle = new Oracle(parts, map);
+        var (direct, indirect) = (0, 0);
+
+        foreach (var root in parts.Methods.Select(m => m.NodeId))
+        {
+            var report = parts.Copy(m => m with { Roots = m.NodeId == root ? RootClass.PublicApi : RootClass.None }).Analyze();
+            for (var sink = 0; sink < Sinks; sink++)
+            {
+                var capability = sink < Sinks - 1 ? (Capability?)sink : null;
+                var row = report.Reaches.SingleOrDefault(r => r.Class == RootClass.PublicApi && r.Capability == capability);
+                if (row is null)
+                    continue;
+                var directDistance = oracle.DirectDistance(root, sink);
+                Assert.Equal(directDistance is null ? 0 : 1, row.Direct);
+
+                var path = Assert.Single(row.Examples);
+                Assert.False(path.Truncated);
+                Assert.Equal(path.Hops.Skip(1).All(h => h.Via is not (MethodEdgeKind.Ldftn or MethodEdgeKind.Ldvirtftn or MethodEdgeKind.LoadToken)), path.Direct);
+                if (path.Evidence == ReachEvidence.ChaOnly)
+                {
+                    Assert.Equal(directDistance is not null, path.Direct);
+                    if (path.Direct)
+                        oracle.AssertDirectShortestPath(path, sink, directDistance!.Value);
+                }
+                else
+                    oracle.AssertShortestPath(path, sink, oracle.Distance(root, path.Evidence, sink)!.Value);
+                (direct, indirect) = path.Direct ? (direct + 1, indirect) : (direct, indirect + 1);
+            }
+        }
+
+        Assert.True(direct > 0 && indirect > 0, $"seed {seed}: {direct} Direct and {indirect} non-Direct examples; pick another seed");
+    }
+
+    // ...and with every root at once, the row's Direct count is the oracle's count of roots with a Direct path.
+    [Theory]
+    [InlineData(1)]
+    [InlineData(7)]
+    [InlineData(2026)]
+    public void Direct_AllRootsTogether_CountsAreTheOraclesDirectCounts(int seed)
+    {
+        var parts = RandomParts(seed);
+        var oracle = new Oracle(parts, map);
+        var report = parts.Analyze();
+        var roots = parts.Methods.Select(m => m.NodeId).ToArray();
+
+        for (var sink = 0; sink < Sinks; sink++)
+        {
+            var capability = sink < Sinks - 1 ? (Capability?)sink : null;
+            var row = report.Reaches.SingleOrDefault(r => r.Class == RootClass.PublicApi && r.Capability == capability);
+            Assert.Equal(roots.Count(r => oracle.DirectDistance(r, sink) is not null), row?.Direct ?? 0);
+            Assert.True(row is null || row.Direct <= row.Roots);
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------------
+    // Name bounding (ADR 0037 amendment a5)
+    // ---------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void BoundName_Premise_MaxNameCharsIs1024()
+    {
+        Assert.Equal(1024, Reachability.MaxNameChars);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(1023)]
+    [InlineData(1024)]
+    public void BoundName_ANameOfAtMostMaxNameChars_IsUnchanged(int length)
+    {
+        var name = new string('n', length);
+
+        Assert.Equal(name, Reachability.BoundName(name));
+    }
+
+    // One char over: the first 1,024 kept, then "…[+1 chars, sha256:<8 hex>]".
+    [Fact]
+    public void BoundName_1025Chars_KeepsTheFirst1024_ThenTheCutCountAndHash()
+    {
+        var name = new string('a', 1024) + "Z";
+
+        Assert.Equal(new string('a', 1024) + $"…[+1 chars, sha256:{Hash8(name)}]", Reachability.BoundName(name));
+    }
+
+    // N is the chars cut, and the hash is over the WHOLE name's UTF-16 code units (not UTF-8, not the kept part; review
+    // Nit 1): 8 lower-case hex. For a well-formed name the code units are Encoding.Unicode's bytes.
+    [Fact]
+    public void BoundName_TheSuffix_CountsTheCharsCut_AndHashesTheWholeNamesUtf16CodeUnits()
+    {
+        var name = "N." + new string('é', 3000);
+
+        var bounded = Reachability.BoundName(name);
+
+        Assert.Equal($"{name[..1024]}…[+{name.Length - 1024} chars, sha256:{Hash8(name)}]", bounded);
+        Assert.Matches("sha256:[0-9a-f]{8}\\]$", bounded);
+        Assert.Equal(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.Unicode.GetBytes(name)))[..8], Hash8(name));
+        Assert.NotEqual(Utf8Hash8(name), Hash8(name));
+        Assert.NotEqual(Hash8(name[..1024]), Hash8(name));
+    }
+
+    // Names differing only in a lone surrogate past char 1,024 bound to different strings (review Nit 1): UTF-8 would
+    // replace each lone surrogate, and a real U+FFFD, by the same EF BF BD, so the three would share one hash. Each hash
+    // is SHA-256 over the name's UTF-16 code units, the lone surrogate included.
+    [Fact]
+    public void BoundName_NamesDifferingOnlyInALoneSurrogatePastTheLimit_BoundDifferently()
+    {
+        var (prefix, suffix) = (new string('a', 1500), new string('b', 10));
+        string[] names = [prefix + '\uD800' + suffix, prefix + '\uDFFF' + suffix, prefix + '�' + suffix];
+        Assert.Single(names.Select(Utf8Hash8).Distinct());   // the premise: UTF-8 cannot tell them apart
+
+        var bounded = names.Select(Reachability.BoundName).ToArray();
+
+        Assert.Equal(3, bounded.Distinct(StringComparer.Ordinal).Count());
+        Assert.All(names.Zip(bounded), p => Assert.Equal($"{prefix[..1024]}…[+{p.First.Length - 1024} chars, sha256:{Hash8(p.First)}]", p.Second));
+        Assert.All(bounded, AssertWellFormed);   // the lone surrogate is in the cut part, never in the report
+    }
+
+    // A surrogate pair across the limit (high surrogate at index 1023) is not split: 1,023 chars are kept, N counts from
+    // there, and the result is well-formed UTF-16.
+    [Fact]
+    public void BoundName_ASurrogatePairStraddlingTheLimit_IsNotSplit()
+    {
+        var name = new string('a', 1023) + "\U0001F600" + new string('b', 10);
+        Assert.True(char.IsHighSurrogate(name[1023]) && char.IsLowSurrogate(name[1024]));   // the premise
+
+        var bounded = Reachability.BoundName(name);
+
+        Assert.Equal(new string('a', 1023) + $"…[+12 chars, sha256:{Hash8(name)}]", bounded);
+        AssertWellFormed(bounded);
+    }
+
+    // A pair just inside the limit (1022-1023) and one just after it (1024-1025) are each kept whole or cut whole.
+    [Theory]
+    [InlineData(1022, 1024)]
+    [InlineData(1024, 1024)]
+    public void BoundName_ASurrogatePairBesideTheLimit_IsKeptOrCutWhole(int pairAt, int kept)
+    {
+        var name = new string('a', pairAt) + "\U0001F600" + new string('b', 5);
+
+        var bounded = Reachability.BoundName(name);
+
+        Assert.Equal($"{name[..kept]}…[+{name.Length - kept} chars, sha256:{Hash8(name)}]", bounded);
+        AssertWellFormed(bounded);
+    }
+
+    // Two names of one length sharing their first 1,024 chars stay distinct, by their hash.
+    [Fact]
+    public void BoundName_TwoNamesSharingTheirFirst1024Chars_StayDistinct()
+    {
+        var prefix = new string('p', 1500);
+        var (a, b) = (Reachability.BoundName(prefix + "A"), Reachability.BoundName(prefix + "B"));
+
+        Assert.NotEqual(a, b);
+        Assert.Equal(a[..1024], b[..1024]);
+        Assert.Equal(Reachability.BoundName(prefix + "A"), a);   // and the same name bounds the same way every time
+    }
+
+    // In a report, every name field is bounded - hop node ids and assemblies, path roots, profile example roots, ignored
+    // edge keys, and a gap reason's assembly - and NamesCut counts each distinct long name once, however often it is
+    // reported: longA (two rows, a profile, its hops), longB (sharing longA's first 1,024 chars), the assembly (every own
+    // hop), and the two ignored-edge keys. Five.
+    [Fact]
+    public void NameBounding_EveryReportedNameField_IsBounded_AndNamesCutCountsEachDistinctNameOnce()
+    {
+        var shared = "App." + new string('a', 1500);
+        var (longA, longB) = (shared + ".A()", shared + ".B()");
+        var assembly = "Asm." + new string('m', 2000);
+        var (callerKey, calleeKey) = ("App.Cutter." + new string('k', 1100), "Ext.Net." + new string('n', 1100));
+        var parts = new Parts()
+            .Own(longA, RootClass.PublicApi | RootClass.TypeInitializer)
+            .Own(longB, RootClass.PublicApi)
+            .Own("App.Mid", RootClass.None)
+            .Own("App.Cutter", RootClass.Hidden, key: callerKey)
+            .Node("Ext.Net.X", MethodNodeKind.External, key: calleeKey)
+            .Ext(Env, File)
+            .Edge(longA, "App.Mid", MethodEdgeKind.Call, 1)
+            .Edge("App.Mid", Env, MethodEdgeKind.Call, 2)
+            .Edge(longA, File, MethodEdgeKind.Call, 3)
+            .Edge(longB, Env, MethodEdgeKind.Call, 4)
+            .Edge("App.Cutter", "Ext.Net.X", MethodEdgeKind.Call, 5)
+            .Copy(m => m with { Assembly = assembly });
+        parts.Gaps.Add(new RootGap(assembly, RootClass.PublicApi, "synthetic gap"));
+        Assert.True(map.IsIgnoredEdge(callerKey, calleeKey));   // the premise
+
+        var report = parts.Analyze();
+
+        Assert.Equal(5, report.NamesCut);
+        var (boundA, boundB, boundAssembly) = (Reachability.BoundName(longA), Reachability.BoundName(longB), Reachability.BoundName(assembly));
+        Assert.NotEqual(boundA, boundB);
+        var env = Row(report, RootClass.PublicApi, Capability.EnvironmentProbe);
+        Assert.Equal([boundB, boundA], env.Examples.Select(e => e.Root));   // longB's path is the shorter
+        Assert.Equal(
+            [new ReachHop(boundA, boundAssembly, null, 0), new ReachHop("App.Mid", boundAssembly, MethodEdgeKind.Call, 1), new ReachHop(Env, null, MethodEdgeKind.Call, 2)],
+            env.Examples[1].Hops);
+        Assert.Equal(boundA, Assert.Single(Row(report, RootClass.TypeInitializer, Capability.FileSystem).Examples).Root);
+        Assert.Equal([boundA, boundB], report.Profiles.Where(p => p.Class == RootClass.PublicApi).Select(p => p.ExampleRoot).Order(StringComparer.Ordinal));
+        Assert.Equal([new IgnoredEdge(Reachability.BoundName(callerKey), Reachability.BoundName(calleeKey))], report.IgnoredEdges);
+        Assert.Contains($"{boundAssembly}: synthetic gap", Status(report, RootClass.PublicApi).Reasons);
+
+        var names = report.Reaches.SelectMany(r => r.Examples).SelectMany(p => p.Hops.SelectMany(h => new[] { h.NodeId, h.Assembly }).Append(p.Root))
+            .Concat(report.Profiles.Select(p => p.ExampleRoot))
+            .Concat(report.IgnoredEdges.SelectMany(e => new[] { e.Caller, e.Callee }))
+            .OfType<string>().ToArray();
+        Assert.All(names, n => Assert.True(n.Length <= Reachability.MaxNameChars + 64, $"{n.Length} chars"));
+        Assert.DoesNotContain(names, n => n is { Length: > 1024 } && !n.Contains("…[+", StringComparison.Ordinal));
+        Assert.All(report.Classes.SelectMany(c => c.Reasons), r => Assert.True(r.Length <= Reachability.MaxNameChars + 128, $"{r.Length} chars"));
+    }
+
+    // The same long name reported many times - one root id in two classes' rows and its profiles, one assembly on every own
+    // hop - is cut once each: NamesCut 2.
+    [Fact]
+    public void NameBounding_TheSameLongNameReportedManyTimes_CountsOnce()
+    {
+        var root = "App." + new string('r', 1200) + "()";
+        var assembly = "Asm." + new string('m', 1200);
+        var parts = new Parts()
+            .Own(root, RootClass.PublicApi | RootClass.TypeInitializer | RootClass.Finalizer)
+            .Own("App.B", RootClass.Hidden)
+            .Own("App.C", RootClass.Hidden)
+            .Ext(Env, File, Net)
+            .Edge(root, "App.B")
+            .Edge("App.B", "App.C")
+            .Edge("App.C", Env)
+            .Edge(root, File)
+            .Edge("App.B", Net)
+            .Copy(m => m with { Assembly = assembly });
+
+        var report = parts.Analyze();
+
+        Assert.True(report.Reaches.Count(r => r.Examples.Any(e => e.Root == Reachability.BoundName(root))) >= 9);
+        Assert.Equal(2, report.NamesCut);
+    }
+
+    // Exactly MaxNameChars is no cut: the name is reported whole and NamesCut is 0; and an ordinary report cuts nothing.
+    [Fact]
+    public void NameBounding_ANameOfExactlyMaxNameChars_IsReportedWhole_AndCutsNothing()
+    {
+        var root = "App." + new string('r', Reachability.MaxNameChars - 4);
+        Assert.Equal(Reachability.MaxNameChars, root.Length);
+
+        var report = new Parts().Own(root, RootClass.PublicApi).Ext(Env).Edge(root, Env).Analyze();
+
+        Assert.Equal(root, Assert.Single(Row(report, RootClass.PublicApi, Capability.EnvironmentProbe).Examples).Root);
+        Assert.Equal(0, report.NamesCut);
+        Assert.Equal(0, RandomParts(1).Analyze().NamesCut);
+    }
+
+    // A failed analysis reports no names, so cuts none.
+    [Fact]
+    public void NameBounding_AFailedAnalysis_HasNamesCutZero()
+    {
+        var parts = new Parts().Own("App." + new string('x', 2000), RootClass.PublicApi);
+        parts.Methods.Add(parts.Methods[0]);
+
+        var report = parts.Analyze();
+
+        Assert.True(report.Partial);
+        Assert.Equal(0, report.NamesCut);
+    }
+
+    // A failure's exception text is bounded too (review Nit 2). Duplicated facts make the analysis's dictionary throw an
+    // ArgumentException naming the key, so a 5,000-char node id gives a message over the limit: every class's reason and
+    // PartialReason carry BoundName of it, and the raw id is in neither.
+    [Fact]
+    public void NameBounding_AFailedAnalysisWithALongExceptionMessage_BoundsItsReasonsAndPartialReason()
+    {
+        var id = "App." + new string('x', 5000);
+        var parts = new Parts().Own(id, RootClass.PublicApi);
+        parts.Methods.Add(parts.Methods[0]);
+        // The message the analysis's own ToDictionary over the facts throws, rebuilt the same way.
+        var message = Assert.IsType<ArgumentException>(Record.Exception(() => parts.Methods.ToDictionary(f => f.NodeId, StringComparer.Ordinal))).Message;
+        Assert.True(message.Length > Reachability.MaxNameChars && message.Contains(id, StringComparison.Ordinal));   // the premise
+
+        var report = parts.Analyze();
+
+        Assert.True(report.Partial);
+        Assert.Equal(Reachability.BoundName(message), report.PartialReason);
+        Assert.All(report.Classes, c => Assert.Equal([$"reachability could not be computed: {Reachability.BoundName(message)}"], c.Reasons));
+        Assert.All(report.Classes.SelectMany(c => c.Reasons).Append(report.PartialReason!), r =>
+        {
+            Assert.True(r.Length <= Reachability.MaxNameChars + 128, $"{r.Length} chars");
+            Assert.DoesNotContain(id, r, StringComparison.Ordinal);
+        });
+    }
+
+    // ---------------------------------------------------------------------------------------------------
+    // Scale (review W1)
+    // ---------------------------------------------------------------------------------------------------
+
+    // Ordering a row's examples once walked every reaching root's whole path, so a chain of N roots cost O(N²): 160,000
+    // took 110 s. Walk lengths are now memoised per sink and pass, O(N). Here a chain of 100,000 PublicApi roots
+    // L000000 -> ... -> L099999 -> Env, every one reaching Env, with an ldftn into L099998, so the memo carries the deferred
+    // bit down 99,997 nodes. The bound is deliberately generous, for a slow CI box: a linear run takes about a second here,
+    // while the quadratic one would take about 43 s on the box that measured 110 s (scaled by (100/160)²). So 20 s still
+    // fails the regression on any box where the quadratic run is slower than that, and passes wherever the linear run is
+    // within 20x of this one. Only Analyze is timed, not building the graph.
+    [Fact]
+    public void Scale_AChainOfAHundredThousandRoots_IsAnalysedInLinearTime_AndAgreesWithTheForwardOracle()
+    {
+        const int n = 100_000;
+        static string L(int i) => $"App.L{i:000000}";
+        var parts = new Parts().Ext(Env);
+        for (var i = 0; i < n; i++)
+            parts.Own(L(i), RootClass.PublicApi);
+        for (var i = 0; i < n - 1; i++)
+            parts.Edge(L(i), L(i + 1), i == n - 3 ? MethodEdgeKind.Ldftn : MethodEdgeKind.Call, (uint)i);
+        parts.Edge(L(n - 1), Env, MethodEdgeKind.Call, n - 1);
+        var graph = parts.Graph();
+
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var report = Reachability.Analyze(graph, map);
+        clock.Stop();
+
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(20), $"Analyze over a {n:N0}-root chain took {clock.Elapsed.TotalSeconds:F1} s: the example ordering is no longer linear (review W1)");
+        Assert.False(report.Partial, report.PartialReason);
+        var row = Row(report, RootClass.PublicApi, Capability.EnvironmentProbe);
+        Assert.Single(report.Reaches);
+        // Every root reaches Env, in every tier (no Dispatch edge); only the two below the ldftn without a deferred edge.
+        Assert.Equal((n, n, n, 2), (row.Roots, row.Bound, row.Instantiated, row.Direct));
+        // Bound throughout, so Direct first, then length: L099999 (2 hops) and L099998 (3), then L099997 through the ldftn (4).
+        Assert.Equal([(L(n - 1), true, 2), (L(n - 2), true, 3), (L(n - 3), false, 4)], row.Examples.Select(e => (e.Root, e.Direct, e.Length)));
+        Assert.Equal(
+            [$"PublicApi [EnvironmentProbe] False [] False {n - 2} {L(0)}", $"PublicApi [EnvironmentProbe] False [EnvironmentProbe] False 2 {L(n - 2)}"],
+            report.Profiles.Select(DescribeDirect));
+
+        // The forward oracle on the examples and on a sample along the chain. A forward BFS per root is O(N), so all N roots
+        // would be the quadratic cost under test; on a chain each root's forward set is its own suffix, so the sample's
+        // agreement and the counts above are the same claim.
+        var oracle = new Oracle(parts, map);
+        const int env = (int)Capability.EnvironmentProbe;
+        foreach (var path in row.Examples)
+        {
+            oracle.AssertShortestPath(path, env, oracle.Distance(path.Root, ReachEvidence.Bound, env)!.Value);
+            Assert.Equal(oracle.DirectDistance(path.Root, env) is not null, path.Direct);
+            if (path.Direct)
+                oracle.AssertDirectShortestPath(path, env, oracle.DirectDistance(path.Root, env)!.Value);
+        }
+        foreach (var i in new[] { 0, 1, n / 2, n - 4, n - 3, n - 2, n - 1 })
+        {
+            Assert.Equal(n - i, oracle.Distance(L(i), ReachEvidence.ChaOnly, env));
+            Assert.Equal(n - i, oracle.Distance(L(i), ReachEvidence.Bound, env));
+            Assert.Equal(i >= n - 2 ? n - i : (int?)null, oracle.DirectDistance(L(i), env));
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------------------------------------
+
+    // App.R reaches Env only through dead Dispatch edges (so ChaOnly): via App.D1.M, whose ldftn (or other deferred edge) of
+    // Env makes a 3-hop path through it; and, withDirectPath, via App.D2.M and App.X, a 4-hop path with none.
+    private static Parts ChaOnlyDelegateCase(bool withDirectPath, MethodEdgeKind deferred = MethodEdgeKind.Ldftn)
+    {
+        var parts = new Parts()
+            .Own("App.R", RootClass.PublicApi)
+            .Own("App.D1.M", RootClass.None, type: "App.D1")
+            .Type("App.D1", live: false)
+            .Ext(Env)
+            .Edge("App.R", "App.D1.M", MethodEdgeKind.Dispatch, 1)
+            .Edge("App.D1.M", Env, deferred, 3);
+        if (withDirectPath)
+            parts.Own("App.D2.M", RootClass.None, type: "App.D2").Own("App.X", RootClass.None).Type("App.D2", live: false)
+                .Edge("App.R", "App.D2.M", MethodEdgeKind.Dispatch, 2)
+                .Edge("App.D2.M", "App.X", MethodEdgeKind.Call, 4)
+                .Edge("App.X", Env, MethodEdgeKind.Call, 5);
+        return parts;
+    }
+
+    private static string DescribeDirect(ReachProfile p) =>
+        $"{p.Class} [{string.Join(",", p.Capabilities)}] {p.Unseen} [{string.Join(",", p.DirectCapabilities)}] {p.DirectUnseen} {p.Roots} {p.ExampleRoot}";
+
+    // The first 8 lower-case hex digits of the SHA-256 of a name's UTF-16 code units, little-endian, each unit as it is (a
+    // lone surrogate included; review Nit 1). Spelled out byte by byte, not through an Encoding, which would replace a
+    // lone surrogate with U+FFFD.
+    private static string Hash8(string name) =>
+        Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(name.SelectMany(c => new[] { (byte)(c & 0xFF), (byte)(c >> 8) }).ToArray()))[..8];
+
+    private static string Utf8Hash8(string name) =>
+        Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(name)))[..8];
+
+    // Well-formed UTF-16: a strict UTF-8 encoder accepts it (no lone surrogate).
+    private static void AssertWellFormed(string text) =>
+        Assert.Null(Record.Exception(() => new System.Text.UTF8Encoding(false, throwOnInvalidBytes: true).GetBytes(text)));
 
     // App.A -[kind@4]-> App.T.M -Call@1-> Env, with App.T.M's facts and its type's shaped by target.
     private static Parts DispatchCase(DispatchTarget target, MethodEdgeKind kind)
@@ -1279,7 +1990,10 @@ public sealed class ReachabilitySyntheticTests
     private const int Sinks = 12;
 
     private static readonly RootClass[] allClasses =
-        [RootClass.LoadTime, RootClass.HostContract, RootClass.RuntimeInvoked, RootClass.PublicApi, RootClass.PublicContract, RootClass.Hidden];
+    [
+        RootClass.LoadTime, RootClass.HostContract, RootClass.TypeInitializer, RootClass.Finalizer, RootClass.NativeEntry,
+        RootClass.PublicApi, RootClass.PublicContract, RootClass.Hidden,
+    ];
 
     private static readonly GraphCoverage complete = new(new IndexCoverage(0, 0, 0), 0, 0, 0, 0, ResolutionCounts.None, 0, 0, 0, 0, 0, 0, 0, false, null);
 
@@ -1391,12 +2105,32 @@ public sealed class ReachabilitySyntheticTests
             facts = parts.Methods.ToDictionary(m => m.NodeId, StringComparer.Ordinal);
             live = parts.Types.ToDictionary(t => t.TypeId, t => t.Live, StringComparer.Ordinal);
             edges = [.. parts.Edges.Where(e => nodes.ContainsKey(e.From) && nodes.ContainsKey(e.To) && !map.IsIgnoredEdge(nodes[e.From].ClassificationKey, nodes[e.To].ClassificationKey))];
+            // Each node's out-edges, in input order: the same edges the BFS scanned, indexed so a long chain is linear.
+            outgoing = edges.ToLookup(e => e.From, StringComparer.Ordinal);
             unseenSites = parts.Opacities.Where(o => o.Kind is OpacityKind.IndirectCall or OpacityKind.Unresolved or OpacityKind.Ambiguous or OpacityKind.BodyUnreadable)
                 .Select(o => o.Site).ToHashSet(StringComparer.Ordinal);
             this.map = map;
         }
 
-        public int? Distance(string root, ReachEvidence tier, int sink)
+        public int? Distance(string root, ReachEvidence tier, int sink) => Distance(root, e => InTier(e, tier), sink);
+
+        // Amendment a2's Direct edge set: the ChaOnly edges (all of them) except a deferred one (IsDirectEdge).
+        public int? DirectDistance(string root, int sink) => Distance(root, IsDirectEdge, sink);
+
+        // A ChaOnly example that is Direct: as short as the nearest sink over the Direct edges, each step one of them.
+        public void AssertDirectShortestPath(ReachPath path, int sink, int distance)
+        {
+            Assert.Equal(new ReachHop(path.Root, Assembly, null, 0), path.Hops[0]);
+            Assert.Equal(distance + 1, path.Length);
+            for (var i = 1; i < path.Hops.Count; i++)
+            {
+                var (from, to) = (path.Hops[i - 1].NodeId, path.Hops[i]);
+                Assert.Contains(edges, e => e.From == from && e.To == to.NodeId && e.Kind == to.Via && e.Offset == to.Offset && IsDirectEdge(e));
+            }
+            Assert.True(IsSink(path.Hops[^1].NodeId, sink), $"{path.Hops[^1].NodeId} is not sink {sink}");
+        }
+
+        private int? Distance(string root, Func<MethodEdge, bool> keep, int sink)
         {
             var seen = new HashSet<string>(StringComparer.Ordinal) { root };
             var frontier = new List<string> { root };
@@ -1404,10 +2138,13 @@ public sealed class ReachabilitySyntheticTests
             {
                 if (frontier.Any(n => IsSink(n, sink)))
                     return depth;
-                frontier = [.. frontier.SelectMany(n => edges.Where(e => e.From == n && InTier(e, tier)).Select(e => e.To)).Where(seen.Add)];
+                frontier = [.. frontier.SelectMany(n => outgoing[n].Where(keep).Select(e => e.To)).Where(seen.Add)];
             }
             return null;
         }
+
+        // Amendment a2 with its 2026-11-06 clarification (review W3): no edge that makes a method value without calling it.
+        private static bool IsDirectEdge(MethodEdge edge) => edge.Kind is not (MethodEdgeKind.Ldftn or MethodEdgeKind.Ldvirtftn or MethodEdgeKind.LoadToken);
 
         // The path is root-first with Via null at offset 0, each step an edge of its tier, it ends at a sink, and it is
         // as short as the nearest sink is (Length counts the root). A truncated path keeps the first MaxPathHops - 2 hops
@@ -1454,6 +2191,7 @@ public sealed class ReachabilitySyntheticTests
         private readonly Dictionary<string, OwnMethodFacts> facts;
         private readonly Dictionary<string, bool> live;
         private readonly MethodEdge[] edges;
+        private readonly ILookup<string, MethodEdge> outgoing;
         private readonly HashSet<string> unseenSites;
         private readonly CapabilityMap map;
     }

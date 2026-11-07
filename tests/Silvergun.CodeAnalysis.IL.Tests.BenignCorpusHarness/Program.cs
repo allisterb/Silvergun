@@ -17,8 +17,13 @@ public sealed record HarnessOptions(
     string OutputDirectory,
     TimeSpan ChildTimeout);
 
-/// <summary>The <c>--reachability</c> options on top of the common ones.</summary>
-public sealed record ReachabilityOptions(HarnessOptions Common, string Results, int MaxChildren, DateOnly Date);
+/// <summary>The <c>--reachability</c> options on top of the common ones; <see cref="Oracle"/> is the presence oracle's path.</summary>
+public sealed record ReachabilityOptions(HarnessOptions Common, string Results, int MaxChildren, DateOnly Date, string Oracle);
+
+/// <summary>The <c>--combine</c> options (R2b S4): both manifests, each with its results and repeat directories, and the oracle.</summary>
+public sealed record CombineOptions(
+    string C100Manifest, string C100Results, string C100Repeat, string CbuildManifest, string CbuildResults, string CbuildRepeat,
+    string Oracle, string OutputDirectory, DateOnly Date);
 
 /// <summary>
 /// Benign-corpus harness - <b>a measurement instrument, not a shipped feature and not a unit test</b>. It scans a
@@ -59,6 +64,8 @@ public static class Program
                 return 0;
             }
 
+            if (args.Contains(CombineFlag))
+                return RunCombine(args);
             if (args.Contains(ReachabilityFlag))
                 return RunReachability(args);
             if (args.Contains(WorkerParityFlag))
@@ -123,13 +130,14 @@ public static class Program
         var common = options.Common;
         var manifest = CorpusManifest.Load(common.Manifest, common.Take);
         var identity = BuildIdentities.Current(RepositoryRoot(), AppContext.BaseDirectory);
-        var oracle = PresenceOracle.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, OracleFileName)));
+        var oracle = PresenceOracle.Parse(File.ReadAllText(options.Oracle));
         var harness = HarnessExecutable();
 
         Console.WriteLine($"manifest {manifest.Path}");
         Console.WriteLine($"manifest-hash {manifest.Hash} ({manifest.Entries.Count} package(s))");
         Console.WriteLine($"cache {common.CacheRoot} (read only)");
         Console.WriteLine($"results {options.Results}");
+        Console.WriteLine($"oracle {options.Oracle}");
         Console.WriteLine($"identity {identity}");
 
         try
@@ -147,7 +155,7 @@ public static class Program
                 return 0;
             }
 
-            var context = new ReachabilityReportContext(options.Date, manifest, common.CacheRoot, identity, common.ChildTimeout, oracle);
+            var context = new ReachabilityReportContext(options.Date, manifest, common.CacheRoot, identity, common.ChildTimeout, oracle, Path.GetFileName(options.Oracle));
             var (paths, notComparable) = ReachabilityCorpusReport.Write(common.OutputDirectory, context, run.Results);
             foreach (var path in paths)
                 Console.WriteLine($"wrote {path}");
@@ -224,7 +232,90 @@ public static class Program
         return 0;
     }
 
-    private static ReachabilityOptions? ParseReachability(string[] args)
+    // --combine (reachability R2b S4): offline like --reachability, and it runs no child either: it reads four results
+    // directories, never a package cache. Writes reachability-combine-<date>.md; exit 3 when a gate fails (no verdict).
+    private static int RunCombine(string[] args)
+    {
+        if (ParseCombine(args) is not { } options)
+        {
+            Console.Error.WriteLine("--combine needs --c100-manifest, --c100-results, --c100-repeat, --cbuild-results and --cbuild-repeat; see --help.");
+            return 2;
+        }
+
+        var identity = BuildIdentities.Current(RepositoryRoot(), AppContext.BaseDirectory);
+        var oracle = PresenceOracle.Parse(File.ReadAllText(options.Oracle));
+        var c100Manifest = CorpusManifest.Load(options.C100Manifest, 0);
+        var cbuildManifest = CorpusManifest.Load(options.CbuildManifest, 0);
+        Console.WriteLine($"c100 {c100Manifest.Path} ({c100Manifest.Entries.Count} package(s)); results {options.C100Results}; repeat {options.C100Repeat}");
+        Console.WriteLine($"c-build {cbuildManifest.Path} ({cbuildManifest.Entries.Count} package(s), hash {cbuildManifest.Hash}); results {options.CbuildResults}; repeat {options.CbuildRepeat}");
+        Console.WriteLine($"oracle {options.Oracle}");
+        Console.WriteLine($"identity {identity}");
+
+        try
+        {
+            var result = ReachabilityCombine.Combine(
+                ReachabilityCombine.ReadSide(ReachabilityCombine.C100Name, c100Manifest, options.C100Results, options.C100Repeat),
+                ReachabilityCombine.ReadSide(ReachabilityCombine.CbuildName, cbuildManifest, options.CbuildResults, options.CbuildRepeat),
+                oracle, identity, ReachabilityCombine.PinnedCbuildManifestHash);
+            Console.WriteLine($"wrote {ReachabilityCombine.Write(options.OutputDirectory, options.Date, Path.GetFileName(options.Oracle), identity, result)}");
+            if (result.NotComparable is not null)
+            {
+                Console.Error.WriteLine($"NOT-COMPARABLE {result.NotComparable}");
+                return NotComparableExitCode;
+            }
+            foreach (var verdict in ReachabilityAggregation.Labels.SelectMany(result.Verdicts))
+                Console.WriteLine($"VERDICT {verdict.Class} {verdict.Label}: {verdict.Verdict}");
+            return 0;
+        }
+        catch (MixedBuildException ex)
+        {
+            Console.Error.WriteLine($"FAILED {ex.Message}");
+            return 1;
+        }
+    }
+
+    /// <summary>
+    /// The <c>--combine</c> options, or null when a required one is missing. <c>--cbuild-manifest</c> defaults to
+    /// <see cref="CbuildManifestFileName"/> beside the harness, <c>--oracle</c> as for <c>--reachability</c>
+    /// (<see cref="OracleOf"/>), <c>--out</c> to <c>docs/agent/measurements</c>, <c>--date</c> to today (UTC).
+    /// </summary>
+    public static CombineOptions? ParseCombine(string[] args)
+    {
+        string? Value(string name)
+        {
+            var index = Array.IndexOf(args, name);
+            return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
+        }
+
+        string[] required = ["--c100-manifest", "--c100-results", "--c100-repeat", "--cbuild-results", "--cbuild-repeat"];
+        if (required.Select(Value).ToArray() is not [{ } c100, { } c100Results, { } c100Repeat, { } cbuildResults, { } cbuildRepeat])
+            return null;
+        return new CombineOptions(
+            Path.GetFullPath(c100), Path.GetFullPath(c100Results), Path.GetFullPath(c100Repeat),
+            Path.GetFullPath(Value("--cbuild-manifest") ?? Path.Combine(AppContext.BaseDirectory, CbuildManifestFileName)),
+            Path.GetFullPath(cbuildResults), Path.GetFullPath(cbuildRepeat),
+            OracleOf(args),
+            Path.GetFullPath(Value("--out") ?? Path.Combine(RepositoryRoot(), "docs", "agent", "measurements")),
+            DateOf(args));
+    }
+
+    /// <summary>The presence oracle's path: <c>--oracle &lt;path&gt;</c>, else <see cref="OracleFileName"/> beside the harness.</summary>
+    public static string OracleOf(string[] args)
+    {
+        var index = Array.IndexOf(args, "--oracle");
+        return Path.GetFullPath(index >= 0 && index + 1 < args.Length ? args[index + 1] : Path.Combine(AppContext.BaseDirectory, OracleFileName));
+    }
+
+    private static DateOnly DateOf(string[] args)
+    {
+        var index = Array.IndexOf(args, "--date");
+        return index >= 0 && index + 1 < args.Length
+            ? DateOnly.ParseExact(args[index + 1], "yyyy-MM-dd", CultureInfo.InvariantCulture)
+            : DateOnly.FromDateTime(DateTime.UtcNow);
+    }
+
+    /// <summary>The <c>--reachability</c> options, or null without <c>--results</c>.</summary>
+    public static ReachabilityOptions? ParseReachability(string[] args)
     {
         string? Value(string name)
         {
@@ -245,9 +336,8 @@ public static class Program
             common,
             Path.GetFullPath(results),
             Value("--max-children") is { } max ? int.Parse(max, CultureInfo.InvariantCulture) : int.MaxValue,
-            Value("--date") is { } date
-                ? DateOnly.ParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture)
-                : DateOnly.FromDateTime(DateTime.UtcNow));
+            DateOf(args),
+            OracleOf(args));
     }
 
     private static HarnessOptions Parse(string[] args)
@@ -305,10 +395,21 @@ public static class Program
     #region Fields
     public const string ManifestFileName = "benign-corpus.manifest";
 
-    /// <summary>The 2026-08-21 presence baseline as data, copied next to the executable.</summary>
-    public const string OracleFileName = "presence-oracle-2026-08-21.tsv";
+    /// <summary>
+    /// The default presence oracle (<c>--oracle</c>), copied next to the executable: R2b's baseline on the S2 map
+    /// (<c>reachability-r2b.md</c>, "Re-baseline").
+    /// </summary>
+    public const string OracleFileName = "presence-oracle-2026-11-06.tsv";
+
+    /// <summary>R2's presence oracle, the 2026-08-21 baseline on the R2 map; kept beside it as R2's record.</summary>
+    public const string R2OracleFileName = "presence-oracle-2026-08-21.tsv";
+
+    /// <summary>The C-build manifest (R2b S3), copied next to the executable: <c>--combine</c>'s default <c>--cbuild-manifest</c>.</summary>
+    public const string CbuildManifestFileName = "c-build.manifest";
 
     private const string ReachabilityFlag = "--reachability";
+
+    private const string CombineFlag = "--combine";
 
     private const string WorkerParityFlag = "--worker-parity";
 
@@ -333,17 +434,34 @@ public static class Program
           --out       report directory. Default <repo>/docs/agent/measurements.
           --timeout   per-child-process timeout in seconds. Default 300.
 
-          <harness> --reachability --results <dir> [--max-children <n>] [--date <yyyy-MM-dd>] [common options]
+          <harness> --reachability --results <dir> [--max-children <n>] [--date <yyyy-MM-dd>] [--oracle <path>] [common options]
           <harness> reach <nupkg> <out-json>  (child mode - one package, one process)
 
-          Reachability R2 (docs/agent/tasks/reachability-r2.md). OFFLINE: reads <cache>/packages/<Id>.<Version>.nupkg
-          and never downloads; a missing package is 'not-cached'. One child per package (timeout default 600 s;
-          --take defaults to 0, every entry); each result is cached as <results>/<Id>.<Version>.json and reused;
-          results of another build (git describe --dirty + assembly hash) are refused.
+          Reachability R2/R2b (docs/agent/tasks/reachability-r2.md, reachability-r2b.md). OFFLINE: reads
+          <cache>/packages/<Id>.<Version>.nupkg and never downloads; a missing package is 'not-cached'. One child per
+          package (timeout default 600 s; --take defaults to 0, every entry); each result is cached as
+          <results>/<Id>.<Version>.json and reused (one of an older result schema is re-measured); results of another
+          build (git describe --dirty + assembly hash) are refused.
           --max-children  new children to run in this invocation. Default unlimited.
           --date          the date in the report's file name. Default today (UTC).
-          Once every entry has a result, writes reachability-benign-<date>.md, .tsv and -cost.md into --out.
+          --oracle        the presence oracle. Default presence-oracle-2026-11-06.tsv next to the executable (R2b, the
+                          S2 map); presence-oracle-2026-08-21.tsv beside it is R2's.
+          Once every entry has a result, writes reachability-benign-<date>.md, .tsv and -cost.md into --out. Each trigger
+          class is judged at ChaOnly and Direct; TypeInitializer, Finalizer and NativeEntry here (P-lib and P-all, both
+          must pass); HostContract and LoadTime only by --combine (their cells read 'judged by --combine').
           Exit 3 after writing it when the population is not comparable (oracle not a full MATCH, or not-cached).
+
+          <harness> --combine --c100-manifest <path> --c100-results <dir> --c100-repeat <dir>
+                    --cbuild-results <dir> --cbuild-repeat <dir> [--cbuild-manifest <path>] [--oracle <path>]
+                    [--out <dir>] [--date <yyyy-MM-dd>]
+
+          Reachability R2b S4, the combine step. OFFLINE: reads the four --reachability results directories (a run and
+          its repeat per manifest); runs no child and opens no cache. --cbuild-manifest defaults to c-build.manifest next
+          to the executable. Gates: the C-build manifest is the pinned c-build.manifest (by its hash; no option changes
+          that); C100's oracle, recomputed from its results, a full MATCH with 0 not-cached; C-build 0 not-cached; each
+          run and its repeat identical per package (results without cost, temp paths masked); no id in both manifests. Judges HostContract and LoadTime at ChaOnly and Direct on P-all over C100 and C-build, one
+          denominator, both runs' floor packages counted. Writes reachability-combine-<date>.md into --out.
+          Exit 3 after writing it when a gate fails (no verdict); 1 when results of another build are found.
 
           <harness> --worker-parity [--date <yyyy-MM-dd>] [common options]
           <harness> parity-inproc <nupkg> <out-json>  (child mode - the in-process graph pass of one package)

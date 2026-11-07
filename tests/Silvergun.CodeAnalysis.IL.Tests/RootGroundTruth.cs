@@ -53,18 +53,18 @@ public static class RootGroundTruth
         new("HostContract.AnalyzerConstructorSafe", Own("Roots.Host.SafeAnalyzer..ctor()"), RootClass.HostContract, null, null, Expectation.Absent,
             "Twin analyzer with a benign constructor."),
 
-        // ---- RuntimeInvoked ----------------------------------------------------------------------------------
-        new("RuntimeInvoked.TypeInitializer", Own("StaticInit.FieldInit..cctor()"), RootClass.RuntimeInvoked, Env, ReachEvidence.Bound, Expectation.Present,
+        // ---- TypeInitializer, Finalizer, NativeEntry (R1's RuntimeInvoked, split by ADR 0037 amendment a1) -----
+        new("TypeInitializer.FieldInitializer", Own("StaticInit.FieldInit..cctor()"), RootClass.TypeInitializer, Env, ReachEvidence.Bound, Expectation.Present,
             "A static field initializer's .cctor (the existing StaticInit case): the runtime runs it on first access."),
-        new("RuntimeInvoked.TypeInitializerSafe", Own("StaticInit.SafeFieldInit..cctor()"), RootClass.RuntimeInvoked, null, null, Expectation.Absent,
+        new("TypeInitializer.FieldInitializerSafe", Own("StaticInit.SafeFieldInit..cctor()"), RootClass.TypeInitializer, null, null, Expectation.Absent,
             "Twin .cctor (the existing StaticInit twin)."),
-        new("RuntimeInvoked.Finalizer", Own("Roots.Runtime.EnvFinalized.Finalize()"), RootClass.RuntimeInvoked, Env, ReachEvidence.Bound, Expectation.Present,
+        new("Finalizer.Finalize", Own("Roots.Runtime.EnvFinalized.Finalize()"), RootClass.Finalizer, Env, ReachEvidence.Bound, Expectation.Present,
             "~EnvFinalized() overrides Object.Finalize: the finalizer thread runs it, nothing in IL calls it."),
-        new("RuntimeInvoked.FinalizerSafe", Own("Roots.Runtime.SafeFinalized.Finalize()"), RootClass.RuntimeInvoked, null, null, Expectation.Absent,
+        new("Finalizer.FinalizeSafe", Own("Roots.Runtime.SafeFinalized.Finalize()"), RootClass.Finalizer, null, null, Expectation.Absent,
             "Twin finalizer with a benign body."),
-        new("RuntimeInvoked.UnmanagedCallersOnly", Own("Roots.Runtime.Exports.ExportsEnv()"), RootClass.RuntimeInvoked, Env, ReachEvidence.Bound, Expectation.Present,
-            "An [UnmanagedCallersOnly] export (a root-attribute ... RuntimeInvoked entry): native code calls in."),
-        new("RuntimeInvoked.UnmanagedCallersOnlySafe", Own("Roots.Runtime.Exports.ExportsSafe()"), RootClass.RuntimeInvoked, null, null, Expectation.Absent,
+        new("NativeEntry.UnmanagedCallersOnly", Own("Roots.Runtime.Exports.ExportsEnv()"), RootClass.NativeEntry, Env, ReachEvidence.Bound, Expectation.Present,
+            "An [UnmanagedCallersOnly] export (a root-attribute ... NativeEntry entry): native code calls in."),
+        new("NativeEntry.UnmanagedCallersOnlySafe", Own("Roots.Runtime.Exports.ExportsSafe()"), RootClass.NativeEntry, null, null, Expectation.Absent,
             "Twin export with a benign body. The scanner still reports a NativeExport for it (the export itself); reachability's sinks are what it calls."),
 
         // ---- PublicApi ---------------------------------------------------------------------------------------

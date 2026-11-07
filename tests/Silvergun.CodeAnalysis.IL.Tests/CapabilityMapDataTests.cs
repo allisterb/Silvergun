@@ -134,7 +134,7 @@ public sealed class CapabilityMapDataTests
             new Dictionary<string, RootClass>
             {
                 ["System.Runtime.CompilerServices.ModuleInitializerAttribute"] = RootClass.LoadTime,
-                ["System.Runtime.InteropServices.UnmanagedCallersOnlyAttribute"] = RootClass.RuntimeInvoked,
+                ["System.Runtime.InteropServices.UnmanagedCallersOnlyAttribute"] = RootClass.NativeEntry,
             },
             CapabilityMap.Default.RootAttributes.OrderBy(p => p.Key, StringComparer.Ordinal).ToDictionary());
 
@@ -602,6 +602,80 @@ public sealed class CapabilityMapDataTests
         Assert.Equal(
             new CapabilityVerdict(CapabilityClass.Capability, Capability.NativeInterop),
             CapabilityMap.Default.Classify(key));
+    }
+
+    // ---------------------------------------------------------------------------------------------------
+    // ADR 0037 a3, the R2b S2 map (docs/agent/tasks/reachability-r2b.md, "The fixed list"). Each admitted entry is
+    // paired with the siblings that must keep their type entry's verdict, as the carve-outs above are.
+    // ---------------------------------------------------------------------------------------------------
+
+    // Directory.GetParent is a path-string operation (Path.GetDirectoryName over Path.GetFullPath): it touches no disk.
+    [Fact]
+    public void Default_DirectoryGetParent_IsSafe()
+    {
+        Assert.Equal(new CapabilityVerdict(CapabilityClass.Safe, null), CapabilityMap.Default.Classify("System.IO.Directory.GetParent"));
+    }
+
+    // ...while the `capability System.IO.Directory FileSystem` entry it is carved out of still covers every other member,
+    // and the DirectoryInfo it returns is still FileSystem through its own type entry.
+    [Theory]
+    [InlineData("System.IO.Directory.GetFiles")]
+    [InlineData("System.IO.Directory.CreateDirectory")]
+    [InlineData("System.IO.Directory.Delete")]
+    [InlineData("System.IO.Directory.Exists")]
+    [InlineData("System.IO.Directory.EnumerateFiles")]
+    [InlineData("System.IO.DirectoryInfo..ctor")]
+    [InlineData("System.IO.DirectoryInfo.get_Parent")]
+    [InlineData("System.IO.DirectoryInfo.GetFiles")]
+    [InlineData("System.IO.DirectoryInfo.Create")]
+    public void Default_DirectorySiblingsOfGetParent_AndDirectoryInfo_RemainFileSystem(string key)
+    {
+        Assert.Equal(new CapabilityVerdict(CapabilityClass.Capability, Capability.FileSystem), CapabilityMap.Default.Classify(key));
+    }
+
+    // GCHandle allocates, pins and addresses a GC handle to a managed object and calls no native code: raw memory, like
+    // NativeMemory and MemoryMarshal. A type entry, so every member moves (it was NativeInterop on the R2 map).
+    [Theory]
+    [InlineData("System.Runtime.InteropServices.GCHandle.Alloc")]
+    [InlineData("System.Runtime.InteropServices.GCHandle.Free")]
+    [InlineData("System.Runtime.InteropServices.GCHandle.get_Target")]
+    [InlineData("System.Runtime.InteropServices.GCHandle.AddrOfPinnedObject")]
+    [InlineData("System.Runtime.InteropServices.GCHandle.op_Explicit")]
+    [InlineData("System.Runtime.InteropServices.GCHandle.FromIntPtr")]
+    [InlineData("System.Runtime.InteropServices.GCHandle.ToIntPtr")]
+    [InlineData("System.Runtime.InteropServices.GCHandle.get_IsAllocated")]
+    public void Default_GCHandleMembers_AreUnsafeMemory(string key)
+    {
+        Assert.Equal(new CapabilityVerdict(CapabilityClass.Capability, Capability.UnsafeMemory), CapabilityMap.Default.Classify(key));
+    }
+
+    // The HGlobal triple allocates and frees process heap memory, as NativeMemory.Alloc/Free do: carve-outs from Marshal's
+    // NativeInterop type entry to UnsafeMemory. Asserted as an equality with NativeMemory too: the same operation, one verdict.
+    [Theory]
+    [InlineData("System.Runtime.InteropServices.Marshal.AllocHGlobal")]
+    [InlineData("System.Runtime.InteropServices.Marshal.ReAllocHGlobal")]
+    [InlineData("System.Runtime.InteropServices.Marshal.FreeHGlobal")]
+    public void Default_MarshalHGlobalTriple_IsUnsafeMemoryLikeNativeMemory(string key)
+    {
+        var verdict = CapabilityMap.Default.Classify(key);
+
+        Assert.Equal(new CapabilityVerdict(CapabilityClass.Capability, Capability.UnsafeMemory), verdict);
+        Assert.Equal(CapabilityMap.Default.Classify("System.Runtime.InteropServices.NativeMemory.Alloc"), verdict);
+    }
+
+    // ...and the Marshal type entry those three are carved out of is still live: the COM allocator (not on the list) and
+    // every other member stay NativeInterop.
+    [Theory]
+    [InlineData("System.Runtime.InteropServices.Marshal.AllocCoTaskMem")]
+    [InlineData("System.Runtime.InteropServices.Marshal.ReAllocCoTaskMem")]
+    [InlineData("System.Runtime.InteropServices.Marshal.FreeCoTaskMem")]
+    [InlineData("System.Runtime.InteropServices.Marshal.Copy")]
+    [InlineData("System.Runtime.InteropServices.Marshal.PtrToStructure")]
+    [InlineData("System.Runtime.InteropServices.Marshal.GetDelegateForFunctionPointer")]
+    [InlineData("System.Runtime.InteropServices.Marshal.StringToHGlobalAnsi")]
+    public void Default_MarshalSiblingsOfTheHGlobalTriple_RemainNativeInterop(string key)
+    {
+        Assert.Equal(new CapabilityVerdict(CapabilityClass.Capability, Capability.NativeInterop), CapabilityMap.Default.Classify(key));
     }
 
     // Task.Run takes a delegate: it is a call-graph EDGE, not a capability. Marking it safe would terminate

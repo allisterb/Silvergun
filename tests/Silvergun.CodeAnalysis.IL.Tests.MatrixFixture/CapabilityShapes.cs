@@ -76,7 +76,7 @@ public static class CapabilityShapes
         return method.Invoke(target, null);
     }
 
-    /// <summary>NativeInterop: <see cref="Marshal.AllocHGlobal(int)"/>. Never called.</summary>
+    /// <summary>UnsafeMemory (NativeInterop before the R2b S2 map): <see cref="Marshal.AllocHGlobal(int)"/>. Never called.</summary>
     public static IntPtr AllocatesUnmanagedMemory(int size) => Marshal.AllocHGlobal(size);
 
     /// <summary>Cryptography: <see cref="Aes.Create()"/>. Never called.</summary>

@@ -223,9 +223,9 @@ public static class ReachabilityChild
                 [.. report.Classes.Select(s => new ClassCount(s.Class, s.Roots))],
                 own.Count(f => f.Roots == RootClass.PublicContract),
                 own.Count(f => f.Roots == RootClass.Hidden),
-                [.. report.Reaches.Select(r => new ReachRecord(r.Class, r.Capability, r.Roots, r.Bound, r.Instantiated))],
+                [.. report.Reaches.Select(r => new ReachRecord(r.Class, r.Capability, r.Roots, r.Bound, r.Instantiated, r.Direct))],
                 [.. report.Classes.Select(s => new VerdictRecord(s.Class, s.Verdict, [.. s.Reasons], CategoriesOf(s.Class, report, graph.Facts.Gaps)))],
-                [.. report.Profiles.Select(p => new ProfileRecord(p.Class, [.. p.Capabilities], p.Unseen, p.Roots, p.ExampleRoot))],
+                [.. report.Profiles.Select(p => new ProfileRecord(p.Class, [.. p.Capabilities], p.Unseen, [.. p.DirectCapabilities], p.DirectUnseen, p.Roots, p.ExampleRoot))],
                 TruncatedClasses(report),
                 report.Partial,
                 report.PartialReason,
@@ -236,8 +236,11 @@ public static class ReachabilityChild
                 [.. report.Reaches
                     .Where(r => TriggerClasses.Contains(r.Class) && r.Capability is { } c && SignalCapabilities.Contains(c) && r.Examples.Count > 0)
                     .Select(r => (Reach: r, Path: r.Examples[0]))
-                    .Select(x => new ExampleRecord(x.Reach.Class, x.Reach.Capability!.Value, x.Path.Root, x.Path.Evidence, x.Path.Length, x.Path.Truncated,
-                        x.Path.EndsInOpacity, [.. x.Path.Hops.Select(h => new HopRecord(h.NodeId, h.Assembly, h.Via, h.Offset))]))]);
+                    .Select(x => new ExampleRecord(x.Reach.Class, x.Reach.Capability!.Value, x.Path.Root, x.Path.Evidence, x.Path.Direct, x.Path.Length, x.Path.Truncated,
+                        x.Path.EndsInOpacity, [.. x.Path.Hops.Select(h => new HopRecord(h.NodeId, h.Assembly, h.Via, h.Offset))]))])
+            {
+                NamesCut = report.NamesCut,
+            };
         }
 
         using var self = Process.GetCurrentProcess();
@@ -323,12 +326,16 @@ public static class ReachabilityChild
     /// <summary>The stderr line that names the child's extraction directory: <c>EXTRACTION\t&lt;dir&gt;</c>.</summary>
     public const string ExtractionMarker = "EXTRACTION";
 
-    /// <summary>The trigger classes of ADR 0037 (E1, E2).</summary>
-    public static readonly RootClass[] TriggerClasses = [RootClass.LoadTime, RootClass.HostContract, RootClass.RuntimeInvoked];
+    /// <summary>The trigger classes of ADR 0037 (E1, E2), with R2's RuntimeInvoked split three ways (amendment a1).</summary>
+    public static readonly RootClass[] TriggerClasses =
+        [RootClass.LoadTime, RootClass.HostContract, RootClass.TypeInitializer, RootClass.Finalizer, RootClass.NativeEntry];
 
-    /// <summary>All six single root classes, strongest first, as <see cref="Reachability"/> orders them.</summary>
+    /// <summary>All eight single root classes, strongest first, as <see cref="Reachability"/> orders them.</summary>
     public static readonly RootClass[] AllClasses =
-        [RootClass.LoadTime, RootClass.HostContract, RootClass.RuntimeInvoked, RootClass.PublicApi, RootClass.PublicContract, RootClass.Hidden];
+    [
+        RootClass.LoadTime, RootClass.HostContract, RootClass.TypeInitializer, RootClass.Finalizer, RootClass.NativeEntry,
+        RootClass.PublicApi, RootClass.PublicContract, RootClass.Hidden,
+    ];
 
     /// <summary>The signal capabilities of ADR 0037 decision 10, in enum order.</summary>
     public static readonly Capability[] SignalCapabilities =

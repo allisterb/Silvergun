@@ -73,6 +73,112 @@ public sealed class GraphWorkerProtocolTests
         Assert.Equal(line, JsonSerializer.Serialize(JsonSerializer.Deserialize(line, GraphWorkerJsonContext.Default.GraphWorkerRequest)!, GraphWorkerJsonContext.Default.GraphWorkerRequest));
     }
 
+    /// <summary>
+    /// Reachability R2b, S1 (ADR 0037 amendment a1/a2/a5) on the wire: a report carrying the three split classes, the
+    /// Direct label on paths, rows and profiles, a bounded name and its <see cref="ReachabilityReport.NamesCut"/>
+    /// round-trips byte for byte, with every new member read back as written and every enum by its exact name. The
+    /// bounded name is the one <see cref="Reachability.BoundName"/> makes of a 100,000-char root, so the raw name is
+    /// not on the wire and the record stays small.
+    /// </summary>
+    [Fact]
+    public void AReportWithTheSplitClassesDirectAndABoundedName_RoundTrips_ByteIdentical()
+    {
+        var longRoot = "App." + new string('r', 100_000) + "..cctor()";
+        var bounded = Reachability.BoundName(longRoot);
+        const string payload = "App.Init.Payload()";
+        const string sink = "System.IO.File.Exists(System.String)";
+        var viaDelegate = new ReachPath(bounded, ReachEvidence.Bound, false,
+            [new ReachHop(bounded, "App", null, 0), new ReachHop(payload, "App", MethodEdgeKind.Ldftn, 6), new ReachHop(sink, null, MethodEdgeKind.Call, 1)], 3, false, null);
+        var direct = new ReachPath("App.Fin.Finalize()", ReachEvidence.ChaOnly, true,
+            [new ReachHop("App.Fin.Finalize()", "App", null, 0), new ReachHop(sink, null, MethodEdgeKind.Call, 2)], 2, false, null);
+        var report = new ReachabilityReport(
+            [
+                new CapabilityReach(RootClass.TypeInitializer, Capability.FileSystem, 1, 1, 1, 0, [viaDelegate]),
+                new CapabilityReach(RootClass.Finalizer, Capability.FileSystem, 1, 0, 0, 1, [direct]),
+                new CapabilityReach(RootClass.NativeEntry, null, 2, 2, 2, 1, []),
+            ],
+            [
+                new ReachProfile(RootClass.TypeInitializer, [Capability.FileSystem, Capability.Network], true, [Capability.Network], false, 1, bounded),
+                new ReachProfile(RootClass.NativeEntry, [], true, [], true, 2, "App.Exp.Export()"),
+            ],
+            false,
+            [
+                new RootClassStatus(RootClass.TypeInitializer, 1, RootClassVerdict.Reaches, []),
+                new RootClassStatus(RootClass.Finalizer, 1, RootClassVerdict.Reaches, []),
+                new RootClassStatus(RootClass.NativeEntry, 2, RootClassVerdict.Unknown, ["2 root(s) reach code the graph cannot see"]),
+            ],
+            0, [], 1, MechanismRecord.Value.Report!.Graph, false, null);
+        var record = new GraphWorkerFolder(0, "lib/net10.0", [], [], report, 4, 3);
+        var json = GraphJson.Of(record);
+
+        var folder = Assert.IsType<GraphWorkerFolder>(JsonSerializer.Deserialize(json, GraphWorkerJsonContext.Default.GraphWorkerMessage));
+
+        Assert.Equal(json, GraphJson.Of(folder));
+        Assert.DoesNotContain(new string('r', Reachability.MaxNameChars + 1), json, StringComparison.Ordinal);
+        Assert.True(Encoding.UTF8.GetByteCount(json) < 16 * 1024, $"{Encoding.UTF8.GetByteCount(json)} bytes");
+        foreach (var name in new[] { "TypeInitializer", "Finalizer", "NativeEntry" })
+            Assert.Contains($"\"class\":\"{name}\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"namesCut\":1", json, StringComparison.Ordinal);
+        var back = folder.Report!;
+        Assert.Equal(1, back.NamesCut);
+        Assert.Equal([RootClass.TypeInitializer, RootClass.Finalizer, RootClass.NativeEntry], back.Reaches.Select(r => r.Class));
+        Assert.Equal([0, 1, 1], back.Reaches.Select(r => r.Direct));
+        Assert.Equal((bounded, false), (back.Reaches[0].Examples[0].Root, back.Reaches[0].Examples[0].Direct));
+        Assert.Equal(bounded, back.Reaches[0].Examples[0].Hops[0].NodeId);
+        Assert.True(back.Reaches[1].Examples[0].Direct);
+        Assert.Equal([Capability.Network], back.Profiles[0].DirectCapabilities);
+        Assert.Equal((true, false, bounded), (back.Profiles[0].Unseen, back.Profiles[0].DirectUnseen, back.Profiles[0].ExampleRoot));
+        Assert.Equal((true, true), (back.Profiles[1].Unseen, back.Profiles[1].DirectUnseen));
+        Assert.Empty(back.Profiles[1].DirectCapabilities);
+    }
+
+    /// <summary>
+    /// The real mechanism record carries the new shape too: the three split classes by name, a namesCut of 0 (its names
+    /// are short), Direct example paths, and a row whose Direct count is below its roots (its ldftn-only reaches,
+    /// e.g. Parity.Kinds.LoadsEnvPointer).
+    /// </summary>
+    [Fact]
+    public void TheRealMechanismRecord_CarriesTheSplitClasses_NamesCut_AndTheDirectCounts()
+    {
+        var json = Valid;
+        var report = MechanismRecord.Value.Report!;
+
+        foreach (var name in new[] { "TypeInitializer", "Finalizer", "NativeEntry" })
+            Assert.Contains($"\"class\":\"{name}\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("RuntimeInvoked", json, StringComparison.Ordinal);
+        Assert.Contains("\"namesCut\":0", json, StringComparison.Ordinal);
+        Assert.Equal(0, report.NamesCut);
+        Assert.Contains(report.Reaches.SelectMany(r => r.Examples), e => e.Direct);
+        Assert.All(report.Reaches, r => Assert.InRange(r.Direct, 0, r.Roots));
+        Assert.Contains(report.Reaches, r => r.Direct < r.Roots);
+    }
+
+    /// <summary>The new members are required like the old: a record missing one is refused, not defaulted.</summary>
+    [Theory]
+    [InlineData("namesCut")]
+    [InlineData("reach direct")]
+    [InlineData("path direct")]
+    [InlineData("directCapabilities")]
+    [InlineData("directUnseen")]
+    public void TheContext_RejectsAReportMissingANewMember(string member)
+    {
+        var node = JsonNode.Parse(Valid)!;
+        var report = node["report"]!.AsObject();
+        var reach = report["reaches"]!.AsArray().First(r => r!["examples"]!.AsArray().Count > 0)!.AsObject();
+        var profile = report["profiles"]!.AsArray()[0]!.AsObject();
+        Assert.True(member switch
+        {
+            "namesCut" => report.Remove("namesCut"),
+            "reach direct" => reach.Remove("direct"),
+            "path direct" => reach["examples"]!.AsArray()[0]!.AsObject().Remove("direct"),
+            _ => profile.Remove(member),
+        }, $"'{member}' is not in the valid record");
+
+        var parsed = Record.Exception(() => JsonSerializer.Deserialize(node.ToJsonString(), GraphWorkerJsonContext.Default.GraphWorkerMessage));
+
+        Assert.True(parsed is JsonException, $"{member}: {(parsed is null ? "accepted" : "threw " + parsed.GetType().Name)}");
+    }
+
     /// <summary>Nulls are written, never omitted: a record without a report says <c>"report":null</c>.</summary>
     [Fact]
     public void ANullReport_IsWritten_NotOmitted()
@@ -170,6 +276,9 @@ public sealed class GraphWorkerProtocolTests
     [InlineData("an upper-case name", "\"LOADTIME\"")]
     [InlineData("a name with a space", "\" LoadTime\"")]
     [InlineData("an empty name", "\"\"")]
+    [InlineData("the retired RuntimeInvoked name (ADR 0037 amendment a1)", "\"RuntimeInvoked\"")]
+    [InlineData("a combination of the split classes", "\"TypeInitializer, Finalizer\"")]
+    [InlineData("the integer of a new class", "16")]
     public void TheContext_RejectsAFlagsClassThatIsNotOneExactName(string what, string value)
     {
         var node = JsonNode.Parse(Valid)!;

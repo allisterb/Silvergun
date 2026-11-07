@@ -133,6 +133,37 @@ public sealed class ReachabilityGraphTests : IClassFixture<RootFixtureModel>
         Assert.Equal(RootClassVerdict.Unknown, Status(report, RootClass.PublicApi).Verdict);
     }
 
+    // The same case on a real graph, for the Direct label (amendment a2): the EnvironmentProbe reach runs through the
+    // ldftn, so it is not Direct, though Bound; the Unseen reach is the root itself, so it is.
+    [Fact]
+    public void Mechanism_CallsThroughPointer_TheReachThroughTheLdftn_IsNotDirect_TheUnseenOneIs()
+    {
+        var report = Reachability.Analyze(Alone(MechanismGraphSource.Graph, CallsThroughPointer));
+
+        var env = Row(report, RootClass.PublicApi, Capability.EnvironmentProbe);
+        Assert.Equal((1, 1, 0), (env.Roots, env.Bound, env.Direct));
+        Assert.Equal((ReachEvidence.Bound, false), (Assert.Single(env.Examples).Evidence, env.Examples[0].Direct));
+        var unseen = Row(report, RootClass.PublicApi, null);
+        Assert.Equal(1, unseen.Direct);
+        Assert.True(Assert.Single(unseen.Examples).Direct);
+        var profile = Assert.Single(report.Profiles, p => p.Class == RootClass.PublicApi);
+        Assert.Equal([Capability.EnvironmentProbe], profile.Capabilities);
+        Assert.Empty(profile.DirectCapabilities);
+        Assert.Equal((true, true), (profile.Unseen, profile.DirectUnseen));
+    }
+
+    // Twin on a real graph: a direct call to the sink is Direct.
+    [Fact]
+    public void Mechanism_DirectReadsEnv_IsDirect()
+    {
+        var report = Reachability.Analyze(Alone(MechanismGraphSource.Graph, DirectReadsEnv));
+
+        var row = Row(report, RootClass.PublicApi, Capability.EnvironmentProbe);
+        Assert.Equal(1, row.Direct);
+        Assert.True(Assert.Single(row.Examples).Direct);
+        Assert.Equal([Capability.EnvironmentProbe], Assert.Single(report.Profiles, p => p.Class == RootClass.PublicApi).DirectCapabilities);
+    }
+
     // Twin: the safe pointer call is still Unseen (the calli), but reaches no capability.
     [Fact]
     public void Mechanism_CallsThroughPointerSafe_ReachesOnlyUnseen()
@@ -341,7 +372,10 @@ public sealed class ReachabilityGraphTests : IClassFixture<RootFixtureModel>
     private const string CallsThroughPointer = "MechanismFixture.Opacity.Pointers.CallsThroughPointer()";
 
     private static readonly RootClass[] allClasses =
-        [RootClass.LoadTime, RootClass.HostContract, RootClass.RuntimeInvoked, RootClass.PublicApi, RootClass.PublicContract, RootClass.Hidden];
+    [
+        RootClass.LoadTime, RootClass.HostContract, RootClass.TypeInitializer, RootClass.Finalizer, RootClass.NativeEntry,
+        RootClass.PublicApi, RootClass.PublicContract, RootClass.Hidden,
+    ];
 
     private readonly RootFixtureModel fixture;
     #endregion

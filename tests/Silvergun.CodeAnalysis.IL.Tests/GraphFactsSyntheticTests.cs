@@ -64,7 +64,7 @@ public sealed class GraphFactsSyntheticTests
 
         var facts = Assert.Single(Collect(index, invokeMap).Methods, f => f.NodeId == MergedOp);
 
-        Assert.Equal(new OwnMethodFacts(MergedOp, "Aaa", "Syn.Merge", RootClass.PublicApi | RootClass.RuntimeInvoked, true, true), facts);
+        Assert.Equal(new OwnMethodFacts(MergedOp, "Aaa", "Syn.Merge", RootClass.PublicApi | RootClass.NativeEntry, true, true), facts);
     }
 
     // Each definition alone carries only its own part, so the OR above is a merge, not one definition's mask.
@@ -204,6 +204,6 @@ public sealed class GraphFactsSyntheticTests
     private static readonly HashSet<string> wideMethods = new(["Syn.C.ToString()"], StringComparer.Ordinal);
 
     private static readonly CapabilityMap invokeMap =
-        CapabilityMap.Load(new StringReader("root-attribute Syn.InvokeAttribute RuntimeInvoked"), "synthetic.cm", CapabilityMap.Default);
+        CapabilityMap.Load(new StringReader("root-attribute Syn.InvokeAttribute NativeEntry"), "synthetic.cm", CapabilityMap.Default);
     #endregion
 }

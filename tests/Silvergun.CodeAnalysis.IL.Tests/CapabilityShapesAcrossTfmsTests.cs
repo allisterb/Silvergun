@@ -323,7 +323,9 @@ public sealed class CapabilityShapesAcrossTfmsTests : IClassFixture<TargetFramew
         new(Capability.EnvironmentProbe, "ProbesEnvironment", ApiCallKind.Call, "System.Environment.GetEnvironmentVariable"),
         new(Capability.DynamicCodeLoading, "LoadsAssembly", ApiCallKind.Call, "System.Reflection.Assembly.Load"),
         new(Capability.ReflectionInvocation, "InvokesViaReflection", ApiCallKind.Call, "System.Reflection.MethodBase.Invoke"),
-        new(Capability.NativeInterop, "AllocatesUnmanagedMemory", ApiCallKind.Call, "System.Runtime.InteropServices.Marshal.AllocHGlobal"),
+        // UnsafeMemory since the R2b S2 map (ADR 0037 a3): AllocHGlobal is a process-heap allocation like
+        // NativeMemory.Alloc, carved out of `capability System.Runtime.InteropServices.Marshal NativeInterop`.
+        new(Capability.UnsafeMemory, "AllocatesUnmanagedMemory", ApiCallKind.Call, "System.Runtime.InteropServices.Marshal.AllocHGlobal"),
         new(Capability.Cryptography, "CreatesAes", ApiCallKind.Call, "System.Security.Cryptography.Aes.Create"),
     ];
 

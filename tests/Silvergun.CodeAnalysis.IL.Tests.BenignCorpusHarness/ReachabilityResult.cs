@@ -76,8 +76,11 @@ public sealed record UnseenEnd(RootClass Class, string End, int Count);
 /// <summary>The roots of one class in a folder.</summary>
 public sealed record ClassCount(RootClass Class, int Roots);
 
-/// <summary>One <see cref="CapabilityReach"/> by value; a null <see cref="Capability"/> is the Unseen sink.</summary>
-public sealed record ReachRecord(RootClass Class, Capability? Capability, int Roots, int Bound, int Instantiated);
+/// <summary>
+/// One <see cref="CapabilityReach"/> by value; a null <see cref="Capability"/> is the Unseen sink. <see cref="Direct"/>:
+/// the roots reaching it at ChaOnly without a deferred edge (<see cref="CapabilityReach.Direct"/>, R2b a2).
+/// </summary>
+public sealed record ReachRecord(RootClass Class, Capability? Capability, int Roots, int Bound, int Instantiated, int Direct);
 
 /// <summary>
 /// One class's verdict and reasons (<see cref="RootClassStatus"/>), and the reasons' categories, computed by the child
@@ -85,8 +88,9 @@ public sealed record ReachRecord(RootClass Class, Capability? Capability, int Ro
 /// </summary>
 public sealed record VerdictRecord(RootClass Class, RootClassVerdict Verdict, IReadOnlyList<string> Reasons, IReadOnlyList<string> Categories);
 
-/// <summary>One <see cref="ReachProfile"/> by value.</summary>
-public sealed record ProfileRecord(RootClass Class, IReadOnlyList<Capability> Capabilities, bool Unseen, int Roots, string ExampleRoot);
+/// <summary>One <see cref="ReachProfile"/> by value, with its Direct capability set (<see cref="ReachProfile.DirectCapabilities"/>).</summary>
+public sealed record ProfileRecord(
+    RootClass Class, IReadOnlyList<Capability> Capabilities, bool Unseen, IReadOnlyList<Capability> DirectCapabilities, bool DirectUnseen, int Roots, string ExampleRoot);
 
 /// <summary>A list capped at <see cref="ReachabilityChild.MaxListed"/> items, with its true count.</summary>
 public sealed record CappedList(int Count, IReadOnlyList<string> Items);
@@ -118,9 +122,12 @@ public sealed record AssemblyPresence(
 /// <summary>One hop of an example path (<see cref="ReachHop"/>).</summary>
 public sealed record HopRecord(string NodeId, string? Assembly, MethodEdgeKind? Via, uint Offset);
 
-/// <summary>The first example path of one trigger-class x signal-capability reach (<see cref="ReachPath"/>).</summary>
+/// <summary>
+/// The first example path of one trigger-class x signal-capability reach (<see cref="ReachPath"/>); <see cref="Direct"/>:
+/// no deferred edge on it (<see cref="ReachPath.Direct"/>).
+/// </summary>
 public sealed record ExampleRecord(
-    RootClass Class, Capability Capability, string Root, ReachEvidence Evidence, int Length, bool Truncated,
+    RootClass Class, Capability Capability, string Root, ReachEvidence Evidence, bool Direct, int Length, bool Truncated,
     OpacityKind? EndsInOpacity, IReadOnlyList<HopRecord> Hops);
 
 /// <summary>Everything measured about one folder of a package. Deterministic: no time, no path outside the package.</summary>
@@ -149,6 +156,13 @@ public sealed record FolderResult(
     IReadOnlyList<ExampleRecord> Examples)
 {
     #region Properties
+    /// <summary>
+    /// The distinct names this folder's report cut at <see cref="Reachability.MaxNameChars"/> chars
+    /// (<see cref="ReachabilityReport.NamesCut"/>, amendment a5; S0-S3 review W2); 0 without a graph. The counts stay whole:
+    /// only the reported names are bounded.
+    /// </summary>
+    public int NamesCut { get; init; }
+
     /// <summary>
     /// The assemblies presence scanned cleanly but the graph never loaded: their capabilities count in presence and can
     /// reach nothing, so this folder's reach numbers are a floor (instrument review W1).
@@ -223,6 +237,9 @@ public sealed record PackageCost(long ChildWallMs, long ChildTotalMs, long OpenM
 /// </summary>
 public sealed record ChildPayload(string? LibTfm, IReadOnlyList<string> LibTfms, IReadOnlyList<FolderResult> Folders, PackageCost Cost);
 
+/// <summary>Whether a package has a lib TFM (<see cref="TfmSelection"/>): one was chosen, there is none, or it is unknown.</summary>
+public enum LibTfmState { Chosen, None, Unknown }
+
 /// <summary>
 /// One manifest entry's reachability result, as cached in <c>--results</c>: the status, the build identity, and the
 /// child's payload. <see cref="Status"/> is one of the <c>const</c>s below.
@@ -245,6 +262,25 @@ public sealed record PackageReachResult(
     [JsonIgnore]
     public bool Measured => Status is Scanned or GraphFailed;
 
+    /// <summary>
+    /// A child started but measured nothing: <see cref="Crashed"/>, <see cref="Timeout"/> or <see cref="Incomplete"/>. A
+    /// floor package with unmeasured presence and reach: in P-all always, in P-lib unless <see cref="LibTfmState"/> is
+    /// <see cref="LibTfmState.None"/> (<see cref="WithLibTfm"/>). Not <see cref="NoAssemblies"/> or <see cref="NotCached"/>.
+    /// </summary>
+    [JsonIgnore]
+    public bool UnmeasuredFloor => Status is Crashed or Timeout or Incomplete;
+
+    /// <summary>
+    /// Whether the package has a lib TFM is unknown (<see cref="LibTfm"/> is then null): the default of every
+    /// <see cref="UnmeasuredFloor"/> result from <see cref="Without"/>, cleared only once the parent reads the
+    /// <c>.nupkg</c>'s file list (<see cref="WithLibTfm"/>).
+    /// </summary>
+    public bool LibTfmUnknown { get; init; }
+
+    /// <summary>The lib TFM as a tri-state: chosen (<see cref="LibTfm"/> set), none, or unknown (<see cref="LibTfmUnknown"/>).</summary>
+    [JsonIgnore]
+    public LibTfmState LibTfmState => LibTfm is not null ? LibTfmState.Chosen : LibTfmUnknown ? LibTfmState.Unknown : LibTfmState.None;
+
     /// <summary>The folders with a loaded assembly.</summary>
     [JsonIgnore]
     public IEnumerable<FolderResult> BuiltFolders => Folders.Where(f => f.GraphBuilt);
@@ -255,9 +291,19 @@ public sealed record PackageReachResult(
     #endregion
 
     #region Methods
-    /// <summary>A result with no child payload: not-cached, crashed, timeout, incomplete.</summary>
+    /// <summary>
+    /// A result with no child payload: not-cached, crashed, timeout, incomplete. No lib TFM. An
+    /// <see cref="UnmeasuredFloor"/> status starts <see cref="LibTfmUnknown"/>, the cautious state (a P-lib floor too),
+    /// until the runner reads the <c>.nupkg</c> (<see cref="WithLibTfm"/>).
+    /// </summary>
     public static PackageReachResult Without(ManifestEntry entry, string status, string detail, int? exitCode, BuildIdentity identity, PackageCost? cost = null) =>
-        new(CurrentSchema, entry.Id, entry.Version, status, detail, exitCode, identity, null, [], [], cost ?? PackageCost.None);
+        new(CurrentSchema, entry.Id, entry.Version, status, detail, exitCode, identity, null, [], [], cost ?? PackageCost.None)
+        {
+            LibTfmUnknown = status is Crashed or Timeout or Incomplete,
+        };
+
+    /// <summary>This result with <paramref name="choice"/> as its lib TFM and the lib TFMs on offer; the TFM is then known.</summary>
+    public PackageReachResult WithLibTfm(TfmChoice choice) => this with { LibTfm = choice.Tfm, LibTfms = choice.Available, LibTfmUnknown = false };
 
     /// <summary>
     /// The result of a child that finished: <see cref="GraphFailed"/> when a folder has no graph but presence read one of
@@ -300,7 +346,14 @@ public sealed record PackageReachResult(
     #endregion
 
     #region Fields
-    public const int CurrentSchema = 2;
+    /// <summary>
+    /// 3: crashed, timeout and incomplete results carry the lib TFM of their <c>.nupkg</c>, or <see cref="LibTfmUnknown"/>
+    /// (unmeasured floors). 4 (R2b a2, a5): reaches carry <see cref="ReachRecord.Direct"/>, profiles their Direct capability set,
+    /// examples <see cref="ExampleRecord.Direct"/>, and folders <see cref="FolderResult.NamesCut"/> (added in place by the
+    /// S0-S3 review, W2, before any schema 4 corpus run). A result of another schema is not cached (<see cref="CachedResults"/>):
+    /// read as this one, a schema 3 result would silently give every Direct count 0.
+    /// </summary>
+    public const int CurrentSchema = 4;
 
     public const string Scanned = "scanned";
     public const string GraphFailed = "graph-failed";

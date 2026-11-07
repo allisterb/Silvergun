@@ -7,7 +7,7 @@
 #   unspecified <pattern>                  clears an inherited type/subtree classification, keep walking
 #   unanalyzed  <pattern>                  opacity: we cannot see through it, always report
 #   ignore-edge <caller-pattern> <callee-pattern>
-#   root-attribute <attribute-type> <LoadTime|RuntimeInvoked>   a method carrying it is a reachability root (ADR 0037)
+#   root-attribute <attribute-type> <LoadTime|NativeEntry>   a method carrying it is a reachability root (ADR 0037)
 #   host-contract  <supertype>      every method of an own type below it is a HostContract root (ADR 0037)
 #
 # Patterns are matched against a ClassificationKey (Namespace.Outer.Inner.Method, no signature):
@@ -48,6 +48,10 @@ capability System.IO.Directory                              FileSystem
 # the file system. Keeping it here would give the same observable operation two capabilities depending on
 # which API the caller reached for — System.Environment.get_CurrentDirectory is an EnvironmentProbe.
 capability System.IO.Directory.GetCurrentDirectory          EnvironmentProbe
+# Carve-out from `capability System.IO.Directory` (ADR 0037 a3): GetParent returns a DirectoryInfo over
+# Path.GetDirectoryName(Path.GetFullPath(path)) and neither touches the disk nor checks existence: a path-string
+# operation, like `safe System.IO.Path`. What the caller then does with the DirectoryInfo is FileSystem by its type.
+safe       System.IO.Directory.GetParent
 capability System.IO.DirectoryInfo                          FileSystem
 capability System.IO.FileStream                             FileSystem
 # CoreLib's INTERNAL filesystem helper (FileSystem.CopyFile/DeleteFile/CreateDirectory/...). The legacy prefix
@@ -224,7 +228,6 @@ capability System.Type.GetType                              ReflectionInvocation
 # ---------------------------------------------------------------------------
 capability System.Runtime.InteropServices.Marshal           NativeInterop
 capability System.Runtime.InteropServices.NativeLibrary     NativeInterop
-capability System.Runtime.InteropServices.GCHandle          NativeInterop
 capability System.Runtime.InteropServices.ComWrappers       NativeInterop
 capability System.Runtime.InteropServices.SafeHandle        NativeInterop
 # COM activation — "materialize an arbitrary COM object from a CLSID/ProgID and call it": a genuine execution
@@ -241,6 +244,14 @@ capability System.Type.GetTypeFromProgID                    NativeInterop
 capability System.Runtime.CompilerServices.Unsafe           UnsafeMemory
 capability System.Runtime.InteropServices.NativeMemory      UnsafeMemory
 capability System.Runtime.InteropServices.MemoryMarshal     UnsafeMemory
+# ADR 0037 a3: raw memory, not a call into native code. GCHandle allocates, pins and addresses a GC handle to a
+# managed object; the HGlobal triple allocates and frees process heap memory, as NativeMemory.Alloc/Free do. The
+# three Marshal entries are carve-outs from `capability System.Runtime.InteropServices.Marshal NativeInterop`; the
+# COM allocator (AllocCoTaskMem and kin) is not, and stays NativeInterop.
+capability System.Runtime.InteropServices.GCHandle          UnsafeMemory
+capability System.Runtime.InteropServices.Marshal.AllocHGlobal   UnsafeMemory
+capability System.Runtime.InteropServices.Marshal.ReAllocHGlobal UnsafeMemory
+capability System.Runtime.InteropServices.Marshal.FreeHGlobal    UnsafeMemory
 
 # ---------------------------------------------------------------------------
 # RuntimeControl  (new)
@@ -328,7 +339,7 @@ safe System.Diagnostics.Contracts.*
 # generic contract is written Ns.Type`1). Only <Module>..cctor is invisible to the model; the C# targets it calls
 # carry ModuleInitializerAttribute and are visible.
 root-attribute System.Runtime.CompilerServices.ModuleInitializerAttribute LoadTime      # runs when the assembly loads
-root-attribute System.Runtime.InteropServices.UnmanagedCallersOnlyAttribute RuntimeInvoked   # native code calls in
+root-attribute System.Runtime.InteropServices.UnmanagedCallersOnlyAttribute NativeEntry   # native code calls in
 
 # MSBuild instantiates a task named by a package's .targets <UsingTask>, sets its parameters and calls Execute, on
 # the developer's or CI machine at build time.

@@ -22,20 +22,26 @@ public enum RootClass
     /// <summary>Called by a build host (MSBuild, the compiler, the IDE): every method of an own type below a <c>host-contract</c> type.</summary>
     HostContract = 2,
 
-    /// <summary>Called by the runtime: a <c>.cctor</c>, a <c>Finalize</c> override, a <c>root-attribute … RuntimeInvoked</c> method.</summary>
-    RuntimeInvoked = 4,
+    /// <summary>Run by the runtime on first use of its type: a type's <c>.cctor</c> (ADR 0037 amendment a1).</summary>
+    TypeInitializer = 4,
+
+    /// <summary>Run by the runtime on the GC's finalizer thread: an override of <c>Object.Finalize</c>.</summary>
+    Finalizer = 8,
+
+    /// <summary>Called in from native code: a <c>root-attribute … NativeEntry</c> method (<c>[UnmanagedCallersOnly]</c>).</summary>
+    NativeEntry = 16,
 
     /// <summary>Callable by a consumer: externally visible on an externally visible type, or an explicit implementation on one.</summary>
-    PublicApi = 8,
+    PublicApi = 32,
 
     /// <summary>
     /// Reachable by a consumer through a visible virtual slot: an own override or implementation CHA finds below a
     /// <see cref="PublicApi"/> virtual, or one filling a slot declared outside the index (<see cref="MemberIndex.ImplementsExternalSlot"/>).
     /// </summary>
-    PublicContract = 16,
+    PublicContract = 64,
 
     /// <summary>None of the above: reachable only from code no consumer can name (reflection, serialization), or dead.</summary>
-    Hidden = 32
+    Hidden = 128
 }
 
 /// <summary>
@@ -89,7 +95,7 @@ public sealed record GraphFacts(IReadOnlyList<OwnMethodFacts> Methods, IReadOnly
             return new GraphFacts(
                 [.. ownNodeIds.Order(StringComparer.Ordinal).Select(id => new OwnMethodFacts(id, CanonicalName.UnknownPart, CanonicalName.UnknownPart, RootClass.PublicApi, false, false))],
                 [.. (Fallback(() => index.TypeIds.ToArray()) ?? []).Select(id => new OwnTypeFacts(id, CanonicalName.UnknownPart, true))],
-                [new RootGap(CanonicalName.UnknownPart, AllClasses, $"root facts could not be collected: {ex.Message}")]);
+                [new RootGap(CanonicalName.UnknownPart, AllClasses, $"root facts could not be collected: {Reachability.BoundName(ex.Message)}")]);
         }
     }
 
@@ -110,7 +116,8 @@ public sealed record GraphFacts(IReadOnlyList<OwnMethodFacts> Methods, IReadOnly
     private static readonly HashSet<string> delegateRuntimeMethods = new(StringComparer.Ordinal) { ".ctor", "Invoke", "BeginInvoke", "EndInvoke" };
 
     private const RootClass AllClasses =
-        RootClass.LoadTime | RootClass.HostContract | RootClass.RuntimeInvoked | RootClass.PublicApi | RootClass.PublicContract | RootClass.Hidden;
+        RootClass.LoadTime | RootClass.HostContract | RootClass.TypeInitializer | RootClass.Finalizer | RootClass.NativeEntry
+        | RootClass.PublicApi | RootClass.PublicContract | RootClass.Hidden;
     #endregion
 
     #region Child types
@@ -181,8 +188,10 @@ public sealed record GraphFacts(IReadOnlyList<OwnMethodFacts> Methods, IReadOnly
                         mask |= conferred;
                 if (hostTypes.Contains(method.DeclaringTypeId))
                     mask |= RootClass.HostContract;
-                if (IsTypeInitializer(definition) || IsFinalizer(method))
-                    mask |= RootClass.RuntimeInvoked;
+                if (IsTypeInitializer(definition))
+                    mask |= RootClass.TypeInitializer;
+                if (IsFinalizer(method))
+                    mask |= RootClass.Finalizer;
 
                 switch (MethodVisible(definition))
                 {

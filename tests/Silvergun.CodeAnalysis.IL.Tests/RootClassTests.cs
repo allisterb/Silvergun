@@ -98,8 +98,8 @@ public sealed class RootClassTests : IClassFixture<RootFixtureModel>
     [Theory]
     [InlineData("Custom.StaticLoad()", RootClass.LoadTime)]
     [InlineData("CustomInstance.InstanceLoad()", RootClass.Hidden)]
-    [InlineData("Custom.StaticInvoke()", RootClass.RuntimeInvoked)]
-    [InlineData("CustomInstance.InstanceInvoke()", RootClass.RuntimeInvoked)]
+    [InlineData("Custom.StaticInvoke()", RootClass.NativeEntry)]
+    [InlineData("CustomInstance.InstanceInvoke()", RootClass.NativeEntry)]
     public void RootAttribute_FromASuppliedMap_TagsTheMethodsCarryingIt(string method, RootClass expected)
     {
         var graph = MethodGraph.Build(fixture.Index, map: customAttributeMap);
@@ -196,50 +196,67 @@ public sealed class RootClassTests : IClassFixture<RootFixtureModel>
     }
 
     // ---------------------------------------------------------------------------------------------------
-    // RuntimeInvoked
+    // TypeInitializer, Finalizer, NativeEntry (ADR 0037 amendment a1: RuntimeInvoked split three ways)
     // ---------------------------------------------------------------------------------------------------
 
+    // Exact: TypeInitializer and nothing else, so neither Finalizer nor NativeEntry.
     [Fact]
-    public void RuntimeInvoked_ATypeInitializer_IsRuntimeInvokedOnly()
+    public void TypeInitializer_ATypeInitializer_IsTypeInitializerOnly()
     {
-        Assert.Equal(RootClass.RuntimeInvoked, Roots($"{Invoked}.WithTypeInitializer..cctor()"));
+        Assert.Equal(RootClass.TypeInitializer, Roots($"{Invoked}.WithTypeInitializer..cctor()"));
     }
 
     [Fact]
-    public void RuntimeInvoked_AStaticMethodThatIsNotATypeInitializer_IsHidden()
+    public void TypeInitializer_AStaticMethodThatIsNotATypeInitializer_IsHidden()
     {
         Assert.Empty(fixture.Index.Definitions($"{Invoked}.WithoutTypeInitializer..cctor()"));
         Assert.Equal(RootClass.Hidden, Roots($"{Invoked}.WithoutTypeInitializer.Initialize()"));
     }
 
-    // ~T() compiles to an override of Object.Finalize. Its slot is the platform's, so it is a PublicContract as well.
+    // ~T() compiles to an override of Object.Finalize. Its slot is the platform's, so it is a PublicContract as well, and
+    // it is neither of the other two runtime classes.
     [Fact]
-    public void RuntimeInvoked_AFinalizer_IsTagged()
+    public void Finalizer_AFinalizer_IsFinalizerAndPublicContract_NotTypeInitializerOrNativeEntry()
     {
-        Assert.True(Roots($"{Invoked}.WithFinalizer.Finalize()").HasFlag(RootClass.RuntimeInvoked));
+        Assert.Equal(RootClass.Finalizer | RootClass.PublicContract, Roots($"{Invoked}.WithFinalizer.Finalize()"));
     }
 
     // A new-slot Finalize hides Object.Finalize, so the runtime never calls it; an overload with a parameter is not the
-    // finalizer either.
+    // finalizer either. Neither is any runtime class.
     [Theory]
     [InlineData("WithNewSlotFinalize.Finalize()")]
     [InlineData("WithFinalizeOverload.Finalize(System.Int32)")]
-    public void RuntimeInvoked_AFinalizeThatIsNotTheFinalizer_IsNotTagged(string method)
+    public void Finalizer_AFinalizeThatIsNotTheFinalizer_IsNotTagged(string method)
     {
         Assert.True(fixture.Method($"{Invoked}.{method}").Definition.Name == "Finalize");
-        Assert.False(Roots($"{Invoked}.{method}").HasFlag(RootClass.RuntimeInvoked), Roots($"{Invoked}.{method}").ToString());
+        Assert.Equal(RootClass.None, Roots($"{Invoked}.{method}") & (RootClass.TypeInitializer | RootClass.Finalizer | RootClass.NativeEntry));
     }
 
+    // Exact: NativeEntry and nothing else, so neither TypeInitializer nor Finalizer.
     [Fact]
-    public void RuntimeInvoked_AnUnmanagedCallersOnlyMethod_IsRuntimeInvokedOnly()
+    public void NativeEntry_AnUnmanagedCallersOnlyMethod_IsNativeEntryOnly()
     {
-        Assert.Equal(RootClass.RuntimeInvoked, Roots($"{Invoked}.Exports.Exported()"));
+        Assert.Equal(RootClass.NativeEntry, Roots($"{Invoked}.Exports.Exported()"));
     }
 
     [Fact]
-    public void RuntimeInvoked_TheSameMethodWithoutUnmanagedCallersOnly_IsHidden()
+    public void NativeEntry_TheSameMethodWithoutUnmanagedCallersOnly_IsHidden()
     {
         Assert.Equal(RootClass.Hidden, Roots($"{Invoked}.Exports.NotExported()"));
+    }
+
+    // Over the whole fixture, each runtime class is on exactly its own members: TypeInitializer only on .cctors, Finalizer
+    // only on Finalize(), NativeEntry only on the one [UnmanagedCallersOnly] method.
+    [Fact]
+    public void RuntimeClasses_AreEachSetOnlyOnTheirOwnKindOfMember()
+    {
+        var methods = fixture.Graph.Facts.Methods;
+
+        Assert.All(methods.Where(f => f.Roots.HasFlag(RootClass.TypeInitializer)), f => Assert.EndsWith("..cctor()", f.NodeId, StringComparison.Ordinal));
+        Assert.All(methods.Where(f => f.Roots.HasFlag(RootClass.Finalizer)), f => Assert.EndsWith(".Finalize()", f.NodeId, StringComparison.Ordinal));
+        Assert.Equal([$"{Invoked}.Exports.Exported()"], methods.Where(f => f.Roots.HasFlag(RootClass.NativeEntry)).Select(f => f.NodeId));
+        Assert.Contains(methods, f => f.Roots.HasFlag(RootClass.TypeInitializer));
+        Assert.Contains(methods, f => f.Roots.HasFlag(RootClass.Finalizer));
     }
 
     // ---------------------------------------------------------------------------------------------------
@@ -450,9 +467,25 @@ public sealed class RootClassTests : IClassFixture<RootFixtureModel>
         Assert.All(facts.Types, t => Assert.True(t.Live, t.TypeId));
         var gap = Assert.Single(facts.Gaps);
         Assert.Equal(
-            RootClass.LoadTime | RootClass.HostContract | RootClass.RuntimeInvoked | RootClass.PublicApi | RootClass.PublicContract | RootClass.Hidden,
+            RootClass.LoadTime | RootClass.HostContract | RootClass.TypeInitializer | RootClass.Finalizer | RootClass.NativeEntry
+                | RootClass.PublicApi | RootClass.PublicContract | RootClass.Hidden,
             gap.Class);
         Assert.Contains(EdgesFailure, gap.Reason, StringComparison.Ordinal);
+    }
+
+    // The fallback gap's reason bounds the exception text (S0-S3 review, Nit 2): a 5,000-char message is cut as a name is.
+    [Fact]
+    public void Collect_WhenCollectionThrowsALongMessage_TheGapReasonIsBounded()
+    {
+        var message = "the edges went away: " + new string('e', 5000);
+
+        var facts = GraphFacts.Collect(fixture.Index, new HashSet<string>(StringComparer.Ordinal) { "RootFixture.Hidden.Unreferenced.Nothing()" },
+            ThrowingEdges(message), CapabilityMap.Default, maxDispatchWork: long.MaxValue);
+
+        var gap = Assert.Single(facts.Gaps);
+        Assert.Equal($"root facts could not be collected: {Reachability.BoundName(message)}", gap.Reason);
+        Assert.True(gap.Reason.Length <= Reachability.MaxNameChars + 128, $"{gap.Reason.Length} chars");
+        Assert.DoesNotContain(message, gap.Reason, StringComparison.Ordinal);
     }
 
     // ---------------------------------------------------------------------------------------------------
@@ -702,10 +735,10 @@ public sealed class RootClassTests : IClassFixture<RootFixtureModel>
     private GraphFacts Collect(MemberIndex index, long maxDispatchWork) =>
         GraphFacts.Collect(index, index.Methods.Select(m => m.NodeId).ToHashSet(StringComparer.Ordinal), fixture.Graph.Edges, CapabilityMap.Default, maxDispatchWork);
 
-    private static IEnumerable<MethodEdge> ThrowingEdges()
+    private static IEnumerable<MethodEdge> ThrowingEdges(string message = EdgesFailure)
     {
         yield return new MethodEdge("A.B()", "A.C()", MethodEdgeKind.NewObj, 0);
-        throw new InvalidOperationException(EdgesFailure);
+        throw new InvalidOperationException(message);
     }
 
     private OwnMethodFacts Facts(string nodeId) => Facts(fixture.Graph, nodeId);
@@ -735,7 +768,7 @@ public sealed class RootClassTests : IClassFixture<RootFixtureModel>
         new StringReader(
             """
             root-attribute RootFixture.LoadTime.CustomLoadAttribute LoadTime
-            root-attribute RootFixture.LoadTime.CustomInvokeAttribute RuntimeInvoked
+            root-attribute RootFixture.LoadTime.CustomInvokeAttribute NativeEntry
             """),
         "override.cm",
         CapabilityMap.Default);

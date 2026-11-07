@@ -11,7 +11,7 @@ using Xunit;
 
 /// <summary>
 /// The two root-tagging directives of the capability map (reachability R1, S1.3; ADR 0037 decision 4):
-/// <c>root-attribute &lt;AttributeType&gt; &lt;LoadTime|RuntimeInvoked&gt;</c> and <c>host-contract &lt;Supertype&gt;</c>.
+/// <c>root-attribute &lt;AttributeType&gt; &lt;LoadTime|NativeEntry&gt;</c> and <c>host-contract &lt;Supertype&gt;</c>.
 /// <para>
 /// Same contracts as the classification directives (<see cref="CapabilityMapTests"/>): the loader never throws, a bad
 /// line is rejected with a reason in <see cref="CapabilityMapStats.RejectedLines"/>, and an override layers over its
@@ -28,7 +28,7 @@ public sealed class CapabilityMapRootDirectiveTests
 
     [Theory]
     [InlineData("LoadTime", RootClass.LoadTime)]
-    [InlineData("RuntimeInvoked", RootClass.RuntimeInvoked)]
+    [InlineData("NativeEntry", RootClass.NativeEntry)]
     public void Load_RootAttribute_RecordsTheAttributeWithItsClass(string name, RootClass expected)
     {
         var map = Map($"root-attribute Ns.StartAttribute {name}");
@@ -81,7 +81,7 @@ public sealed class CapabilityMapRootDirectiveTests
             """
             capability Ns.A Network
             root-attribute Ns.StartAttribute LoadTime
-            root-attribute Ns.ExportAttribute RuntimeInvoked
+            root-attribute Ns.ExportAttribute NativeEntry
             safe Ns.B
             host-contract Ns.IHostTask
             host-contract Ns.HostBase
@@ -98,8 +98,8 @@ public sealed class CapabilityMapRootDirectiveTests
     [Theory]
     [InlineData("ROOT-ATTRIBUTE Ns.StartAttribute loadtime", RootClass.LoadTime)]
     [InlineData("Root-Attribute Ns.StartAttribute LOADTIME", RootClass.LoadTime)]
-    [InlineData("root-attribute Ns.StartAttribute runtimeinvoked", RootClass.RuntimeInvoked)]
-    [InlineData("root-attribute Ns.StartAttribute RUNTIMEINVOKED", RootClass.RuntimeInvoked)]
+    [InlineData("root-attribute Ns.StartAttribute nativeentry", RootClass.NativeEntry)]
+    [InlineData("root-attribute Ns.StartAttribute NATIVEENTRY", RootClass.NativeEntry)]
     public void Load_RootClassName_IsMatchedCaseInsensitively(string line, RootClass expected)
     {
         var map = Map(line);
@@ -130,18 +130,24 @@ public sealed class CapabilityMapRootDirectiveTests
     // Reject, never throw
     // ---------------------------------------------------------------------------------------------------
 
-    // Only LoadTime and RuntimeInvoked may come from an attribute; every other class comes from structure (visibility,
-    // contracts, .cctor), so naming one here is a mistake, not an extension. A numeric value is never the enum ordinal.
+    // Only LoadTime and NativeEntry may come from an attribute; every other class comes from structure (visibility,
+    // contracts, .cctor, Finalize), so naming one here is a mistake, not an extension. A numeric value is never the enum
+    // value (16 is NativeEntry's). RuntimeInvoked is gone (ADR 0037 amendment a1): a map still naming it is malformed.
     [Theory]
     [InlineData("PublicApi")]
     [InlineData("HostContract")]
     [InlineData("PublicContract")]
     [InlineData("Hidden")]
     [InlineData("None")]
-    [InlineData("LoadTime|RuntimeInvoked")]
-    [InlineData("LoadTime,RuntimeInvoked")]
+    [InlineData("TypeInitializer")]
+    [InlineData("Finalizer")]
+    [InlineData("RuntimeInvoked")]
+    [InlineData("runtimeinvoked")]
+    [InlineData("LoadTime|NativeEntry")]
+    [InlineData("LoadTime,NativeEntry")]
     [InlineData("1")]
     [InlineData("4")]
+    [InlineData("16")]
     [InlineData("Telepathy")]
     public void Load_RootAttributeWithAnUnknownOrDisallowedClass_IsRejectedWithAReason(string name)
     {
@@ -152,6 +158,22 @@ public sealed class CapabilityMapRootDirectiveTests
         Assert.Contains($"unknown root class '{name}'", reject, StringComparison.Ordinal);
         Assert.Empty(map.RootAttributes);
         Assert.Equal(0, map.Stats.RootAttributes);
+    }
+
+    // The old class name, exactly as a pre-amendment map wrote it: rejected with the new message, naming the two classes
+    // an attribute may confer, and the attribute is not silently given another class.
+    [Fact]
+    public void Load_RootAttributeWithTheRetiredRuntimeInvokedClass_IsRejectedWithTheNewMessage()
+    {
+        var map = Map(
+            """
+            root-attribute Ns.StartAttribute LoadTime
+            root-attribute Ns.ExportAttribute RuntimeInvoked
+            """);
+
+        var reject = Assert.Single(map.Stats.RejectedLines);
+        Assert.Equal("test.cm: (2): unknown root class 'RuntimeInvoked' (expected LoadTime or NativeEntry)", reject);
+        Assert.Equal(new Dictionary<string, RootClass> { ["Ns.StartAttribute"] = RootClass.LoadTime }, map.RootAttributes.ToDictionary());
     }
 
     [Theory]
@@ -204,7 +226,7 @@ public sealed class CapabilityMapRootDirectiveTests
     {
         var map = Map(
             $"""
-            root-attribute {pattern} RuntimeInvoked
+            root-attribute {pattern} NativeEntry
             host-contract {pattern}
             """);
 
@@ -243,12 +265,12 @@ public sealed class CapabilityMapRootDirectiveTests
         var map = Map(
             """
             root-attribute Ns.StartAttribute LoadTime
-            root-attribute Ns.StartAttribute RuntimeInvoked
+            root-attribute Ns.StartAttribute NativeEntry
             host-contract Ns.IHostTask
             host-contract Ns.IHostTask
             """);
 
-        Assert.Equal(RootClass.RuntimeInvoked, map.RootAttributes["Ns.StartAttribute"]);
+        Assert.Equal(RootClass.NativeEntry, map.RootAttributes["Ns.StartAttribute"]);
         Assert.Equal(1, map.Stats.RootAttributes);
         Assert.Equal(["Ns.IHostTask"], map.HostContracts);
         Assert.Equal(1, map.Stats.HostContracts);
@@ -270,13 +292,13 @@ public sealed class CapabilityMapRootDirectiveTests
 
         var map = Map(
             """
-            root-attribute Ns.AddedAttribute RuntimeInvoked
+            root-attribute Ns.AddedAttribute NativeEntry
             host-contract Ns.IAddedHost
             """,
             baseMap);
 
         Assert.Equal(
-            new Dictionary<string, RootClass> { ["Ns.AddedAttribute"] = RootClass.RuntimeInvoked, ["Ns.BaseAttribute"] = RootClass.LoadTime },
+            new Dictionary<string, RootClass> { ["Ns.AddedAttribute"] = RootClass.NativeEntry, ["Ns.BaseAttribute"] = RootClass.LoadTime },
             map.RootAttributes.ToDictionary());
         Assert.Equal(["Ns.IAddedHost", "Ns.IBaseHost"], map.HostContracts);
         Assert.Equal((2, 2), (map.Stats.RootAttributes, map.Stats.HostContracts));
@@ -288,9 +310,9 @@ public sealed class CapabilityMapRootDirectiveTests
     {
         var baseMap = Map("root-attribute Ns.StartAttribute LoadTime");
 
-        var map = Map("root-attribute Ns.StartAttribute RuntimeInvoked", baseMap);
+        var map = Map("root-attribute Ns.StartAttribute NativeEntry", baseMap);
 
-        Assert.Equal(RootClass.RuntimeInvoked, map.RootAttributes["Ns.StartAttribute"]);
+        Assert.Equal(RootClass.NativeEntry, map.RootAttributes["Ns.StartAttribute"]);
         Assert.Equal(1, map.Stats.RootAttributes);
 
         // The base map itself is unaffected: layering builds a new map.

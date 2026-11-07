@@ -53,7 +53,8 @@ public sealed class ReaderAssertionReproChildTests
                 Assert.False(folder.Coverage!.IndexComplete, $"{folder.Folder}: the index reads complete.");
                 var otherGaps = folder.Coverage.AssembliesUnreadable + folder.Coverage.TypesSkipped + folder.Coverage.IndexMethodsSkipped
                     + folder.Coverage.ForwardersUnreadable + folder.Coverage.SupertypesUnresolved > 0;
-                Assert.Equal(6, folder.Verdicts.Count);
+                // One verdict per single root class: eight since ADR 0037 amendment a1 split RuntimeInvoked three ways.
+                Assert.Equal(ReachabilityChild.AllClasses, folder.Verdicts.Select(v => v.Class));
                 Assert.All(folder.Verdicts, v =>
                 {
                     Assert.Equal(RootClassVerdict.Unknown, v.Verdict);

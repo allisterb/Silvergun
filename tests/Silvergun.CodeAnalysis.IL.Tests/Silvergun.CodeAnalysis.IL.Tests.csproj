@@ -96,6 +96,12 @@
          located BY PATH (RootFixtureAssemblies) and read as metadata, never loaded - it has a [ModuleInitializer]. The
          tests index RootFixture ALONE, so the stubbed host contracts stay external. -->
     <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.RootFixture\Silvergun.CodeAnalysis.IL.Tests.RootFixture.csproj" />
+    <!-- The runtime-class and Direct-label fixture for reachability R2b, S1 (docs/agent/tasks/reachability-r2b.md): type
+         initializers that hand a delegate to Task.Run, a Thread, a Timer, AssemblyLoadContext.Resolving or an own helper,
+         a finalizer and an [UnmanagedCallersOnly] export, each with a benign twin. Same rules as RootFixture: a plain
+         reference that copies it here, located BY PATH (DelegateRootFixtureAssembly) and read as metadata, never loaded,
+         so its type initializers never run. Its own project, so it moves no pinned baseline of the other fixtures. -->
+    <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.DelegateRootFixture\Silvergun.CodeAnalysis.IL.Tests.DelegateRootFixture.csproj" />
     <!-- The benign-corpus harness (an Exe), for the unit tests of its reachability R2 mode: the aggregation and the
          E1/E2 decision, the offline driver, the child's status rule, and its copy of the parity rule
          (ReachabilityHarnessTests; docs/agent/tasks/reachability-r2.md). It brings Silvergun.PackageAnalysis.NuGet and

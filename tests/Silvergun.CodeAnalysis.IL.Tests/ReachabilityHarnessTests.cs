@@ -27,7 +27,9 @@ public sealed class ReachabilityHarnessTests
     // Populations, shares and denominators
     // ---------------------------------------------------------------------------------------------------
 
-    // P-lib reads only the lib/<tfm> folder; P-all every loaded folder. A build-only package is in P-all alone.
+    // P-lib reads only the lib/<tfm> folder; P-all every loaded folder. A build-only package is in P-all alone. A crashed
+    // package with a lib TFM is an unmeasured floor package in both denominators (R2 "Known instrument limitation", fixed;
+    // this test used to pin it out of both), and its folders, if any, are not read.
     [Fact]
     public void View_PlibAndPall_HaveTheirOwnDenominators()
     {
@@ -36,16 +38,16 @@ public sealed class ReachabilityHarnessTests
             Package("A", Lib(presence: [(Capability.Network, 1)])),
             Package("B", Lib(), Folder("build", "build", presence: [(Capability.Network, 2)])),
             Package("C", Folder("build", "build")),
-            Package("D", Lib()) with { Status = PackageReachResult.Crashed },
+            Package("D", Lib(presence: [(Capability.Network, 1)])) with { Status = PackageReachResult.Crashed },
         };
 
         var plib = ReachabilityAggregation.View(results, Population.Plib);
         var pall = ReachabilityAggregation.View(results, Population.Pall);
 
-        Assert.Equal(["A", "B"], plib.Units.Select(u => u.Id));
-        Assert.Equal(["A", "B", "C"], pall.Units.Select(u => u.Id));
-        Assert.Equal(new Share(1, 2), ReachabilityAggregation.Presence(plib, Capability.Network));
-        Assert.Equal(new Share(2, 3), ReachabilityAggregation.Presence(pall, Capability.Network));
+        Assert.Equal(["A", "B", "D"], plib.Units.Select(u => u.Id));
+        Assert.Equal(["A", "B", "C", "D"], pall.Units.Select(u => u.Id));
+        Assert.Equal(new Share(1, 3), ReachabilityAggregation.Presence(plib, Capability.Network));
+        Assert.Equal(new Share(2, 4), ReachabilityAggregation.Presence(pall, Capability.Network));
     }
 
     // Only a folder neither side read is left out (no graph, and no presence scan that read an assembly). A package whose
@@ -239,13 +241,13 @@ public sealed class ReachabilityHarnessTests
         var two = new[] { Capability.FileSystem, Capability.Network };
         var results = new[]
         {
-            Package("A", Lib(profiles: [Profile(RootClass.RuntimeInvoked, two, unseen: true)])),
-            Package("B", Lib(profiles: [Profile(RootClass.RuntimeInvoked, two, unseen: false)])),
-            Package("C", Lib(profiles: [Profile(RootClass.RuntimeInvoked, two, unseen: true), Profile(RootClass.RuntimeInvoked, two, unseen: false)])),
-            Package("D", Lib(profiles: [Profile(RootClass.RuntimeInvoked, [Capability.FileSystem], unseen: true)])),
+            Package("A", Lib(profiles: [Profile(RootClass.TypeInitializer, two, unseen: true)])),
+            Package("B", Lib(profiles: [Profile(RootClass.TypeInitializer, two, unseen: false)])),
+            Package("C", Lib(profiles: [Profile(RootClass.TypeInitializer, two, unseen: true), Profile(RootClass.TypeInitializer, two, unseen: false)])),
+            Package("D", Lib(profiles: [Profile(RootClass.TypeInitializer, [Capability.FileSystem], unseen: true)])),
         };
 
-        var e2 = ReachabilityAggregation.E2(ReachabilityAggregation.View(results, Population.Plib), RootClass.RuntimeInvoked);
+        var e2 = ReachabilityAggregation.E2(ReachabilityAggregation.View(results, Population.Plib), RootClass.TypeInitializer);
 
         Assert.Equal(new Share(3, 4), e2.Inclusive);
         Assert.Equal(new Share(2, 4), e2.Exclusive);
@@ -367,7 +369,7 @@ public sealed class ReachabilityHarnessTests
     public void CategoriesOf_AFailedAnalysis_IsAnalysisFailedAlone()
     {
         var report = new ReachabilityReport([], [], false,
-            [new RootClassStatus(RootClass.LoadTime, 0, RootClassVerdict.Unknown, ["reachability could not be computed: boom"])], 0, [], completeCoverage, true, "boom");
+            [new RootClassStatus(RootClass.LoadTime, 0, RootClassVerdict.Unknown, ["reachability could not be computed: boom"])], 0, [], 0, completeCoverage, true, "boom");
 
         Assert.Equal(["analysis-failed"], ReachabilityChild.CategoriesOf(RootClass.LoadTime, report, [new RootGap("A.dll", RootClass.LoadTime, "<Module>..cctor runs at load")]));
     }
@@ -462,11 +464,14 @@ public sealed class ReachabilityHarnessTests
         Assert.Equal(1, comparison.PackagesCompared);
     }
 
-    // The checked-in oracle is internally consistent: its packages sum to its totals (it was copied, not retyped).
-    [Fact]
-    public void Oracle_TheCheckedInFile_IsConsistentWithItself()
+    // Each checked-in oracle is internally consistent: its packages sum to its totals (it was copied, not retyped). R2's
+    // 2026-08-21 file and R2b's 2026-11-06 default (the S2 map), both over C100.
+    [Theory]
+    [InlineData(Program.OracleFileName)]
+    [InlineData(Program.R2OracleFileName)]
+    public void Oracle_TheCheckedInFile_IsConsistentWithItself(string file)
     {
-        var oracle = PresenceOracle.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, Program.OracleFileName)));
+        var oracle = PresenceOracle.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, file)));
 
         Assert.Equal("9e5635c320485af7b86e5656860465e4c1bc5ba753e7771336e7d677ac8838a6", oracle.ManifestHash);
         Assert.Equal(oracle.Denominator, oracle.Packages.Count);
@@ -990,13 +995,27 @@ public sealed class ReachabilityHarnessTests
         Assert.Equal(Outcome.Pass, ReachabilityAggregation.E1(ReachabilityAggregation.View(results, Population.Plib), RootClass.LoadTime).Outcome);
     }
 
+    // The harness's class lists follow the library after amendment a1: every single class in Reachability's order, and
+    // R2's three trigger classes with RuntimeInvoked split three ways (TypeInitializer, Finalizer, NativeEntry).
+    [Fact]
+    public void ClassLists_FollowTheLibrarysOrder_AndTheTriggerClassesAreTheFiveSplitOnes()
+    {
+        var report = Reachability.Analyze(MethodGraph.FromParts([], [], [], completeCoverage, GraphFacts.None));
+
+        Assert.Equal(report.Classes.Select(c => c.Class), ReachabilityChild.AllClasses);
+        Assert.Equal(
+            [RootClass.LoadTime, RootClass.HostContract, RootClass.TypeInitializer, RootClass.Finalizer, RootClass.NativeEntry],
+            ReachabilityChild.TriggerClasses);
+        Assert.Equal(ReachabilityChild.AllClasses.Take(5), ReachabilityChild.TriggerClasses);
+    }
+
     // The child flags a class as cut when the report was cut and the class holds exactly MaxProfiles profiles.
     [Fact]
     public void TruncatedClasses_AreTheClassesHoldingTheCap_OnlyWhenTheReportWasCut()
     {
-        var profiles = Enumerable.Range(0, ReachabilityChild.MaxProfiles).Select(i => new ReachProfile(RootClass.PublicApi, [Capability.FileSystem], false, 1, $"R{i}"))
-            .Append(new ReachProfile(RootClass.Hidden, [Capability.Network], false, 1, "H")).ToArray();
-        ReachabilityReport Report(bool cut) => new([], profiles, cut, [], 0, [], completeCoverage, false, null);
+        var profiles = Enumerable.Range(0, ReachabilityChild.MaxProfiles).Select(i => new ReachProfile(RootClass.PublicApi, [Capability.FileSystem], false, [Capability.FileSystem], false, 1, $"R{i}"))
+            .Append(new ReachProfile(RootClass.Hidden, [Capability.Network], false, [Capability.Network], false, 1, "H")).ToArray();
+        ReachabilityReport Report(bool cut) => new([], profiles, cut, [], 0, [], 0, completeCoverage, false, null);
 
         Assert.Equal([RootClass.PublicApi], ReachabilityChild.TruncatedClasses(Report(true)));
         Assert.Empty(ReachabilityChild.TruncatedClasses(Report(false)));
@@ -1218,13 +1237,15 @@ public sealed class ReachabilityHarnessTests
     }
 
     // The rendering of possibly judged cells, on a comparable population: "Pass (may be judged)" or "Floor (may be judged)".
+    // R2b: the cells are a runtime class's (TypeInitializer, Finalizer), since HostContract and LoadTime read "judged by
+    // --combine" in a single run; R2 pinned the same two renderings on LoadTime and HostContract.
     [Fact]
     public void Report_RendersPossiblyJudgedCells()
     {
         using var dir = new TempDirectory();
         var failedScan = new[] { new AssemblyPresence("lib/net8.0/a.dll", false, "load failed", 0, 0, []) };
         var results = Enumerable.Range(0, 10).Select(i => Package($"P{i}",
-            i < 2 ? Lib(presence: [(Capability.Network, 1)], reaches: i == 0 ? [Reach(RootClass.HostContract, Capability.Network, 1)] : [])
+            i < 2 ? Lib(presence: [(Capability.Network, 1)], reaches: i == 0 ? [Reach(RootClass.TypeInitializer, Capability.Network, 1)] : [])
             : i == 2 ? Lib() with { Presence = failedScan } : Lib())).ToArray();
         var manifestPath = Path.Combine(dir.Path, "ten.manifest");
         File.WriteAllLines(manifestPath, results.Select(r => $"{r.Id},{r.Version}"));
@@ -1239,8 +1260,10 @@ public sealed class ReachabilityHarnessTests
         Assert.Null(ReachabilityCorpusReport.NotComparable(context, results));
         var e1 = Section(string.Join("\n", ReachabilityCorpusReport.Markdown(context, results)), "## 3.", "## 4.");
 
-        // LoadTime reaches nothing: its worst case passes. HostContract reaches from P0: 2 x (1 + 1) > 2 seen.
-        Assert.Contains("| Network | 2/10 (20.0%) | 0/10 (0.0%) | 0/10 (0.0%) | Pass (may be judged) | 1/10 (10.0%) | 0/10 (0.0%) | Floor (may be judged) |", e1);
+        // TypeInitializer reaches from P0: 2 x (1 + 1) > 2 seen. Finalizer reaches nothing: its worst case passes. The
+        // ChaOnly table's columns are LoadTime, HostContract (data, judged by --combine), then the runtime classes.
+        Assert.Contains("| Network | 2/10 (20.0%) | 0/10 (0.0%) | 0/10 (0.0%) | judged by --combine | 0/10 (0.0%) | 0/10 (0.0%) | judged by --combine | " +
+            "1/10 (10.0%) | 0/10 (0.0%) | Floor (may be judged) | 0/10 (0.0%) | 0/10 (0.0%) | Pass (may be judged) |", e1);
     }
 
     // A possibly judged cell never contributes Fail, however far its counted reach exceeds half of presence.
@@ -1355,6 +1378,496 @@ public sealed class ReachabilityHarnessTests
 
         Assert.Equal(PackageReachResult.GraphFailed, result.Status);
         Assert.Contains("| Peak working set per child (MB) | 1 | 1.0 | 1.0 | 1.0 |", cost);
+    }
+
+    // ---------------------------------------------------------------------------------------------------
+    // Unmeasured floor packages: crashed, timeout, incomplete (R2 "Known instrument limitation")
+    // ---------------------------------------------------------------------------------------------------
+
+    // (a) A crashed, timed-out or incomplete package whose .nupkg has a lib TFM is a floor package, with no folders and
+    // unmeasured presence, in P-lib and P-all, and in both denominators. It survives the --results JSON round trip.
+    [Theory]
+    [InlineData(PackageReachResult.Crashed)]
+    [InlineData(PackageReachResult.Timeout)]
+    [InlineData(PackageReachResult.Incomplete)]
+    public void View_AnUnmeasuredPackageWithALibTfm_IsAFloorInBothPopulations_AndInBothDenominators(string status)
+    {
+        var results = new[]
+        {
+            Package("A", Lib(presence: [(Capability.Network, 1)])),
+            Package("B", Folder("build", "build")),
+            PackageReachResult.FromJson(Unmeasured("C", status, "lib/net8.0/c.dll", "build/c.dll").ToJson()),
+        };
+
+        var plib = ReachabilityAggregation.View(results, Population.Plib);
+        var pall = ReachabilityAggregation.View(results, Population.Pall);
+
+        Assert.Equal("net8.0", results[2].LibTfm);
+        Assert.Equal(["A", "C"], plib.Units.Select(u => u.Id));
+        Assert.Equal(["A", "B", "C"], pall.Units.Select(u => u.Id));
+        Assert.Equal(new Share(1, 2), ReachabilityAggregation.Presence(plib, Capability.Network));
+        Assert.Equal(new Share(1, 3), ReachabilityAggregation.Presence(pall, Capability.Network));
+        Assert.All(new[] { plib.Units[1], pall.Units[2] }, u =>
+        {
+            Assert.True(u.Floor);
+            Assert.True(u.PresenceFloor);
+            Assert.True(u.ProfileFloor(RootClass.HostContract));
+            Assert.Empty(u.Folders);
+        });
+    }
+
+    // (b) Without a lib TFM (TfmSelection over its file list finds none) it is a floor in P-all only.
+    [Theory]
+    [InlineData(PackageReachResult.Crashed)]
+    [InlineData(PackageReachResult.Timeout)]
+    [InlineData(PackageReachResult.Incomplete)]
+    public void View_AnUnmeasuredPackageWithNoLibTfm_IsAFloorInPallOnly(string status)
+    {
+        var results = new[]
+        {
+            Package("A", Lib()),
+            Unmeasured("C", status, "build/c.dll", "tools/net462/c.dll", "lib/net8.0-windows/c.dll"),
+        };
+
+        var plib = ReachabilityAggregation.View(results, Population.Plib);
+        var pall = ReachabilityAggregation.View(results, Population.Pall);
+
+        Assert.Null(results[1].LibTfm);
+        Assert.Equal(["A"], plib.Units.Select(u => u.Id));
+        Assert.Equal(["A", "C"], pall.Units.Select(u => u.Id));
+        Assert.True(pall.Units[1].Floor);
+    }
+
+    // Which roles an unmeasured package holds was not measured, so no role table counts it.
+    [Fact]
+    public void View_ByRole_LeavesOutUnmeasuredPackages()
+    {
+        var results = new[] { Package("A", Lib()), Unmeasured("C", PackageReachResult.Crashed, "lib/net8.0/c.dll", "build/c.dll") };
+
+        Assert.Equal(["A"], ReachabilityAggregation.View(results, Population.Pall, "lib").Units.Select(u => u.Id));
+        Assert.Empty(ReachabilityAggregation.View(results, Population.Pall, "build").Units);
+        Assert.Equal(["lib"], ReachabilityAggregation.Roles(results));
+    }
+
+    // (c) 9 packages, `presence` of them present Network and `reach` reach it from LoadTime; a 10th crashed with a lib TFM.
+    // It counts in E1's favour for Fail (best-case presence + 1) and against it for Pass (one more reaching package, against
+    // presence seen): a Pass without room for it becomes Floor, a Pass with room stays Pass, a Fail that holds even in E1's
+    // favour stays Fail, and a Fail that does not becomes Floor. Both populations alike.
+    [Theory]
+    [InlineData(6, 3, Outcome.Pass, Outcome.Floor)] // 2 x 3 <= 6; with it, 2 x 4 > 6 seen and 2 x 3 <= 7 best
+    [InlineData(6, 1, Outcome.Pass, Outcome.Pass)]  // 2 x (1 + 1) <= 6
+    [InlineData(6, 4, Outcome.Fail, Outcome.Fail)]  // 2 x 4 > 7 best
+    [InlineData(7, 4, Outcome.Fail, Outcome.Floor)] // 2 x 4 > 7; with it, 2 x 4 <= 8 best and 2 x 5 > 7 seen
+    public void E1_ACrashedPackage_CountsInE1sFavourForFail_AndAgainstItForPass(int presence, int reach, Outcome without, Outcome with)
+    {
+        var measured = Enumerable.Range(0, 9).Select(i => Package($"P{i}", Lib(
+            presence: i < presence ? [(Capability.Network, 1)] : [],
+            reaches: i < reach ? [Reach(RootClass.LoadTime, Capability.Network, 1)] : []))).ToArray();
+        PackageReachResult[] withCrash = [.. measured, Unmeasured("P9", PackageReachResult.Crashed, "lib/net8.0/p.dll")];
+
+        foreach (var population in new[] { Population.Plib, Population.Pall })
+        {
+            var view = ReachabilityAggregation.View(withCrash, population);
+            var cell = ReachabilityAggregation.E1(view, RootClass.LoadTime).Cells.Single(c => c.Capability == Capability.Network);
+
+            Assert.Equal(without, ReachabilityAggregation.E1(ReachabilityAggregation.View(measured, population), RootClass.LoadTime).Outcome);
+            Assert.Equal(10, view.Denominator);
+            Assert.Equal(new Share(presence, 10), cell.Presence);
+            Assert.Equal(presence + 1, cell.PresenceBest);
+            Assert.Equal(presence, cell.PresenceSeen);
+            Assert.Equal(1, cell.FloorPackages);
+            Assert.Equal(with, ReachabilityAggregation.E1(view, RootClass.LoadTime).Outcome);
+        }
+    }
+
+    // (c) for E2: `count` measured packages, `composed` of them with a >= 2-signal HostContract profile, and one more
+    // crashed (denominator count + 1): counted against a Pass (10 x (composed + 1) <= count + 1), never toward a Fail
+    // (10 x composed > count + 1). The last row is a Fail without the crash (10 > 9) that only the larger denominator
+    // undoes (10 <= 10), and the floor package then blocks the Pass (20 > 10): Floor.
+    [Theory]
+    [InlineData(10, 1, Outcome.Pass, Outcome.Floor)]
+    [InlineData(10, 0, Outcome.Pass, Outcome.Pass)]
+    [InlineData(10, 2, Outcome.Fail, Outcome.Fail)]
+    [InlineData(9, 1, Outcome.Fail, Outcome.Floor)]
+    public void E2_ACrashedPackage_IsCountedAgainstAPass_AndNeverTowardAFail(int count, int composed, Outcome without, Outcome with)
+    {
+        var measured = Enumerable.Range(0, count).Select(i => Package($"P{i}", Lib(
+            profiles: i < composed ? [Profile(RootClass.HostContract, [Capability.FileSystem, Capability.Network])] : []))).ToArray();
+        PackageReachResult[] withCrash = [.. measured, Unmeasured($"P{count}", PackageReachResult.Crashed, "lib/net8.0/p.dll")];
+
+        foreach (var population in new[] { Population.Plib, Population.Pall })
+        {
+            var e2 = ReachabilityAggregation.E2(ReachabilityAggregation.View(withCrash, population), RootClass.HostContract);
+
+            Assert.Equal(without, ReachabilityAggregation.E2(ReachabilityAggregation.View(measured, population), RootClass.HostContract).Outcome);
+            Assert.Equal(new Share(composed, count + 1), e2.Inclusive);
+            Assert.Equal(1, e2.FloorPackages);
+            Assert.Equal(0, e2.TruncatedPackages);
+            Assert.Equal(with, e2.Outcome);
+        }
+    }
+
+    // The floor-aware judged gate: 2 of 9 present Network (too rare), but a crashed 10th could be a third, so the cell is
+    // possibly judged. Its worst case passes (2 x (0 + 1) <= 2), but a class whose only candidates are possibly judged is
+    // Floor, not "nothing judged".
+    [Fact]
+    public void E1_ACrashedPackage_CanMakeACellPossiblyJudged_AndTheClassFloor()
+    {
+        var measured = Enumerable.Range(0, 9).Select(i => Package($"P{i}", Lib(presence: i < 2 ? [(Capability.Network, 1)] : []))).ToArray();
+        PackageReachResult[] withCrash = [.. measured, Unmeasured("P9", PackageReachResult.Crashed, "lib/net8.0/p.dll")];
+
+        var e1 = ReachabilityAggregation.E1(ReachabilityAggregation.View(withCrash, Population.Plib), RootClass.LoadTime);
+
+        Assert.Equal(Outcome.NothingJudged, ReachabilityAggregation.E1(ReachabilityAggregation.View(measured, Population.Plib), RootClass.LoadTime).Outcome);
+        var network = e1.Cells.Single(c => c.Capability == Capability.Network);
+        Assert.False(network.Judged);
+        Assert.Equal(3, network.PresenceBest);
+        Assert.True(network.PossiblyJudged);
+        Assert.Equal(Outcome.Pass, network.Contribution);
+        Assert.Equal(Outcome.Floor, e1.Outcome);
+    }
+
+    // A class with no roots in the measured packages is Floor, not "no data", when a crashed package might hold some (the
+    // R2 write-up: "LoadTime would read Floor instead of no data").
+    [Fact]
+    public void E1AndE2_WithZeroRootsAndACrashedPackage_AreFloor_NotNoData()
+    {
+        var measured = Enumerable.Range(0, 5).Select(i => Package($"P{i}", Lib(presence: [(Capability.Network, 1)], roots: Roots(loadTime: 0)))).ToArray();
+        PackageReachResult[] withCrash = [.. measured, Unmeasured("P5", PackageReachResult.Crashed, "build/p.dll")];
+        var pall = ReachabilityAggregation.View(withCrash, Population.Pall);
+        var plib = ReachabilityAggregation.View(withCrash, Population.Plib);
+
+        Assert.Equal(Outcome.NoData, ReachabilityAggregation.E1(ReachabilityAggregation.View(measured, Population.Pall), RootClass.LoadTime).Outcome);
+        Assert.Equal(Outcome.Floor, ReachabilityAggregation.E1(pall, RootClass.LoadTime).Outcome);
+        Assert.Equal(Outcome.Floor, ReachabilityAggregation.E2(pall, RootClass.LoadTime).Outcome);
+        // No lib TFM: P-lib is untouched, still "no data" there.
+        Assert.Equal(Outcome.NoData, ReachabilityAggregation.E1(plib, RootClass.LoadTime).Outcome);
+        Assert.Equal(ClassVerdict.UndecidedFloor, ReachabilityAggregation.Verdicts(plib, pall).Single(v => v.Class == RootClass.LoadTime).Verdict);
+    }
+
+    // (d) Timeout and incomplete behave exactly like crashed: the same units, cells, outcomes and verdicts.
+    [Theory]
+    [InlineData(PackageReachResult.Timeout)]
+    [InlineData(PackageReachResult.Incomplete)]
+    public void TimeoutAndIncomplete_AggregateExactlyLikeCrashed(string status)
+    {
+        PackageReachResult[] Corpus(string s) =>
+        [
+            .. Enumerable.Range(0, 9).Select(i => Package($"P{i}", Lib(
+                presence: i < 6 ? [(Capability.Network, 1)] : [],
+                reaches: i < 3 ? [Reach(RootClass.LoadTime, Capability.Network, 1)] : [],
+                profiles: i < 1 ? [Profile(RootClass.LoadTime, [Capability.FileSystem, Capability.Network])] : []))),
+            Unmeasured("P9", s, "lib/net8.0/p.dll"),
+            Unmeasured("P10", s, "build/p.dll"),
+        ];
+        var crashed = Corpus(PackageReachResult.Crashed);
+        var other = Corpus(status);
+
+        foreach (var population in new[] { Population.Plib, Population.Pall })
+        {
+            var (c, o) = (ReachabilityAggregation.View(crashed, population), ReachabilityAggregation.View(other, population));
+            Assert.Equal(c.Units.Select(u => (u.Id, u.Floor, u.PresenceFloor)), o.Units.Select(u => (u.Id, u.Floor, u.PresenceFloor)));
+            foreach (var k in ReachabilityChild.TriggerClasses)
+            {
+                Assert.Equal(ReachabilityAggregation.E1(c, k).Cells, ReachabilityAggregation.E1(o, k).Cells);
+                Assert.Equal(ReachabilityAggregation.E1(c, k).Outcome, ReachabilityAggregation.E1(o, k).Outcome);
+                Assert.Equal(ReachabilityAggregation.E2(c, k), ReachabilityAggregation.E2(o, k));
+            }
+        }
+        Assert.Equal(Outcome.Floor, ReachabilityAggregation.E1(ReachabilityAggregation.View(other, Population.Plib), RootClass.LoadTime).Outcome);
+        Assert.Equal(
+            ReachabilityAggregation.Verdicts(ReachabilityAggregation.View(crashed, Population.Plib), ReachabilityAggregation.View(crashed, Population.Pall)),
+            ReachabilityAggregation.Verdicts(ReachabilityAggregation.View(other, Population.Plib), ReachabilityAggregation.View(other, Population.Pall)));
+    }
+
+    // (e) no-assemblies is not a floor, even with a lib TFM (a native binary in lib/net8.0): in no population, no floor
+    // package in any cell. not-cached is not a floor either; it still makes the run not comparable.
+    [Fact]
+    public void NoAssembliesAndNotCached_AreStillNotFloors()
+    {
+        using var dir = new TempDirectory();
+        var native = Lib() with
+        {
+            GraphBuilt = false, Assemblies = [], LoadFailures = [new LoadFailureRecord("lib/net8.0/a.dll", "not a managed assembly")],
+            Presence = [new AssemblyPresence("lib/net8.0/a.dll", false, "not a managed assembly", 0, 0, [])],
+        };
+        var noAssemblies = PackageReachResult.From(Entry("N"), new ChildPayload("net8.0", ["net8.0"], [native], PackageCost.None), identity, 1);
+        var notCached = PackageReachResult.Without(Entry("M"), PackageReachResult.NotCached, "no M.1.0.0.nupkg in the cache", null, identity);
+        var measured = Enumerable.Range(0, 9).Select(i => Package($"P{i}", Lib(
+            presence: i < 6 ? [(Capability.Network, 1)] : [], reaches: i < 3 ? [Reach(RootClass.LoadTime, Capability.Network, 1)] : []))).ToArray();
+        PackageReachResult[] results = [.. measured, noAssemblies, notCached];
+
+        Assert.Equal(PackageReachResult.NoAssemblies, noAssemblies.Status);
+        Assert.False(noAssemblies.UnmeasuredFloor);
+        Assert.False(notCached.UnmeasuredFloor);
+        foreach (var population in new[] { Population.Plib, Population.Pall })
+        {
+            var view = ReachabilityAggregation.View(results, population);
+            Assert.Equal(9, view.Denominator);
+            Assert.DoesNotContain(view.Units, u => u.Floor);
+            Assert.Equal(Outcome.Pass, ReachabilityAggregation.E1(view, RootClass.LoadTime).Outcome);
+        }
+        var coverage = Section(string.Join("\n", ReachabilityCorpusReport.Markdown(Context(Manifest(dir, "A")), results)) + "\n## end", "## 12.", "## end");
+        Assert.DoesNotContain("floor package, presence and reach unmeasured", coverage);
+        Assert.Contains("not-cached 1", ReachabilityCorpusReport.NotComparable(Context(Manifest(dir, "A")), results));
+    }
+
+    // Coverage honesty: section 12 names each unmeasured floor package, its status and the populations it is a floor in;
+    // section 1 counts them; the E1 headings count them as floor packages.
+    [Fact]
+    public void Report_NamesEachUnmeasuredFloorPackage_AndItsStatus()
+    {
+        using var dir = new TempDirectory();
+        var results = new[]
+        {
+            Package("A", Lib()),
+            Unmeasured("C", PackageReachResult.Crashed, "lib/net8.0/c.dll"),
+            Unmeasured("I", PackageReachResult.Incomplete, "lib/netstandard2.0/i.dll", "build/i.dll"),
+            Unmeasured("T", PackageReachResult.Timeout, "build/t.dll"),
+        };
+
+        var md = string.Join("\n", ReachabilityCorpusReport.Markdown(Context(Manifest(dir, "A", "C", "I", "T")), results));
+        var coverage = Section(md + "\n## end", "## 12.", "## end");
+
+        Assert.Contains("| C | 1.0.0 | lib/net8.0 | crashed\\: boom; floor package, presence and reach unmeasured (E1 and E2 floor package)\\: in P-all and P-lib |", coverage);
+        Assert.Contains("| I | 1.0.0 | lib/netstandard2.0 | incomplete\\: boom; floor package, presence and reach unmeasured (E1 and E2 floor package)\\: in P-all and P-lib |", coverage);
+        Assert.Contains("| T | 1.0.0 | - | timeout\\: boom; floor package, presence and reach unmeasured (E1 and E2 floor package)\\: in P-all; " +
+            "not in P-lib, TfmSelection over the .nupkg finds no lib TFM |", coverage);
+        Assert.Contains("(a lib TFM by `TfmSelection` over the `.nupkg`, or unknown) | 3 / 2 |", md);
+        Assert.Contains("### P-lib (denominator 3; floor packages 2)", md);
+        Assert.Contains("### P-all (denominator 4; floor packages 3)", md);
+    }
+
+    // A crashed P-lib package of the baseline cannot reproduce its presence: the oracle mismatches and names it.
+    [Fact]
+    public void Oracle_WhenABaselinePackageCrashed_MismatchesAndNamesIt()
+    {
+        var results = OracleResults();
+        results[1] = Unmeasured("B", PackageReachResult.Crashed, "lib/net8.0/b.dll") with { Version = "2.0.0" };
+
+        var comparison = ReachabilityAggregation.CompareOracle(PresenceOracle.Parse(OracleText), ReachabilityAggregation.View(results, Population.Plib), OracleHash);
+
+        Assert.False(comparison.Match);
+        Assert.Contains("B 2.0.0: crashed, presence not measured", comparison.Differences);
+        Assert.DoesNotContain("B 2.0.0: in the baseline, not in P-lib", comparison.Differences);
+    }
+
+    // The runner reads the lib TFM of an unmeasured package from the .nupkg's file list (TfmSelection, the P-lib rule).
+    [Fact]
+    public void WithLibTfm_AnUnmeasuredResult_TakesTheLibTfmTfmSelectionPicksOverTheNupkg()
+    {
+        using var withLib = new TempDirectory();
+        using var withoutLib = new TempDirectory();
+        var lib = SyntheticPackage(withLib, ShadowFixtureAssembly.Path, "lib/net8.0/Shadow.dll", "lib/netstandard2.0/Shadow.dll", "build/Shadow.dll");
+        var buildOnly = SyntheticPackage(withoutLib, ShadowFixtureAssembly.Path, "build/Shadow.dll", "tools/net462/Shadow.dll");
+        var crashed = PackageReachResult.Without(Entry("Synthetic"), PackageReachResult.Crashed, "child exited 35", 35, identity);
+
+        var a = ReachabilityChildRunner.WithLibTfm(crashed, lib);
+        var b = ReachabilityChildRunner.WithLibTfm(crashed with { Status = PackageReachResult.Timeout }, buildOnly);
+
+        Assert.Equal("net8.0", a.LibTfm);
+        Assert.Equal(["net8.0", "netstandard2.0"], a.LibTfms);
+        Assert.Equal("child exited 35", a.Detail);
+        Assert.Null(b.LibTfm);
+        Assert.Empty(b.LibTfms);
+    }
+
+    // Only unmeasured results are touched; an unreadable archive marks the lib TFM unknown and says so. A readable one
+    // sets the state to chosen or none.
+    [Fact]
+    public void WithLibTfm_LeavesOtherResultsAlone_AndNamesAnUnreadableArchive()
+    {
+        using var dir = new TempDirectory();
+        var bogus = Path.Combine(dir.Path, "bogus.nupkg");
+        File.WriteAllText(bogus, "not a real package");
+        var scanned = Package("A", Lib()) with { LibTfm = null };
+        var noAssemblies = PackageReachResult.From(Entry("N"), new ChildPayload(null, [], [], PackageCost.None), identity, 1);
+
+        var unreadable = ReachabilityChildRunner.WithLibTfm(PackageReachResult.Without(Entry("A"), PackageReachResult.Incomplete, "cut short", 0, identity), bogus);
+
+        Assert.Same(scanned, ReachabilityChildRunner.WithLibTfm(scanned, bogus));
+        Assert.Same(noAssemblies, ReachabilityChildRunner.WithLibTfm(noAssemblies, bogus));
+        Assert.Null(unreadable.LibTfm);
+        Assert.True(unreadable.LibTfmUnknown);
+        Assert.Equal(LibTfmState.Unknown, unreadable.LibTfmState);
+        Assert.StartsWith("cut short; lib TFM unknown, the .nupkg file list is unreadable (", unreadable.Detail);
+        Assert.Equal(LibTfmState.Chosen, Unmeasured("C", PackageReachResult.Crashed, "lib/net8.0/c.dll").LibTfmState);
+        Assert.Equal(LibTfmState.None, Unmeasured("C", PackageReachResult.Crashed, "build/c.dll").LibTfmState);
+    }
+
+    // Call 4, the cautious option: when the parent cannot read the .nupkg's file list, whether the package has a lib TFM
+    // is unknown, so it is a floor in P-lib as well as P-all (leaving it out of P-lib's denominator would be the optimistic
+    // direction). It survives the --results JSON round trip, moves a P-lib Pass to Floor, and section 12 says why.
+    [Theory]
+    [InlineData(PackageReachResult.Crashed)]
+    [InlineData(PackageReachResult.Timeout)]
+    [InlineData(PackageReachResult.Incomplete)]
+    public void View_AnUnmeasuredPackageWithAnUnreadableNupkg_IsAFloorInBothPopulations(string status)
+    {
+        using var dir = new TempDirectory();
+        var bogus = Path.Combine(dir.Path, "bogus.nupkg");
+        File.WriteAllText(bogus, "not a real package");
+        var unreadable = PackageReachResult.FromJson(ReachabilityChildRunner.WithLibTfm(
+            PackageReachResult.Without(Entry("U"), status, "boom", null, identity), bogus).ToJson());
+        // 9 P-lib packages: 6 present Network, 3 reach it. 2 x 3 <= 6 passes; with U counted against it, 2 x 4 > 6.
+        var measured = Enumerable.Range(0, 9).Select(i => Package($"P{i}", Lib(
+            presence: i < 6 ? [(Capability.Network, 1)] : [], reaches: i < 3 ? [Reach(RootClass.LoadTime, Capability.Network, 1)] : []))).ToArray();
+        PackageReachResult[] results = [.. measured, unreadable];
+
+        var plib = ReachabilityAggregation.View(results, Population.Plib);
+        var pall = ReachabilityAggregation.View(results, Population.Pall);
+
+        Assert.Equal(LibTfmState.Unknown, unreadable.LibTfmState);
+        Assert.Equal(10, plib.Denominator);
+        Assert.Equal(10, pall.Denominator);
+        Assert.All(new[] { plib.Units.Single(u => u.Id == "U"), pall.Units.Single(u => u.Id == "U") }, u =>
+        {
+            Assert.True(u.Floor);
+            Assert.True(u.PresenceFloor);
+            Assert.Empty(u.Folders);
+        });
+        Assert.Equal(Outcome.Pass, ReachabilityAggregation.E1(ReachabilityAggregation.View(measured, Population.Plib), RootClass.LoadTime).Outcome);
+        Assert.Equal(Outcome.Floor, ReachabilityAggregation.E1(plib, RootClass.LoadTime).Outcome);
+        Assert.DoesNotContain(ReachabilityAggregation.View(results, Population.Pall, "lib").Units, u => u.Id == "U");
+
+        var md = string.Join("\n", ReachabilityCorpusReport.Markdown(Context(Manifest(dir, "U")), results));
+        var coverage = Section(md + "\n## end", "## 12.", "## end");
+        Assert.Contains($"| U | 1.0.0 | - | {status}\\: boom; lib TFM unknown, the .nupkg file list is unreadable (", coverage);
+        Assert.Contains("; floor package, presence and reach unmeasured (E1 and E2 floor package)\\: in P-all and P-lib, since whether it has a lib TFM is unknown |", coverage);
+        Assert.Contains("(a lib TFM by `TfmSelection` over the `.nupkg`, or unknown) | 1 / 1 |", md);
+    }
+
+    // S0 review W1: the cautious lib TFM state is structural. A crashed, timed-out or incomplete result starts Unknown (a
+    // P-lib floor), whoever builds it; only reading the .nupkg (WithLibTfm) settles it to Chosen or None. Other statuses
+    // start None.
+    [Theory]
+    [InlineData(PackageReachResult.Crashed, LibTfmState.Unknown)]
+    [InlineData(PackageReachResult.Timeout, LibTfmState.Unknown)]
+    [InlineData(PackageReachResult.Incomplete, LibTfmState.Unknown)]
+    [InlineData(PackageReachResult.NotCached, LibTfmState.None)]
+    public void Without_StartsAnUnmeasuredResultWithTheLibTfmUnknown(string status, LibTfmState expected)
+    {
+        var result = PackageReachResult.Without(Entry("A"), status, "boom", null, identity);
+        string[] inPlib = expected == LibTfmState.Unknown ? ["A"] : [];
+
+        Assert.Equal(expected, result.LibTfmState);
+        Assert.Equal(inPlib, ReachabilityAggregation.View([result], Population.Plib).Units.Select(u => u.Id));
+        Assert.Equal(LibTfmState.Chosen, result.WithLibTfm(TfmSelection.Choose(["lib/net8.0/a.dll"])).LibTfmState);
+        Assert.Equal(LibTfmState.None, result.WithLibTfm(TfmSelection.Choose(["build/a.dll"])).LibTfmState);
+    }
+
+    // S0 review W1, end to end: ReachabilityChildRunner.Run against the real harness executable. The .nupkg has a lib TFM
+    // and no .nuspec: the parent (and the child, first) can list it, but NuGetPackage.Open rejects it, so the child exits
+    // non-zero. Crashed, with the lib TFM Chosen from the parent's own listing.
+    [Fact]
+    public void Run_AChildThatCannotOpenThePackage_IsCrashed_WithTheLibTfmChosen()
+    {
+        using var dir = new TempDirectory();
+        var nupkg = Path.Combine(dir.Path, "NoNuspec.1.0.0.nupkg");
+        using (var zip = ZipFile.Open(nupkg, ZipArchiveMode.Create))
+            foreach (var path in new[] { "lib/net8.0/NoNuspec.dll", "lib/netstandard2.0/NoNuspec.dll", "build/NoNuspec.dll" })
+                using (var writer = new StreamWriter(zip.CreateEntry(path).Open()))
+                    writer.Write("not an assembly");
+        var results = Directory.CreateDirectory(Path.Combine(dir.Path, "results")).FullName;
+        var harness = Path.Combine(AppContext.BaseDirectory, "Silvergun.CodeAnalysis.IL.Tests.BenignCorpusHarness.exe");
+
+        var result = ReachabilityChildRunner.Run(harness, results, new ManifestEntry("NoNuspec", "1.0.0"), nupkg, TimeSpan.FromSeconds(120), identity);
+
+        Assert.Equal(PackageReachResult.Crashed, result.Status);
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Equal(LibTfmState.Chosen, result.LibTfmState);
+        Assert.Equal("net8.0", result.LibTfm);
+        Assert.Equal(["net8.0", "netstandard2.0"], result.LibTfms);
+        Assert.Empty(result.Folders);
+        Assert.Equal(["NoNuspec"], ReachabilityAggregation.View([result], Population.Plib).Units.Select(u => u.Id));
+        Assert.False(File.Exists(Path.Combine(results, "NoNuspec.1.0.0.child.json")));
+    }
+
+    // S0 review W2: any unmeasured package in P-lib makes the oracle a MISMATCH, whether the baseline holds it or not and
+    // whether its lib TFM is chosen or unknown; so the P-lib floor branch never decides a verdict. One with no lib TFM
+    // leaves the oracle alone.
+    [Fact]
+    public void Oracle_AnyUnmeasuredPlibPackage_MakesItMismatch_AndOneWithNoLibTfmDoesNot()
+    {
+        var oracle = PresenceOracle.Parse(OracleText);
+        PackageReachResult[] With(PackageReachResult extra) => [.. OracleResults(), extra];
+        var chosen = Unmeasured("X", PackageReachResult.Crashed, "lib/net8.0/x.dll");
+        var unknown = PackageReachResult.Without(Entry("Y"), PackageReachResult.Timeout, "boom", null, identity);
+        var none = Unmeasured("Z", PackageReachResult.Incomplete, "build/z.dll");
+
+        OracleComparison Compare(PackageReachResult extra) => ReachabilityAggregation.CompareOracle(oracle, ReachabilityAggregation.View(With(extra), Population.Plib), OracleHash);
+
+        Assert.False(Compare(chosen).Match);
+        Assert.Contains("X 1.0.0: in P-lib, not in the baseline", Compare(chosen).Differences);
+        Assert.False(Compare(unknown).Match);
+        Assert.Contains("Y 1.0.0: in P-lib, not in the baseline", Compare(unknown).Differences);
+        Assert.True(Compare(none).Match, string.Join(Environment.NewLine, Compare(none).Differences));
+    }
+
+    // S0 review W2: sections 2 and 3 say so plainly.
+    [Fact]
+    public void Report_SaysAnUnmeasuredPlibPackageMeansNoVerdict()
+    {
+        using var dir = new TempDirectory();
+        var md = string.Join("\n", ReachabilityCorpusReport.Markdown(Context(Manifest(dir, "A")), [Package("A", Lib())]));
+
+        Assert.Contains("has no measured presence, so it always makes the oracle\na MISMATCH, and the run then gives no verdict", Section(md, "## 2.", "## 3."));
+        Assert.Contains("makes the regression oracle a MISMATCH (section 2), so no verdict is\ngiven at all", Section(md, "## 3.", "## 4."));
+        Assert.Contains("only the P-all floors of packages with no lib TFM ever feed a\nverdict", Section(md, "## 3.", "## 4."));
+    }
+
+    // S0 review N1: Q4 counts an unmeasured package as Unknown for every class, with its own reason, beside the other
+    // reasons.
+    [Fact]
+    public void Unknown_CountsAnUnmeasuredPackageAsUnknown_WithItsOwnReason()
+    {
+        var unknown = new VerdictRecord(RootClass.LoadTime, RootClassVerdict.Unknown, ["2 root(s) reach code the graph cannot see"], ["unseen"]);
+        var results = new[]
+        {
+            Package("A", Lib(verdicts: [unknown])),
+            Package("B", Lib(verdicts: [new VerdictRecord(RootClass.LoadTime, RootClassVerdict.None, [], [])])),
+            Unmeasured("C", PackageReachResult.Crashed, "lib/net8.0/c.dll"),
+            Unmeasured("D", PackageReachResult.Timeout, "build/d.dll"),
+        };
+
+        var plib = ReachabilityAggregation.Unknown(ReachabilityAggregation.View(results, Population.Plib), RootClass.LoadTime);
+        var pall = ReachabilityAggregation.Unknown(ReachabilityAggregation.View(results, Population.Pall), RootClass.LoadTime);
+        var hostContract = ReachabilityAggregation.Unknown(ReachabilityAggregation.View(results, Population.Pall), RootClass.HostContract);
+
+        Assert.Equal(new Share(2, 3), plib.Unknown);
+        Assert.Equal([new NamedCount("unmeasured (crashed/timeout/incomplete)", 1), new NamedCount("unseen", 1)], plib.Reasons);
+        Assert.Equal(new Share(3, 4), pall.Unknown);
+        Assert.Equal([new NamedCount(ReachabilityAggregation.UnmeasuredReason, 2), new NamedCount("unseen", 1)], pall.Reasons);
+        Assert.Equal(new Share(2, 4), hostContract.Unknown);
+        Assert.Equal([new NamedCount(ReachabilityAggregation.UnmeasuredReason, 2)], hostContract.Reasons);
+    }
+
+    // S0 review N1: the section 5 matrix and the Q2 tables print the unmeasured count beside the denominator; the shares
+    // themselves are unchanged (over the full denominator, the unmeasured package contributing nothing).
+    [Fact]
+    public void Report_PrintsTheUnmeasuredCountBesideTheMatrixAndQ2Denominators()
+    {
+        using var dir = new TempDirectory();
+        var results = new[]
+        {
+            Package("A", Lib(presence: [(Capability.Network, 1)], reaches: [Reach(RootClass.PublicApi, Capability.Network, 1)])),
+            Package("B", Lib()),
+            Unmeasured("C", PackageReachResult.Crashed, "lib/net8.0/c.dll"),
+            Unmeasured("D", PackageReachResult.Incomplete, "build/d.dll"),
+        };
+
+        var md = string.Join("\n", ReachabilityCorpusReport.Markdown(Context(Manifest(dir, "A", "B", "C", "D")), results));
+        var matrix = Section(md, "## 5.", "## 6.");
+        var q2 = Section(md, "## 6.", "## 7.");
+
+        Assert.Equal(1, ReachabilityAggregation.View(results, Population.Plib).Unmeasured);
+        Assert.Contains("### P-lib - ChaOnly (denominator 3; unmeasured 1)", matrix);
+        Assert.Contains("### P-all - Bound (denominator 4; unmeasured 2)", matrix);
+        Assert.Contains("### P-all, role lib - ChaOnly (denominator 2; unmeasured 0)", matrix);
+        Assert.Contains("### P-lib (denominator 3; unmeasured 1; ", q2);
+        Assert.Contains("### P-all (denominator 4; unmeasured 2; ", q2);
+        Assert.Contains("| Network | 1/3 (33.3%) | ", q2);
+        Assert.Contains("| Network | 1/4 (25.0%) | ", q2);
     }
 
     // ---------------------------------------------------------------------------------------------------
@@ -1620,6 +2133,11 @@ public sealed class ReachabilityHarnessTests
             PartialReason = partial.Contains(i) ? "the graph is truncated: nodes" : null,
         }))];
 
+    // A crashed, timed-out or incomplete result as the runner writes it: no folders, and the lib TFM TfmSelection picks
+    // over the .nupkg's `files`.
+    private static PackageReachResult Unmeasured(string id, string status, params string[] files) =>
+        PackageReachResult.Without(Entry(id), status, "boom", status == PackageReachResult.Crashed ? 35 : null, identity).WithLibTfm(TfmSelection.Choose(files));
+
     private static string Serialize(ChildPayload payload) => System.Text.Json.JsonSerializer.Serialize(payload, PackageReachResult.JsonOptions);
 
     private static ManifestEntry Entry(string id) => new(id, "1.0.0");
@@ -1645,17 +2163,19 @@ public sealed class ReachabilityHarnessTests
             [new AssemblyPresence($"{folder}/a.dll", true, null, methods, 0, [.. (presence ?? []).Select(p => new PresenceCount(p.Item1, ApiCallKind.Call, p.Item2))])],
             null, []);
 
-    private static IReadOnlyList<ClassCount> Roots(int loadTime = 1, int hostContract = 1, int runtimeInvoked = 1, int publicApi = 5, int publicContract = 2, int hidden = 3) =>
+    private static IReadOnlyList<ClassCount> Roots(
+        int loadTime = 1, int hostContract = 1, int typeInitializer = 1, int finalizer = 1, int nativeEntry = 1, int publicApi = 5, int publicContract = 2, int hidden = 3) =>
     [
-        new(RootClass.LoadTime, loadTime), new(RootClass.HostContract, hostContract), new(RootClass.RuntimeInvoked, runtimeInvoked),
+        new(RootClass.LoadTime, loadTime), new(RootClass.HostContract, hostContract), new(RootClass.TypeInitializer, typeInitializer),
+        new(RootClass.Finalizer, finalizer), new(RootClass.NativeEntry, nativeEntry),
         new(RootClass.PublicApi, publicApi), new(RootClass.PublicContract, publicContract), new(RootClass.Hidden, hidden),
     ];
 
-    private static ReachRecord Reach(RootClass @class, Capability? capability, int roots, int bound = 0, int instantiated = 0) =>
-        new(@class, capability, roots, bound, instantiated);
+    private static ReachRecord Reach(RootClass @class, Capability? capability, int roots, int bound = 0, int instantiated = 0, int direct = 0) =>
+        new(@class, capability, roots, bound, instantiated, direct);
 
     private static ProfileRecord Profile(RootClass @class, IReadOnlyList<Capability> capabilities, bool unseen = false) =>
-        new(@class, capabilities, unseen, 1, "App.M()");
+        new(@class, capabilities, unseen, [], false, 1, "App.M()");
 
     // n P-lib packages: the first `network` present Network, the first `reachNetwork` reach it from LoadTime.
     private static PopulationView Corpus(int n, int network, int reachNetwork) =>

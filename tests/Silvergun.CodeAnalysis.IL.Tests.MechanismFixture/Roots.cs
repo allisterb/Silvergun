@@ -48,7 +48,8 @@ namespace MechanismFixture.Roots.Host
     }
 }
 
-// RuntimeInvoked: a finalizer and an [UnmanagedCallersOnly] export (the StaticInit .cctors are the third kind).
+// The runtime classes (ADR 0037 amendment a1): a finalizer (Finalizer) and an [UnmanagedCallersOnly] export
+// (NativeEntry); the StaticInit .cctors are the TypeInitializer cases.
 namespace MechanismFixture.Roots.Runtime
 {
     using System;
@@ -74,7 +75,7 @@ namespace MechanismFixture.Roots.Runtime
         [UnmanagedCallersOnly]
         public static int ExportsEnv() => Environment.GetEnvironmentVariable(Names.Variable)?.Length ?? 0;
 
-        // Twin: also an export, so it is also a RuntimeInvoked root.
+        // Twin: also an export, so it is also a NativeEntry root.
         [UnmanagedCallersOnly]
         public static int ExportsSafe() => string.Concat(Names.Variable, Names.Suffix).Length;
     }

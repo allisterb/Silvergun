@@ -19,7 +19,7 @@ using System.Reflection;
 /// unspecified &lt;pattern&gt;
 /// unanalyzed  &lt;pattern&gt;
 /// ignore-edge &lt;caller-pattern&gt; &lt;callee-pattern&gt;
-/// root-attribute &lt;attribute-type&gt; &lt;LoadTime|RuntimeInvoked&gt;
+/// root-attribute &lt;attribute-type&gt; &lt;LoadTime|NativeEntry&gt;
 /// host-contract  &lt;supertype&gt;
 /// </code>
 /// <para>
@@ -236,7 +236,7 @@ public sealed class CapabilityMap
             RootAttributeDirective =>
                 rootAttributeClasses.TryGetValue(tokens[2], out var rootClass)
                     ? new Directive(Root: (pattern, rootClass))
-                    : Directive.Malformed($"unknown root class '{tokens[2]}' (expected LoadTime or RuntimeInvoked)"),
+                    : Directive.Malformed($"unknown root class '{tokens[2]}' (expected LoadTime or NativeEntry)"),
             HostContractDirective => new Directive(Contract: pattern),
             _ => Key(tokens[2]) is { } callee
                     ? new Directive(Edge: (pattern, callee))
@@ -346,7 +346,7 @@ public sealed class CapabilityMap
     private static readonly Dictionary<string, RootClass> rootAttributeClasses = new(StringComparer.OrdinalIgnoreCase)
     {
         [nameof(RootClass.LoadTime)] = RootClass.LoadTime,
-        [nameof(RootClass.RuntimeInvoked)] = RootClass.RuntimeInvoked,
+        [nameof(RootClass.NativeEntry)] = RootClass.NativeEntry,
     };
 
     private const string ResourceSuffix = ".Resources.capabilities.cm";
