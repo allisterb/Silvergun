@@ -459,6 +459,75 @@ public sealed class ReachabilityR2bHarnessTests
         Assert.Contains("| Presence oracle (`--oracle`) | `my-oracle.tsv` |", md);
     }
 
+    // A committed report must not name the machine's account: a cache root under local app-data is printed from
+    // %LOCALAPPDATA% (Program.DisplayPath), and neither the expanded local app-data nor the profile folder appears.
+    // Windows only: off Windows the home folder is printed as ~ (HarnessDisplayPathTests).
+    [Fact]
+    public void Report_PrintsACacheRootUnderLocalAppData_WithoutTheAccountName()
+    {
+        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.DoNotVerify);
+        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile, Environment.SpecialFolderOption.DoNotVerify);
+        if (!OperatingSystem.IsWindows() || local.Length == 0)
+            return; // %LOCALAPPDATA% is a Windows name, and there must be a local app-data folder to map.
+        using var dir = new TempDirectory();
+        var results = Ten(i => Lib());
+
+        var md = string.Join("\n", ReachabilityCorpusReport.Markdown(ComparableContext(dir, results) with { CacheRoot = Path.Combine(local, "Silvergun", "benign-corpus") }, results));
+
+        Assert.Contains($"| Cache root (read only; no download in this mode) | `{Path.Combine("%LOCALAPPDATA%", "Silvergun", "benign-corpus")}` |", md);
+        Assert.DoesNotContain(local, md, StringComparison.OrdinalIgnoreCase);
+        if (profile.Length > 0)
+            Assert.DoesNotContain(profile, md, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // The free-text rows (a child's detail, a load-failure reason, a presence failure, a partial-reach reason) name files
+    // the analysis touched; under local app-data each is printed from %LOCALAPPDATA%: Deterministic redacts before Escape
+    // rewrites the separators. None of the three files names the expanded local app-data or profile folder, as written or
+    // escaped. Windows only, as above.
+    [Fact]
+    public void Report_RedactsLocalAppDataInTheFreeTextRows_BeforeEscaping()
+    {
+        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.DoNotVerify);
+        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile, Environment.SpecialFolderOption.DoNotVerify);
+        if (!OperatingSystem.IsWindows() || local.Length == 0)
+            return;
+        using var dir = new TempDirectory();
+        string Under(string root) => Path.Combine(root, "Silvergun", "benign-corpus", "extracted", "x.dll");
+        string Load(string root) => $"BadImageFormatException: Could not load '{Under(root)}'.";
+        string Crash(string root) => $"exit 35 while reading {Under(root)}";
+        string Scan(string root) => $"load failed: {Under(root)}";
+        string Partial(string root) => $"the body of {Under(root)} is unreadable";
+        PackageReachResult[] results =
+        [
+            .. Ten(i => i switch
+            {
+                0 => Lib() with { LoadFailures = [new LoadFailureRecord("lib/net8.0/b.dll", Load(local))] },
+                1 => Lib() with { Presence = [new AssemblyPresence("lib/net8.0/a.dll", false, Scan(local), 0, 0, [])] },
+                2 => Lib() with { ReachPartial = true, PartialReason = Partial(local) },
+                _ => Lib(),
+            }),
+            PackageReachResult.Without(new ManifestEntry("Q", "1.0.0"), PackageReachResult.Crashed, Crash(local), 35, identity),
+        ];
+        const string L = "%LOCALAPPDATA%";
+
+        var (paths, _) = ReachabilityCorpusReport.Write(Path.Combine(dir.Path, "out"), ComparableContext(dir, results), results);
+        var md = File.ReadAllText(paths[0]);
+        var coverage = md[md.IndexOf("## 12.", StringComparison.Ordinal)..];
+
+        Assert.Equal(ReachabilityCorpusReport.MarkdownName(new DateOnly(2026, 11, 7)), Path.GetFileName(paths[0]));
+        Assert.Contains($"| Q | 1.0.0 | {PackageReachResult.Crashed} | 35 | {ReachabilityCorpusReport.Escape(Crash(L))} |", md);
+        Assert.Contains($"| P0 | 1.0.0 | lib/net8.0 | lib/net8.0/b.dll | {ReachabilityCorpusReport.Escape(Load(L))} |", md);
+        Assert.Contains($"| P1 | 1.0.0 | lib/net8.0 | lib/net8.0/a.dll | {ReachabilityCorpusReport.Escape(Scan(L))} | 0 |", md);
+        Assert.Contains(ReachabilityCorpusReport.Escape($"{PackageReachResult.Crashed}: {Crash(L)}"), coverage);
+        Assert.Contains(ReachabilityCorpusReport.Escape($"reachability partial: {Partial(L)}"), coverage);
+        foreach (var text in paths.Select(File.ReadAllText))
+            foreach (var root in new[] { local, profile }.Where(r => r.Length > 0))
+            {
+                Assert.DoesNotContain(root, text, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain(ReachabilityCorpusReport.Escape(root), text, StringComparison.OrdinalIgnoreCase);
+            }
+    }
+
     // --combine's options: the five required ones, else null; the C-build manifest defaults to the checked-in one beside the
     // harness (50 entries), and the oracle as --reachability's.
     [Fact]

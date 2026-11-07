@@ -55,7 +55,7 @@ internal static class YaraX
         $"rule {name}{(tags.Length > 0 ? " : " + string.Join(" ", tags) : "")} {{ strings: $m = {{ {Convert.ToHexString(marker)} }} condition: $m }}";
 
     /// <summary>
-    /// The C API spike's slow rule (<c>docs/agent/measurements/yara-x-capi-spike-2026-10-21.md</c>, Q2): a nested loop over
+    /// The C API spike's slow rule (<c>data/results/yara-x-capi-spike-2026-10-21.md</c>, Q2): a nested loop over
     /// every byte pair. On zeros it never matches, so its cost is quadratic in the input: 18,212 bytes took ~6 s untimed.
     /// </summary>
     internal const string SlowRule =

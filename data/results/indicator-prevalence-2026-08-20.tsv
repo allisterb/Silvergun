@@ -1,0 +1,485 @@
+Package	Version	Tfm	Assembly	Category	Value	CallerType	CallerMethod	Occurrences	Excerpt
+AutoMapper	13.0.1	net6.0	AutoMapper.dll	GenericUrl	docs.automapper.org	AutoMapper.TypeMap	CheckRecord	1	 When mapping to records, consider using only public constructors. See https://docs.automapper.org/en/latest/Construction.html.
+AutoMapper	13.0.1	net6.0	AutoMapper.dll	ReflectionTypeName	AutoMapper.Proxies	AutoMapper.Execution.ProxyGenerator	CreateProxyModule	1	AutoMapper.Proxies.emit
+AutoMapper	13.0.1	net6.0	AutoMapper.dll	ReflectionTypeName	Context.Items	AutoMapper.ResolutionContext	ThrowInvalidMap	1	Context.Items are only available when using a Map overload that takes Action<IMappingOperationOptions>! Consider using Context.TryGetItems instead.
+AutoMapper	13.0.1	net6.0	AutoMapper.dll	ReflectionTypeName	Context.TryGetItems	AutoMapper.ResolutionContext	ThrowInvalidMap	1	Context.Items are only available when using a Map overload that takes Action<IMappingOperationOptions>! Consider using Context.TryGetItems instead.
+Castle.Core	5.1.1	net6.0	Castle.Core.dll	GenericUrl	microsoft.com	Castle.Components.DictionaryAdapter.Xml.Wsdl	.cctor	1	http://microsoft.com/wsdl/types/
+Castle.Core	5.1.1	net6.0	Castle.Core.dll	GenericUrl	microsoft.com	Castle.Components.DictionaryAdapter.Xml.XmlIncludedTypeSet	.cctor	1	http://microsoft.com/wsdl/types/
+Castle.Core	5.1.1	net6.0	Castle.Core.dll	GenericUrl	www.w3.org	Castle.Components.DictionaryAdapter.Xml.SysXmlExtensions	DefineNamespace	1	http://www.w3.org/2000/xmlns/
+Castle.Core	5.1.1	net6.0	Castle.Core.dll	GenericUrl	www.w3.org	Castle.Components.DictionaryAdapter.Xml.SysXmlExtensions	IsXsiType	1	http://www.w3.org/2001/XMLSchema-instance
+Castle.Core	5.1.1	net6.0	Castle.Core.dll	GenericUrl	www.w3.org	Castle.Components.DictionaryAdapter.Xml.XPathNode	DefineNamespace	1	http://www.w3.org/2000/xmlns/
+Castle.Core	5.1.1	net6.0	Castle.Core.dll	GenericUrl	www.w3.org	Castle.Components.DictionaryAdapter.Xml.XmlIgnoreBehaviorAccessor.DummyContext	GetDefaultXsiType	1	http://www.w3.org/2001/XMLSchema
+Castle.Core	5.1.1	net6.0	Castle.Core.dll	GenericUrl	www.w3.org	Castle.Components.DictionaryAdapter.Xml.XmlIncludedTypeSet	.cctor	19	http://www.w3.org/2001/XMLSchema
+Castle.Core	5.1.1	net6.0	Castle.Core.dll	GenericUrl	www.w3.org	Castle.Components.DictionaryAdapter.Xml.XmlMetadataBehavior	.ctor	2	http://www.w3.org/2000/xmlns/
+Castle.Core	5.1.1	net6.0	Castle.Core.dll	GenericUrl	www.w3.org	Castle.Components.DictionaryAdapter.Xml.Xsd	.cctor	1	http://www.w3.org/2001/XMLSchema
+Castle.Core	5.1.1	net6.0	Castle.Core.dll	GenericUrl	www.w3.org	Castle.Components.DictionaryAdapter.Xml.Xsi	.cctor	3	http://www.w3.org/2001/XMLSchema-instance
+Castle.Core	5.1.1	net6.0	Castle.Core.dll	ReflectionTypeName	BindingFlags.Public	Castle.DynamicProxy.Generators.MethodFinder	MakeFilteredCopy	1	Only supports BindingFlags.Public and NonPublic.
+Castle.Core	5.1.1	net6.0	Castle.Core.dll	ReflectionTypeName	Castle.Components.DictionaryAdapter	Castle.Components.DictionaryAdapter.Xml.XmlAdapter	InitializeBaseTypes	1	Castle.Components.DictionaryAdapter
+Castle.Core	5.1.1	net6.0	Castle.Core.dll	ReflectionTypeName	Castle.Components.DictionaryAdapter	Castle.Core.Internal.InterfaceAttributeUtil	ShouldConsiderType	1	Castle.Components.DictionaryAdapter
+Castle.Core	5.1.1	net6.0	Castle.Core.dll	ReflectionTypeName	Castle.DynamicProxy	Castle.DynamicProxy.ProxyGenerator	.ctor	1	Castle.DynamicProxy
+Castle.Core	5.1.1	net6.0	Castle.Core.dll	ReflectionTypeName	Castle.DynamicProxy.DynProxy	Castle.DynamicProxy.ModuleScope	GetKeyPair	2	Castle.DynamicProxy.DynProxy.snk
+Castle.Core	5.1.1	net6.0	Castle.Core.dll	ReflectionTypeName	Castle.Proxies	Castle.DynamicProxy.Generators.BaseProxyGenerator.<>c__DisplayClass13_0	<GetProxyType>b__0	1	Castle.Proxies.
+Castle.Core	5.1.1	net6.0	Castle.Core.dll	ReflectionTypeName	Castle.Proxies.Delegates	Castle.DynamicProxy.Generators.DelegateTypeGenerator	GetEmitter	1	Castle.Proxies.Delegates.{0}_{1}
+Castle.Core	5.1.1	net6.0	Castle.Core.dll	ReflectionTypeName	Castle.Proxies.Invocations	Castle.DynamicProxy.Generators.InvocationTypeGenerator	GetEmitter	1	Castle.Proxies.Invocations.{0}_{1}
+Castle.Core	5.1.1	net6.0	Castle.Core.dll	ReflectionTypeName	IVirtual.Realize	Castle.Components.DictionaryAdapter.Xml.XmlAdapter	Castle.Components.DictionaryAdapter.IVirtual.Realize	1	XmlAdapter does not support realization via IVirtual.Realize().
+Castle.Core	5.1.1	net6.0	Castle.Core.dll	ReflectionTypeName	InternalsVisible.ToDynamicProxyGenAssembly2	Castle.DynamicProxy.ExceptionMessageBuilder	CreateInstructionsToMakeVisible	1	InternalsVisible.ToDynamicProxyGenAssembly2
+Castle.Core	5.1.1	net6.0	Castle.Core.dll	ReflectionTypeName	Meta.Type.FullName	Castle.Components.DictionaryAdapter.DictionaryAdapterFactory	CreateAdapterType	1	Type: {Meta.Type.FullName,nq}
+Castle.Core	5.1.1	net6.0	Castle.Core.dll	ReflectionTypeName	System.ComponentModel	Castle.Components.DictionaryAdapter.Xml.XmlAdapter	InitializeBaseTypes	1	System.ComponentModel
+Castle.Core	5.1.1	net6.0	Castle.Core.dll	ReflectionTypeName	System.ComponentModel	Castle.Core.Internal.InterfaceAttributeUtil	ShouldConsiderType	1	System.ComponentModel
+Castle.Core	5.1.1	net6.0	Castle.Core.dll	ReflectionTypeName	System.Object	Castle.DynamicProxy.Generators.BaseInterfaceProxyGenerator	EnsureValidBaseType	1	Base type for proxy is null reference. Please set it to System.Object or some other valid type.
+Castle.Core	5.1.1	net6.0	Castle.Core.dll	ReflectionTypeName	System.Runtime.CompilerServices.IsReadOnlyAttribute	Castle.DynamicProxy.Generators.GeneratorUtil.<>c	<CopyOutAndRefParameters>b__0_3	1	System.Runtime.CompilerServices.IsReadOnlyAttribute
+Castle.Core	5.1.1	net6.0	Castle.Core.dll	ReflectionTypeName	System.Runtime.CompilerServices.PreserveBaseOverridesAttribute	Castle.DynamicProxy.Generators.MethodSignatureComparer	.cctor	1	System.Runtime.CompilerServices.PreserveBaseOverridesAttribute
+CsvHelper	33.0.1	net8.0	CsvHelper.dll	ReflectionTypeName	BadDataFoundArgs.Field	CsvHelper.CsvParser	get_Item	1	You can't access IParser[int] or IParser.Record inside of the BadDataFound callback. Use BadDataFoundArgs.Field and BadDataFoundArgs.RawRecord instead.
+CsvHelper	33.0.1	net8.0	CsvHelper.dll	ReflectionTypeName	BadDataFoundArgs.RawRecord	CsvHelper.CsvParser	get_Item	1	You can't access IParser[int] or IParser.Record inside of the BadDataFound callback. Use BadDataFoundArgs.Field and BadDataFoundArgs.RawRecord instead.
+CsvHelper	33.0.1	net8.0	CsvHelper.dll	ReflectionTypeName	Configuration.HasHeaderRecord	CsvHelper.CsvReader	ReadHeader	1	Configuration.HasHeaderRecord is false.
+CsvHelper	33.0.1	net8.0	CsvHelper.dll	ReflectionTypeName	IParser.Configuration	CsvHelper.CsvContext	.ctor	1	IParser.Configuration must be of type CsvConfiguration to be used in the context.
+CsvHelper	33.0.1	net8.0	CsvHelper.dll	ReflectionTypeName	IParser.Record	CsvHelper.CsvParser	get_Item	1	You can't access IParser[int] or IParser.Record inside of the BadDataFound callback. Use BadDataFoundArgs.Field and BadDataFoundArgs.RawRecord instead.
+CsvHelper	33.0.1	net8.0	CsvHelper.dll	ReflectionTypeName	IReader.Configuration	CsvHelper.CsvContext	.ctor	1	IReader.Configuration must be of type CsvConfiguration to be used in the context.
+CsvHelper	33.0.1	net8.0	CsvHelper.dll	ReflectionTypeName	IWriter.Configuration	CsvHelper.CsvContext	.ctor	1	IWriter.Configuration must be of type CsvConfiguration to be used in the context.
+Dapper	2.1.35	net7.0	Dapper.dll	ReflectionTypeName	Dapper.DbString	Dapper.DbString	ToString	2	Dapper.DbString (Value: '
+Dapper	2.1.35	net7.0	Dapper.dll	ReflectionTypeName	Microsoft.SqlServer.Types.SqlGeography	Dapper.SqlMapper	LookupDbType	1	Microsoft.SqlServer.Types.SqlGeography
+Dapper	2.1.35	net7.0	Dapper.dll	ReflectionTypeName	Microsoft.SqlServer.Types.SqlGeometry	Dapper.SqlMapper	LookupDbType	1	Microsoft.SqlServer.Types.SqlGeometry
+Dapper	2.1.35	net7.0	Dapper.dll	ReflectionTypeName	Microsoft.SqlServer.Types.SqlHierarchyId	Dapper.SqlMapper	LookupDbType	1	Microsoft.SqlServer.Types.SqlHierarchyId
+Dapper	2.1.35	net7.0	Dapper.dll	ReflectionTypeName	System.Data.Linq.Binary	Dapper.DefaultTypeMap	FindConstructor	1	System.Data.Linq.Binary
+Dapper	2.1.35	net7.0	Dapper.dll	ReflectionTypeName	System.Data.Linq.Binary	Dapper.SqlMapper	CreateParamInfoGenerator	1	System.Data.Linq.Binary
+Dapper	2.1.35	net7.0	Dapper.dll	ReflectionTypeName	System.Data.Linq.Binary	Dapper.SqlMapper	GetDeserializer	1	System.Data.Linq.Binary
+Dapper	2.1.35	net7.0	Dapper.dll	ReflectionTypeName	System.Data.Linq.Binary	Dapper.SqlMapper	GetSimpleValueDeserializer	1	System.Data.Linq.Binary
+Dapper	2.1.35	net7.0	Dapper.dll	ReflectionTypeName	System.Data.Linq.Binary	Dapper.SqlMapper	LoadReaderValueOrBranchToDBNullLabel	1	System.Data.Linq.Binary
+Dapper	2.1.35	net7.0	Dapper.dll	ReflectionTypeName	System.Data.Linq.Binary	Dapper.SqlMapper	LookupDbType	1	System.Data.Linq.Binary
+Dapper	2.1.35	net7.0	Dapper.dll	ReflectionTypeName	System.ValueTuple	Dapper.SqlMapper	IsValueTuple	1	System.ValueTuple`
+FluentValidation	11.11.0	net8.0	FluentValidation.dll	ReflectionTypeName	ASP.NET	FluentValidation.AsyncValidatorInvokedSynchronouslyException	BuildMessage	2	" can't be used with ASP.NET automatic validation as it contains asynchronous rules. ASP.NET's validation pipeline is not asynchronous and can't invoke asynchronous rules. Remove the asynchronous rule.
+HtmlAgilityPack	1.11.71	netstandard2.0	HtmlAgilityPack.dll	GenericUrl	github.com	HtmlAgilityPack.HtmlNode	SetChildNodesId	1	Oops! a scenario that will cause a Stack Overflow has been found. See the following issue for an example: https://github.com/zzzprojects/html-agility-pack/issues/513
+HtmlAgilityPack	1.11.71	netstandard2.0	HtmlAgilityPack.dll	ReflectionTypeName	Response.Write	HtmlAgilityPack.MixedCodeDocument	.ctor	1	Response.Write 
+Humanizer.Core	2.14.1	net6.0	Humanizer.dll	ReflectionTypeName	Humanizer.Properties.Resources	Humanizer.Localisation.Resources	.cctor	1	Humanizer.Properties.Resources
+Humanizer.Core	2.14.1	net6.0	Humanizer.dll	ReflectionTypeName	System.ComponentModel.DataAnnotations.DisplayAttribute	Humanizer.EnumHumanizeExtensions	GetCustomDescription	1	System.ComponentModel.DataAnnotations.DisplayAttribute
+Microsoft.Extensions.Configuration	9.0.0	net9.0	Microsoft.Extensions.Configuration.dll	ReflectionTypeName	System.Resources.UseSystemResourceKeys	System.SR	GetUsingResourceKeysSwitchValue	1	System.Resources.UseSystemResourceKeys
+Microsoft.Extensions.DependencyInjection	9.0.0	net9.0	Microsoft.Extensions.DependencyInjection.dll	ReflectionTypeName	Microsoft.Extensions.DependencyInjection.DisableDynamicEngine	Microsoft.Extensions.DependencyInjection.ServiceProvider	.cctor	1	Microsoft.Extensions.DependencyInjection.DisableDynamicEngine
+Microsoft.Extensions.DependencyInjection	9.0.0	net9.0	Microsoft.Extensions.DependencyInjection.dll	ReflectionTypeName	Microsoft.Extensions.DependencyInjection.VerifyOpenGenericServiceTrimmability	Microsoft.Extensions.DependencyInjection.ServiceProvider	.cctor	1	Microsoft.Extensions.DependencyInjection.VerifyOpenGenericServiceTrimmability
+Microsoft.Extensions.DependencyInjection	9.0.0	net9.0	Microsoft.Extensions.DependencyInjection.dll	ReflectionTypeName	System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes	Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory	GetDynamicallyAccessedMemberTypes	1	System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes
+Microsoft.Extensions.DependencyInjection	9.0.0	net9.0	Microsoft.Extensions.DependencyInjection.dll	ReflectionTypeName	System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembersAttribute	Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory	GetDynamicallyAccessedMemberTypes	1	System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembersAttribute
+Microsoft.Extensions.DependencyInjection	9.0.0	net9.0	Microsoft.Extensions.DependencyInjection.dll	ReflectionTypeName	System.Resources.UseSystemResourceKeys	System.SR	GetUsingResourceKeysSwitchValue	1	System.Resources.UseSystemResourceKeys
+Microsoft.Extensions.Logging.Abstractions	9.0.0	net9.0	Microsoft.Extensions.Logging.Abstractions.dll	ReflectionTypeName	System.Resources.UseSystemResourceKeys	System.SR	GetUsingResourceKeysSwitchValue	1	System.Resources.UseSystemResourceKeys
+MimeKit	4.8.0	net8.0	MimeKit.dll	GenericUrl	www.w3.org	MimeKit.Text.HtmlNamespaceExtensions	.cctor	7	http://www.w3.org/
+MimeKit	4.8.0	net8.0	MimeKit.dll	GenericUrl	www.w3.org	MimeKit.Text.HtmlNamespaceExtensions	ToHtmlNamespace	1	http://www.w3.org/
+MimeKit	4.8.0	net8.0	MimeKit.dll	ReflectionTypeName	AudioExplosion.MjuiceMediaFile	MimeKit.MimeTypes	LoadExtensions	1	audio/x-vnd.AudioExplosion.MjuiceMediaFile
+MimeKit	4.8.0	net8.0	MimeKit.dll	ReflectionTypeName	AudioExplosion.MjuiceMediaFile	MimeKit.MimeTypes	LoadMimeTypes	1	audio/x-vnd.AudioExplosion.MjuiceMediaFile
+MimeKit	4.8.0	net8.0	MimeKit.dll	ReflectionTypeName	DateTime.Now	MimeKit.Cryptography.GnuPGContext	GenerateKeyPair	2	expirationDate needs to be greater than DateTime.Now
+MimeKit	4.8.0	net8.0	MimeKit.dll	ReflectionTypeName	MailKit.GroupAddress	MimeKit.InternetAddressList	op_Explicit	1	Cannot cast a MailKit.GroupAddress to a System.Net.Mail.MailAddress.
+MimeKit	4.8.0	net8.0	MimeKit.dll	ReflectionTypeName	MimeKit.Cryptography.CryptographyContext.Register	MimeKit.Cryptography.CryptographyContext	Create	1	You need to subclass {0} and then register it with MimeKit.Cryptography.CryptographyContext.Register().
+MimeKit	4.8.0	net8.0	MimeKit.dll	ReflectionTypeName	MimeKit.Cryptography.GnuPGContext	MimeKit.Cryptography.CryptographyContext	Create	1	MimeKit.Cryptography.OpenPgpContext or MimeKit.Cryptography.GnuPGContext
+MimeKit	4.8.0	net8.0	MimeKit.dll	ReflectionTypeName	MimeKit.Cryptography.OpenPgpContext	MimeKit.Cryptography.CryptographyContext	Create	1	MimeKit.Cryptography.OpenPgpContext or MimeKit.Cryptography.GnuPGContext
+MimeKit	4.8.0	net8.0	MimeKit.dll	ReflectionTypeName	Mono.Data.Sqlite	MimeKit.Cryptography.SqliteCertificateDatabase	.cctor	1	Mono.Data.Sqlite
+MimeKit	4.8.0	net8.0	MimeKit.dll	ReflectionTypeName	System.Data.SQLite	MimeKit.Cryptography.DefaultSecureMimeContext	CheckIsAvailable	1	SQLite is not available. Install the System.Data.SQLite nuget package.
+MimeKit	4.8.0	net8.0	MimeKit.dll	ReflectionTypeName	System.Data.SQLite	MimeKit.Cryptography.SqliteCertificateDatabase	.cctor	1	System.Data.SQLite
+MimeKit	4.8.0	net8.0	MimeKit.dll	ReflectionTypeName	System.Net.Mail.MailAddress	MimeKit.InternetAddressList	op_Explicit	1	Cannot cast a MailKit.GroupAddress to a System.Net.Mail.MailAddress.
+Moq	4.20.72	net6.0	Moq.dll	ReflectionTypeName	Moq.Properties.Resources	Moq.Properties.Resources	get_ResourceManager	1	Moq.Properties.Resources
+Moq	4.20.72	net6.0	Moq.dll	ReflectionTypeName	System.ValueTuple	Moq.LookupOrFallbackDefaultValueProvider	.ctor	8	System.ValueTuple`1
+NLog	5.3.4	netstandard2.0	NLog.dll	GenericUrl	nlog-project.org	NLog.LayoutRenderers.Log4JXmlEventLayoutRenderer	.cctor	2	http://nlog-project.org/dummynamespace/
+NLog	5.3.4	netstandard2.0	NLog.dll	GenericUrl	schemas.xmlsoap.org	NLog.Targets.WebServiceTarget.HttpPostSoap11Formatter	get_SoapEnvelopeNamespace	1	http://schemas.xmlsoap.org/soap/envelope/
+NLog	5.3.4	netstandard2.0	NLog.dll	GenericUrl	www.w3.org	NLog.Targets.WebServiceTarget.HttpPostSoap12Formatter	get_SoapEnvelopeNamespace	1	http://www.w3.org/2003/05/soap-envelope
+NLog	5.3.4	netstandard2.0	NLog.dll	PrivateIpLiteral	0.0.0.0	NLog.LayoutRenderers.AssemblyVersionLayoutRenderer	ApplyFormatToVersion	1	0.0.0.0
+NLog	5.3.4	netstandard2.0	NLog.dll	PrivateIpLiteral	0.0.0.0	NLog.LayoutRenderers.LocalIpAddressLayoutRenderer	IsLoopbackAddressValue	1	0.0.0.0
+NLog	5.3.4	netstandard2.0	NLog.dll	PrivateIpLiteral	127.0.0.1	NLog.LayoutRenderers.LocalIpAddressLayoutRenderer	IsLoopbackAddressValue	1	127.0.0.1
+NLog	5.3.4	netstandard2.0	NLog.dll	PrivateIpLiteral	::1	NLog.LayoutRenderers.LocalIpAddressLayoutRenderer	IsLoopbackAddressValue	1	::1
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	AppDomain.BaseDirectory	NLog.Internal.Fakeables.AppDomainWrapper	.ctor	1	AppDomain.BaseDirectory Failed
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	AppDomain.BaseDirectory	NLog.Internal.FilePathLayout	.ctor	1	FileTarget FilePathLayout with FilePathKind.Relative using AppDomain.BaseDirectory: {0}
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	AppDomain.FriendlyName	NLog.Internal.Fakeables.AppDomainWrapper	.ctor	1	AppDomain.FriendlyName Failed
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	AppDomain.SetupInformation.ConfigurationFile	NLog.Internal.Fakeables.AppDomainWrapper	.ctor	1	AppDomain.SetupInformation.ConfigurationFile Failed
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	AppDomain.SetupInformation.PrivateBinPath	NLog.Internal.Fakeables.AppDomainWrapper	.ctor	1	AppDomain.SetupInformation.PrivateBinPath Failed
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	Console.OpenStandardInput	NLog.Targets.ConsoleTargetHelper	IsConsoleAvailable	1	Console.OpenStandardInput = Null
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	Console.OutputEncoding	NLog.Targets.ConsoleTargetHelper	SetConsoleOutputEncoding	1	Failed changing Console.OutputEncoding to {0}
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	Environment.UserInteractive	NLog.Targets.ConsoleTargetHelper	IsConsoleAvailable	1	Environment.UserInteractive = False
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	File.Exists	NLog.Internal.FileAppenders.BaseFileAppender	MonitorForEnableFileDeleteEvent	1	FileTarget: Failed to check if File.Exists: '{0}'
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	File.Exists	NLog.Internal.FileAppenders.CountingSingleProcessFileAppender	Write	1	{0}: Recreating FileStream because no longer File.Exists: '{1}'
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	File.Exists	NLog.Internal.FileAppenders.SingleProcessFileAppender	Write	1	{0}: Recreating FileStream because no longer File.Exists: '{1}'
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	FilePathKind.Relative	NLog.Internal.FilePathLayout	.ctor	1	FileTarget FilePathLayout with FilePathKind.Relative using AppDomain.BaseDirectory: {0}
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	FileTarget.ConcurrentWrites	NLog.Targets.FileTarget	TryGetArchiveFileCreationTimeSource	1	{0}: File creation time {1} newer than previous file write time {2}. Linux FileSystem probably don't support file birthtime, unless multiple applications are writing to the same file. Configure FileTa.
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	FileTarget.KeepFileOpen	NLog.Targets.FileTarget	TryGetArchiveFileCreationTimeSource	1	{0}: File creation time {1} newer than previous file write time {2}. Linux FileSystem probably don't support file birthtime, unless multiple applications are writing to the same file. Configure FileTa.
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	LogLevel.Debug	NLog.SetupLoadConfigurationExtensions	WriteToColoredConsole	1	level == LogLevel.Debug
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	LogLevel.Debug	NLog.Targets.ColoredConsoleAnsiPrinter	.ctor	1	level == LogLevel.Debug
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	LogLevel.Debug	NLog.Targets.ColoredConsoleSystemPrinter	.ctor	1	level == LogLevel.Debug
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	LogLevel.Error	NLog.SetupLoadConfigurationExtensions	WriteToColoredConsole	1	level == LogLevel.Error
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	LogLevel.Error	NLog.Targets.ColoredConsoleAnsiPrinter	.ctor	1	level == LogLevel.Error
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	LogLevel.Error	NLog.Targets.ColoredConsoleSystemPrinter	.ctor	1	level == LogLevel.Error
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	LogLevel.Fatal	NLog.SetupLoadConfigurationExtensions	WriteToColoredConsole	1	level == LogLevel.Fatal
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	LogLevel.Fatal	NLog.Targets.ColoredConsoleAnsiPrinter	.ctor	1	level == LogLevel.Fatal
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	LogLevel.Fatal	NLog.Targets.ColoredConsoleSystemPrinter	.ctor	1	level == LogLevel.Fatal
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	LogLevel.Info	NLog.SetupLoadConfigurationExtensions	WriteToColoredConsole	1	level == LogLevel.Info
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	LogLevel.Info	NLog.Targets.ColoredConsoleAnsiPrinter	.ctor	1	level == LogLevel.Info
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	LogLevel.Info	NLog.Targets.ColoredConsoleSystemPrinter	.ctor	1	level == LogLevel.Info
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	LogLevel.Trace	NLog.SetupLoadConfigurationExtensions	WriteToColoredConsole	1	level == LogLevel.Trace
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	LogLevel.Trace	NLog.Targets.ColoredConsoleAnsiPrinter	.ctor	1	level == LogLevel.Trace
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	LogLevel.Trace	NLog.Targets.ColoredConsoleSystemPrinter	.ctor	1	level == LogLevel.Trace
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	LogLevel.Warn	NLog.SetupLoadConfigurationExtensions	WriteToColoredConsole	1	level == LogLevel.Warn
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	LogLevel.Warn	NLog.Targets.ColoredConsoleAnsiPrinter	.ctor	1	level == LogLevel.Warn
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	LogLevel.Warn	NLog.Targets.ColoredConsoleSystemPrinter	.ctor	1	level == LogLevel.Warn
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	LogManager.ThrowExceptions	NLog.Config.LoggingConfiguration	InitializeAll	1	LogManager.ThrowExceptions = true can crash the application! Use only for unit-testing and last resort troubleshooting.
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	Microsoft.Extensions.Logging	NLog.Config.AssemblyExtensionLoader	IncludeAsHiddenAssembly	1	Microsoft.Extensions.Logging,
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	Microsoft.Extensions.Logging.Abstractions	NLog.Config.AssemblyExtensionLoader	IncludeAsHiddenAssembly	1	Microsoft.Extensions.Logging.Abstractions,
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	Microsoft.Extensions.Logging.Filter	NLog.Config.AssemblyExtensionLoader	IncludeAsHiddenAssembly	1	Microsoft.Extensions.Logging.Filter,
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	Microsoft.Logging	NLog.Config.AssemblyExtensionLoader	IncludeAsHiddenAssembly	1	Microsoft.Logging,
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.Database	NLog.Config.ConfigurationItemFactory	RegisterExternalItems	1	NLog.Targets.DatabaseTarget, NLog.Database
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.Database	NLog.Config.FactoryExtensions	CreateInstance	1	 - Extension NLog.Database not included?
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.DiagnosticSource	NLog.Config.ConfigurationItemFactory	RegisterExternalItems	2	NLog.LayoutRenderers.ActivityTraceLayoutRenderer, NLog.DiagnosticSource
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.ExceptionLoggedToInternalLogger	NLog.Internal.ExceptionHelper	IsLoggedToInternalLogger	1	NLog.ExceptionLoggedToInternalLogger
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.ExceptionLoggedToInternalLogger	NLog.Internal.ExceptionHelper	MarkAsLoggedToInternalLogger	1	NLog.ExceptionLoggedToInternalLogger
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.Extensions.Logging	NLog.Config.AssemblyExtensionLoader	IncludeAsHiddenAssembly	1	NLog.Extensions.Logging,
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.Extensions.Logging	NLog.Config.ConfigurationItemFactory	RegisterExternalItems	3	NLog.Extensions.Logging.MicrosoftConsoleJsonLayout, NLog.Extensions.Logging
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.Extensions.Logging.ConfigSettingLayoutRenderer	NLog.Config.ConfigurationItemFactory	RegisterExternalItems	1	NLog.Extensions.Logging.ConfigSettingLayoutRenderer, NLog.Extensions.Logging
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.Extensions.Logging.MicrosoftConsoleJsonLayout	NLog.Config.ConfigurationItemFactory	RegisterExternalItems	1	NLog.Extensions.Logging.MicrosoftConsoleJsonLayout, NLog.Extensions.Logging
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.Extensions.Logging.MicrosoftConsoleLayoutRenderer	NLog.Config.ConfigurationItemFactory	RegisterExternalItems	1	NLog.Extensions.Logging.MicrosoftConsoleLayoutRenderer, NLog.Extensions.Logging
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.LayoutRenderers.ActivityTraceLayoutRenderer	NLog.Config.ConfigurationItemFactory	RegisterExternalItems	1	NLog.LayoutRenderers.ActivityTraceLayoutRenderer, NLog.DiagnosticSource
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.LayoutRenderers.PerformanceCounterLayoutRenderer	NLog.Config.ConfigurationItemFactory	RegisterExternalItems	1	NLog.LayoutRenderers.PerformanceCounterLayoutRenderer, NLog.PerformanceCounter
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.LayoutRenderers.RegistryLayoutRenderer	NLog.Config.ConfigurationItemFactory	RegisterExternalItems	1	NLog.LayoutRenderers.RegistryLayoutRenderer, NLog.WindowsRegistry
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.LayoutRenderers.WindowsIdentityLayoutRenderer	NLog.Config.ConfigurationItemFactory	RegisterExternalItems	1	NLog.LayoutRenderers.WindowsIdentityLayoutRenderer, NLog.WindowsIdentity
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.OutputDebugString	NLog.Config.ConfigurationItemFactory	RegisterExternalItems	1	NLog.Targets.OutputDebugStringTarget, NLog.OutputDebugString
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.OutputDebugString	NLog.Config.FactoryExtensions	CreateInstance	1	 - Extension NLog.OutputDebugString not included?
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.PerformanceCounter	NLog.Config.ConfigurationItemFactory	RegisterExternalItems	2	NLog.LayoutRenderers.PerformanceCounterLayoutRenderer, NLog.PerformanceCounter
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.PerformanceCounter	NLog.Config.FactoryExtensions	CreateInstance	1	 - Extension NLog.PerformanceCounter not included?
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.Targets.DatabaseTarget	NLog.Config.ConfigurationItemFactory	RegisterExternalItems	1	NLog.Targets.DatabaseTarget, NLog.Database
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.Targets.DiagnosticListenerTarget	NLog.Config.ConfigurationItemFactory	RegisterExternalItems	1	NLog.Targets.DiagnosticListenerTarget, NLog.DiagnosticSource
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.Targets.EventLogTarget	NLog.Config.ConfigurationItemFactory	RegisterExternalItems	1	NLog.Targets.EventLogTarget, NLog.WindowsEventLog
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.Targets.LogReceiverWebServiceTarget	NLog.Config.ConfigurationItemFactory	RegisterExternalItems	1	NLog.Targets.LogReceiverWebServiceTarget, NLog.Wcf
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.Targets.OutputDebugStringTarget	NLog.Config.ConfigurationItemFactory	RegisterExternalItems	1	NLog.Targets.OutputDebugStringTarget, NLog.OutputDebugString
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.Targets.PerformanceCounterTarget	NLog.Config.ConfigurationItemFactory	RegisterExternalItems	1	NLog.Targets.PerformanceCounterTarget, NLog.PerformanceCounter
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.Targets.Wrappers.ImpersonatingTargetWrapper	NLog.Config.ConfigurationItemFactory	RegisterExternalItems	1	NLog.Targets.Wrappers.ImpersonatingTargetWrapper, NLog.WindowsIdentity
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.UnitTests	NLog.Config.AssemblyExtensionLoader.<>c	<GetNLogExtensionFiles>b__14_1	1	NLog.UnitTests.dll
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.Wcf	NLog.Config.ConfigurationItemFactory	RegisterExternalItems	1	NLog.Targets.LogReceiverWebServiceTarget, NLog.Wcf
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.Web	NLog.Config.AssemblyExtensionLoader	IncludeAsHiddenAssembly	1	NLog.Web,
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.Web.AspNetCore	NLog.Config.AssemblyExtensionLoader	IncludeAsHiddenAssembly	1	NLog.Web.AspNetCore,
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.Web.AspNetCore	NLog.Config.FactoryExtensions	CreateInstance	1	 - Extension NLog.Web.AspNetCore not included?
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.Windows.Forms	NLog.Config.ConfigurationItemFactory	RegisterExternalItems	5	NLog.Windows.Forms.RichTextBoxLinkLayoutRenderer, NLog.Windows.Forms
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.Windows.Forms.FormControlTarget	NLog.Config.ConfigurationItemFactory	RegisterExternalItems	1	NLog.Windows.Forms.FormControlTarget, NLog.Windows.Forms
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.Windows.Forms.MessageBoxTarget	NLog.Config.ConfigurationItemFactory	RegisterExternalItems	1	NLog.Windows.Forms.MessageBoxTarget, NLog.Windows.Forms
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.Windows.Forms.RichTextBoxLinkLayoutRenderer	NLog.Config.ConfigurationItemFactory	RegisterExternalItems	1	NLog.Windows.Forms.RichTextBoxLinkLayoutRenderer, NLog.Windows.Forms
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.Windows.Forms.RichTextBoxTarget	NLog.Config.ConfigurationItemFactory	RegisterExternalItems	1	NLog.Windows.Forms.RichTextBoxTarget, NLog.Windows.Forms
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.Windows.Forms.ToolStripItemTarget	NLog.Config.ConfigurationItemFactory	RegisterExternalItems	1	NLog.Windows.Forms.ToolStripItemTarget, NLog.Windows.Forms
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.WindowsEventLog	NLog.Config.ConfigurationItemFactory	RegisterExternalItems	1	NLog.Targets.EventLogTarget, NLog.WindowsEventLog
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.WindowsEventLog	NLog.Config.FactoryExtensions	CreateInstance	1	 - Extension NLog.WindowsEventLog not included?
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.WindowsIdentity	NLog.Config.ConfigurationItemFactory	RegisterExternalItems	2	NLog.LayoutRenderers.WindowsIdentityLayoutRenderer, NLog.WindowsIdentity
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.WindowsIdentity	NLog.Config.FactoryExtensions	CreateInstance	1	 - Extension NLog.WindowsIdentity not included?
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NLog.WindowsRegistry	NLog.Config.ConfigurationItemFactory	RegisterExternalItems	1	NLog.LayoutRenderers.RegistryLayoutRenderer, NLog.WindowsRegistry
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	NetworkInterface.GetAllNetworkInterfaces	NLog.LayoutRenderers.LocalIpAddressLayoutRenderer	LookupIpAddress	1	Failed to lookup NetworkInterface.GetAllNetworkInterfaces()
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	System.Diagnostics.Debugger.IsLogging	NLog.Targets.DebuggerTarget	InitializeTarget	1	{0}: System.Diagnostics.Debugger.IsLogging()==false. Output has been disabled.
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	System.Diagnostics.Process	NLog.LayoutRenderers.ProcessInfoLayoutRenderer	InitializeLayoutRenderer	1	Property '{0}' not found in System.Diagnostics.Process
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	System.Runtime.CompilerServices	NLog.Internal.CallSiteInformation	SkipToUserStackFrameLegacy	1	System.Runtime.CompilerServices
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	WebServiceProtocol.Xml	NLog.Targets.WebServiceTarget.HttpPostXmlDocumentFormatter	.ctor	1	WebServiceProtocol.Xml requires WebServiceTarget.XmlRoot to be set.
+NLog	5.3.4	netstandard2.0	NLog.dll	ReflectionTypeName	WebServiceTarget.XmlRoot	NLog.Targets.WebServiceTarget.HttpPostXmlDocumentFormatter	.ctor	1	WebServiceProtocol.Xml requires WebServiceTarget.XmlRoot to be set.
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	Assert.AreEqual	NUnit.Framework.Assert	Equals	1	Assert.Equals should not be used. Use Assert.AreEqual instead.
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	Assert.AreSame	NUnit.Framework.Assert	ReferenceEquals	1	Assert.ReferenceEquals should not be used. Use Assert.AreSame instead.
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	Assert.Equals	NUnit.Framework.Assert	Equals	1	Assert.Equals should not be used. Use Assert.AreEqual instead.
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	Assert.Ignore	NUnit.Framework.Assert	Ignore	1	Assert.Ignore may not be used in a multiple assertion block.
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	Assert.Inconclusive	NUnit.Framework.Assert	Inconclusive	1	Assert.Inconclusive may not be used in a multiple assertion block.
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	Assert.Pass	NUnit.Framework.Assert	Pass	1	Assert.Pass may not be used in a multiple assertion block.
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	Assert.ReferenceEquals	NUnit.Framework.Assert	ReferenceEquals	1	Assert.ReferenceEquals should not be used. Use Assert.AreSame instead.
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	Assert.That	NUnit.Framework.Assert	ReportFailure	1	Assert.That
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	Assume.Equals	NUnit.Framework.Assume	Equals	1	Assume.Equals should not be used. Use Assume.That instead.
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	Assume.ReferenceEquals	NUnit.Framework.Assume	ReferenceEquals	1	Assume.ReferenceEquals should not be used. Use Assume.That instead.
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	Assume.That	NUnit.Framework.Assume	CheckMultipleAssertLevel	1	Assume.That may not be used in a multiple assertion block.
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	Assume.That	NUnit.Framework.Assume	Equals	1	Assume.Equals should not be used. Use Assume.That instead.
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	Assume.That	NUnit.Framework.Assume	ReferenceEquals	1	Assume.ReferenceEquals should not be used. Use Assume.That instead.
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	Assume.That	NUnit.Framework.Assume	ReportInconclusive	1	Assume.That
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	Contains.Substring	NUnit.Framework.Constraints.ContainsConstraint	ApplyTo	1	Expected value for substring must be a string. Suggest using Contains.Substring to get a compile time error
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	Decimal.Floor	NUnit.Framework.Internal.Randomizer	NextDecimal	1	Decimal.Floor returned a value whose scale was not 0.
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	DefaultTestAssemblyBuilder.Build	NUnit.Framework.TestContext	get_WorkDirectory	1	TestContext.WorkDirectory must not be accessed before DefaultTestAssemblyBuilder.Build runs.
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	Environment.StackTrace	NUnit.Framework.Assert	GetEnvironmentStackTraceWithoutThrowing	1	 was thrown by the Environment.StackTrace property.
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	Exception.Data	NUnit.Framework.ExceptionExtensions	GetDataWithoutThrowing	1	 was thrown by the Exception.Data property.
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	Exception.Message	NUnit.Framework.ExceptionExtensions	GetMessageWithoutThrowing	1	 was thrown by the Exception.Message property.
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	Exception.StackTrace	NUnit.Framework.ExceptionExtensions	GetStackTraceWithoutThrowing	1	 was thrown by the Exception.StackTrace property.
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	ExceptionHelper.Rethrow	NUnit.Framework.Internal.Reflect	DynamicInvokeWithTransparentExceptions	1	ExceptionHelper.Rethrow failed to throw an exception.
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	ExceptionHelper.Rethrow	NUnit.Framework.Internal.Reflect	InvokeWithTransparentExceptions	1	ExceptionHelper.Rethrow failed to throw an exception.
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	Is.EqualTo	NUnit.Framework.Internal.Commands.TestMethodCommand	Execute	1	Is.EqualTo(_testMethod.ExpectedResult)
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	Is.True	NUnit.Framework.Assert	That	6	Is.True
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	Is.True	NUnit.Framework.Assume	That	6	Is.True
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	Is.True	NUnit.Framework.Warn	If	6	Is.True
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	Is.True	NUnit.Framework.Warn	Unless	6	Is.True
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	Microsoft.FSharp.Control.FSharpAsync	NUnit.Framework.Internal.FSharpAsyncAwaitAdapter	GetAsyncInfo	1	Microsoft.FSharp.Control.FSharpAsync`1
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	Microsoft.FSharp.Control.FSharpAsync	NUnit.Framework.Internal.FSharpAsyncAwaitAdapter	TryCreate	1	Microsoft.FSharp.Control.FSharpAsync
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	Microsoft.FSharp.Core.FSharpOption	NUnit.Framework.Internal.Reflect	IsFSharpOption	1	Microsoft.FSharp.Core.FSharpOption`1
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	Microsoft.FSharp.Core.Unit	NUnit.Framework.Internal.Reflect	IsVoidOrUnit	1	Microsoft.FSharp.Core.Unit
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	Mono.Runtime	NUnit.Framework.Internal.RuntimeFramework.<>c	<.cctor>b__34_0	1	Mono.Runtime
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	MonoTouch.UIKit.UIApplicationDelegate	NUnit.Framework.Internal.RuntimeFramework.<>c	<.cctor>b__34_0	1	MonoTouch.UIKit.UIApplicationDelegate,monotouch
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	ParallelScope.Children	NUnit.Framework.ParallelizableAttribute	ApplyToTest	1	May not specify ParallelScope.Children on a non-parameterized test method
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	ParallelScope.Fixtures	NUnit.Framework.ParallelizableAttribute	ApplyToTest	1	May not specify ParallelScope.Fixtures on a test method
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	SingleThreadedTestSynchronizationContext.Run	NUnit.Framework.Internal.SingleThreadedTestSynchronizationContext	Run	1	SingleThreadedTestSynchronizationContext.Run may not be reentered.
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	System.Collections.Generic	NUnit.Framework.Internal.Extensions.IEnumerableExtensions.<>c	<IsSortable>b__0_0	1	System.Collections.Generic
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	System.Collections.Generic.IEnumerable	NUnit.Framework.Constraints.UniqueItemsConstraint	GetGenericTypeArgument	1	System.Collections.Generic.IEnumerable`1
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	System.Collections.Generic.KeyValuePair	NUnit.Framework.Constraints.UniqueItemsConstraint	IsSpecialComparisonType	1	System.Collections.Generic.KeyValuePair`2
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	System.DBNull	NUnit.Framework.Internal.ParamAttributeTypeConversions	TryConvert	1	System.DBNull
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	System.IComparable	NUnit.Framework.Internal.Extensions.TypeExtensions	ImplementsIComparable	1	System.IComparable
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	System.Nullable	NUnit.Framework.Internal.Reflect	CanImplicitlyConvertTo	1	System.Nullable
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	System.Reflection.AssemblyMetadataAttribute	NUnit.Framework.Internal.RuntimeFramework.<>c	<.cctor>b__34_0	1	System.Reflection.AssemblyMetadataAttribute
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	System.Runtime	NUnit.Framework.Internal.AsyncToSyncAdapter	.cctor	1	System.Runtime.CompilerServices.AsyncStateMachineAttribute, System.Runtime
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	System.Runtime.CompilerServices.AsyncStateMachineAttribute	NUnit.Framework.Internal.AsyncToSyncAdapter	.cctor	1	System.Runtime.CompilerServices.AsyncStateMachineAttribute, System.Runtime
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	System.Runtime.CompilerServices.ICriticalNotifyCompletion	NUnit.Framework.Internal.CSharpPatternBasedAwaitAdapter.AwaitShapeInfo	TryCreate	1	System.Runtime.CompilerServices.ICriticalNotifyCompletion
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	System.Runtime.CompilerServices.INotifyCompletion	NUnit.Framework.Internal.CSharpPatternBasedAwaitAdapter.AwaitShapeInfo	TryCreate	1	System.Runtime.CompilerServices.INotifyCompletion
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	System.Runtime.Loader.AssemblyLoadContext	NUnit.Framework.Internal.AssemblyHelper.ReflectionAssemblyLoader	TryInitialize	1	System.Runtime.Loader.AssemblyLoadContext
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	System.Security.Permissions.UIPermission	NUnit.Framework.Api.NUnitTestAssemblyRunner	StartRun	1	System.Security.Permissions.UIPermission must be granted in order to launch the debugger.
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	System.Threading.CancellationToken	NUnit.Framework.Internal.FSharpAsyncAwaitAdapter.<>c__DisplayClass5_0	<TryCreate>b__0	1	System.Threading.CancellationToken
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	System.Tuple	NUnit.Framework.Constraints.UniqueItemsConstraint	IsHandledSpeciallyByNUnit	1	System.Tuple
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	System.Tuple	NUnit.Framework.Internal.TypeHelper	IsTuple	1	System.Tuple
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	System.ValueTuple	NUnit.Framework.Constraints.UniqueItemsConstraint	IsHandledSpeciallyByNUnit	1	System.ValueTuple
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	System.ValueTuple	NUnit.Framework.Internal.TypeHelper	IsValueTuple	1	System.ValueTuple
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	System.Windows.Forms.Application	NUnit.Framework.Internal.MessagePumpStrategy.WindowsFormsMessagePumpStrategy	GetIfApplicable	1	System.Windows.Forms.Application
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	System.Windows.Forms.WindowsFormsSynchronizationContext	NUnit.Framework.Internal.MessagePumpStrategy.WindowsFormsMessagePumpStrategy	IsApplicable	1	System.Windows.Forms.WindowsFormsSynchronizationContext
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	System.Windows.Threading.Dispatcher	NUnit.Framework.Internal.MessagePumpStrategy.WpfMessagePumpStrategy	GetIfApplicable	1	System.Windows.Threading.Dispatcher
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	System.Windows.Threading.DispatcherFrame	NUnit.Framework.Internal.MessagePumpStrategy.WpfMessagePumpStrategy	GetIfApplicable	1	System.Windows.Threading.DispatcherFrame
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	System.Windows.Threading.DispatcherSynchronizationContext	NUnit.Framework.Internal.MessagePumpStrategy.WpfMessagePumpStrategy	IsApplicable	1	System.Windows.Threading.DispatcherSynchronizationContext
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	TestAttribute.ExpectedResult	NUnit.Framework.TestAttribute	ApplyToTest	1	The 'TestAttribute.ExpectedResult' property may not be used on parameterized methods.
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	TestContext.WorkDirectory	NUnit.Framework.TestContext	get_WorkDirectory	1	TestContext.WorkDirectory must not be accessed before DefaultTestAssemblyBuilder.Build runs.
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	Warn.Equals	NUnit.Framework.Warn	Equals	1	Warn.Equals should not be used.
+NUnit	4.2.2	net6.0	nunit.framework.dll	ReflectionTypeName	Warn.ReferenceEquals	NUnit.Framework.Warn	ReferenceEquals	1	Warn.ReferenceEquals should not be used.
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Assert.AreEqual	NUnit.Framework.Legacy.ClassicAssert	Equals	1	Assert.Equals should not be used. Use Assert.AreEqual instead.
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Assert.AreEqual	NUnit.Framework.Legacy.StringAssert	Equals	1	StringAssert.Equals should not be used. Use StringAssert.AreEqualIgnoringCase or Assert.AreEqual instead.
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Assert.AreSame	NUnit.Framework.Legacy.ClassicAssert	ReferenceEquals	1	Assert.ReferenceEquals should not be used. Use Assert.AreSame instead.
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Assert.Equals	NUnit.Framework.Legacy.ClassicAssert	Equals	1	Assert.Equals should not be used. Use Assert.AreEqual instead.
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Assert.ReferenceEquals	NUnit.Framework.Legacy.ClassicAssert	ReferenceEquals	1	Assert.ReferenceEquals should not be used. Use Assert.AreSame instead.
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	CollectionAssert.AreEqual	NUnit.Framework.Legacy.CollectionAssert	Equals	1	CollectionAssert.Equals should not be used. Use CollectionAssert.AreEqual instead.
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	CollectionAssert.Equals	NUnit.Framework.Legacy.CollectionAssert	Equals	1	CollectionAssert.Equals should not be used. Use CollectionAssert.AreEqual instead.
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	CollectionAssert.ReferenceEquals	NUnit.Framework.Legacy.CollectionAssert	ReferenceEquals	1	CollectionAssert.ReferenceEquals should not be used.
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	DirectoryAssert.AreEqual	NUnit.Framework.Legacy.DirectoryAssert	Equals	1	DirectoryAssert.Equals should not be used. Use DirectoryAssert.AreEqual instead.
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	DirectoryAssert.Equals	NUnit.Framework.Legacy.DirectoryAssert	Equals	1	DirectoryAssert.Equals should not be used. Use DirectoryAssert.AreEqual instead.
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	DirectoryAssert.ReferenceEquals	NUnit.Framework.Legacy.DirectoryAssert	ReferenceEquals	1	DirectoryAssert.ReferenceEquals should not be used.
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Does.Contain	NUnit.Framework.Legacy.StringAssert	Contains	1	Does.Contain(expected)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Does.EndWith	NUnit.Framework.Legacy.StringAssert	EndsWith	1	Does.EndWith(expected)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Does.Match	NUnit.Framework.Legacy.StringAssert	IsMatch	1	Does.Match(pattern)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Does.Not.Contain	NUnit.Framework.Legacy.StringAssert	DoesNotContain	1	Does.Not.Contain(expected)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Does.Not.EndWith	NUnit.Framework.Legacy.StringAssert	DoesNotEndWith	1	Does.Not.EndWith(expected)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Does.Not.Match	NUnit.Framework.Legacy.StringAssert	DoesNotMatch	1	Does.Not.Match(pattern)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Does.Not.StartWith	NUnit.Framework.Legacy.StringAssert	DoesNotStartWith	1	Does.Not.StartWith(expected)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Does.StartWith	NUnit.Framework.Legacy.StringAssert	StartsWith	1	Does.StartWith(expected)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	FileAssert.AreEqual	NUnit.Framework.Legacy.FileAssert	Equals	1	FileAssert.Equals should not be used. Use FileAssert.AreEqual instead.
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	FileAssert.Equals	NUnit.Framework.Legacy.FileAssert	Equals	1	FileAssert.Equals should not be used. Use FileAssert.AreEqual instead.
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	FileAssert.ReferenceEquals	NUnit.Framework.Legacy.FileAssert	ReferenceEquals	1	FileAssert.ReferenceEquals should not be used.
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Has.Member	NUnit.Framework.Legacy.CollectionAssert	Contains	1	Has.Member(actual)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Has.No.Member	NUnit.Framework.Legacy.CollectionAssert	DoesNotContain	1	Has.No.Member(actual)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.All.InstanceOf	NUnit.Framework.Legacy.CollectionAssert	AllItemsAreInstancesOfType	1	Is.All.InstanceOf(expectedType)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.All.Not.Null	NUnit.Framework.Legacy.CollectionAssert	AllItemsAreNotNull	1	Is.All.Not.Null
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.AssignableFrom	NUnit.Framework.Legacy.ClassicAssert	IsAssignableFrom	4	Is.AssignableFrom(expected)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.EqualTo	NUnit.Framework.Legacy.ClassicAssert	AreEqual	2	Is.EqualTo(expected)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.EqualTo	NUnit.Framework.Legacy.ClassicAssert	AssertDoublesAreEqual	2	Is.EqualTo(expected)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.EqualTo	NUnit.Framework.Legacy.CollectionAssert	AreEqual	2	Is.EqualTo(expected).AsCollection
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.EqualTo	NUnit.Framework.Legacy.FileAssert	AreEqual	1	Is.EqualTo(expected)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.EqualTo	NUnit.Framework.Legacy.StringAssert	AreEqualIgnoringCase	1	Is.EqualTo(expected).IgnoreCase
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.EquivalentTo	NUnit.Framework.Legacy.CollectionAssert	AreEquivalent	1	Is.EquivalentTo(expected)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.False	NUnit.Framework.Legacy.ClassicAssert	False	4	Is.False
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.False	NUnit.Framework.Legacy.ClassicAssert	IsFalse	4	Is.False
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.GreaterThan	NUnit.Framework.Legacy.ClassicAssert	Greater	16	Is.GreaterThan(arg2)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.GreaterThanOrEqualTo	NUnit.Framework.Legacy.ClassicAssert	GreaterOrEqual	16	Is.GreaterThanOrEqualTo(arg2)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.InstanceOf	NUnit.Framework.Legacy.ClassicAssert	IsInstanceOf	4	Is.InstanceOf(expected)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.LessThan	NUnit.Framework.Legacy.ClassicAssert	Less	16	Is.LessThan(arg2)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.LessThanOrEqualTo	NUnit.Framework.Legacy.ClassicAssert	LessOrEqual	16	Is.LessThanOrEqualTo(arg2)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.NaN	NUnit.Framework.Legacy.ClassicAssert	IsNaN	4	Is.NaN
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.Negative	NUnit.Framework.Legacy.ClassicAssert	Negative	14	Is.Negative
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.Not.AssignableFrom	NUnit.Framework.Legacy.ClassicAssert	IsNotAssignableFrom	4	Is.Not.AssignableFrom(expected)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.Not.Empty	NUnit.Framework.Legacy.ClassicAssert	IsNotEmpty	4	Is.Not.Empty
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.Not.EqualTo	NUnit.Framework.Legacy.ClassicAssert	AreNotEqual	2	Is.Not.EqualTo(expected)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.Not.EqualTo	NUnit.Framework.Legacy.CollectionAssert	AreNotEqual	2	Is.Not.EqualTo(expected).AsCollection
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.Not.EqualTo	NUnit.Framework.Legacy.FileAssert	AreNotEqual	1	Is.Not.EqualTo(expected)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.Not.EqualTo	NUnit.Framework.Legacy.StringAssert	AreNotEqualIgnoringCase	1	Is.Not.EqualTo(expected).IgnoreCase
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.Not.EquivalentTo	NUnit.Framework.Legacy.CollectionAssert	AreNotEquivalent	1	Is.Not.EquivalentTo(expected)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.Not.InstanceOf	NUnit.Framework.Legacy.ClassicAssert	IsNotInstanceOf	4	Is.Not.InstanceOf(expected)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.Not.Null	NUnit.Framework.Legacy.ClassicAssert	IsNotNull	2	Is.Not.Null
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.Not.Null	NUnit.Framework.Legacy.ClassicAssert	NotNull	2	Is.Not.Null
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.Not.SameAs	NUnit.Framework.Legacy.ClassicAssert	AreNotSame	2	Is.Not.SameAs(expected)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.Not.SubsetOf	NUnit.Framework.Legacy.CollectionAssert	IsNotSubsetOf	1	Is.Not.SubsetOf(superset)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.Not.SupersetOf	NUnit.Framework.Legacy.CollectionAssert	IsNotSupersetOf	1	Is.Not.SupersetOf(subset)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.Not.Zero	NUnit.Framework.Legacy.ClassicAssert	NotZero	14	Is.Not.Zero
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.Null	NUnit.Framework.Legacy.ClassicAssert	IsNull	2	Is.Null
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.Null	NUnit.Framework.Legacy.ClassicAssert	Null	2	Is.Null
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.Ordered	NUnit.Framework.Legacy.CollectionAssert	IsOrdered	1	Is.Ordered
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.Ordered.Using	NUnit.Framework.Legacy.CollectionAssert	IsOrdered	1	Is.Ordered.Using(comparer)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.Positive	NUnit.Framework.Legacy.ClassicAssert	Positive	14	Is.Positive
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.SameAs	NUnit.Framework.Legacy.ClassicAssert	AreSame	2	Is.SameAs(expected)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.SubsetOf	NUnit.Framework.Legacy.CollectionAssert	IsSubsetOf	1	Is.SubsetOf(superset)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.SupersetOf	NUnit.Framework.Legacy.CollectionAssert	IsSupersetOf	1	Is.SupersetOf(subset)
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.True	NUnit.Framework.Legacy.ClassicAssert	IsTrue	4	Is.True
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.True	NUnit.Framework.Legacy.ClassicAssert	True	4	Is.True
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.Unique	NUnit.Framework.Legacy.CollectionAssert	AllItemsAreUnique	1	Is.Unique
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	Is.Zero	NUnit.Framework.Legacy.ClassicAssert	Zero	14	Is.Zero
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	StringAssert.AreEqualIgnoringCase	NUnit.Framework.Legacy.StringAssert	Equals	1	StringAssert.Equals should not be used. Use StringAssert.AreEqualIgnoringCase or Assert.AreEqual instead.
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	StringAssert.Equals	NUnit.Framework.Legacy.StringAssert	Equals	1	StringAssert.Equals should not be used. Use StringAssert.AreEqualIgnoringCase or Assert.AreEqual instead.
+NUnit	4.2.2	net6.0	nunit.framework.legacy.dll	ReflectionTypeName	StringAssert.ReferenceEquals	NUnit.Framework.Legacy.StringAssert	ReferenceEquals	1	StringAssert.ReferenceEquals should not be used.
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	GenericUrl	james.newtonking.com	Newtonsoft.Json.Converters.XmlNodeConverter	AddJsonArrayAttribute	3	http://james.newtonking.com/projects/json
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	GenericUrl	james.newtonking.com	Newtonsoft.Json.Converters.XmlNodeConverter	GetPropertyName	2	http://james.newtonking.com/projects/json
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	GenericUrl	james.newtonking.com	Newtonsoft.Json.Converters.XmlNodeConverter	IsArray	1	http://james.newtonking.com/projects/json
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	GenericUrl	james.newtonking.com	Newtonsoft.Json.Converters.XmlNodeConverter	ReadAttributeElements	3	http://james.newtonking.com/projects/json
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	GenericUrl	james.newtonking.com	Newtonsoft.Json.Converters.XmlNodeConverter	ReadElement	2	http://james.newtonking.com/projects/json
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	GenericUrl	james.newtonking.com	Newtonsoft.Json.Converters.XmlNodeConverter	SerializeNode	2	http://james.newtonking.com/projects/json
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	GenericUrl	james.newtonking.com	Newtonsoft.Json.Converters.XmlNodeConverter	ValueAttributes	2	http://james.newtonking.com/projects/json
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	GenericUrl	www.w3.org	Newtonsoft.Json.Converters.XmlNodeConverter	AddJsonArrayAttribute	1	http://www.w3.org/2000/xmlns/
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	GenericUrl	www.w3.org	Newtonsoft.Json.Converters.XmlNodeConverter	PushParentNamespaces	1	http://www.w3.org/2000/xmlns/
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	GenericUrl	www.w3.org	Newtonsoft.Json.Converters.XmlNodeConverter	ResolveFullName	1	http://www.w3.org/2000/xmlns/
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	GenericUrl	www.w3.org	Newtonsoft.Json.Converters.XmlNodeConverter	SerializeNode	2	http://www.w3.org/2000/xmlns/
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	GenericUrl	www.w3.org	Newtonsoft.Json.Converters.XmlNodeConverter	ValueAttributes	1	http://www.w3.org/2000/xmlns/
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	Microsoft.CSharp	Newtonsoft.Json.Utilities.DynamicUtils.BinderWrapper	Init	1	Could not resolve type '{0}'. You may need to add a reference to Microsoft.CSharp.dll to work with dynamic types.
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	Microsoft.CSharp.RuntimeBinder.Binder, Microsoft.CSharp, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a	Newtonsoft.Json.Utilities.DynamicUtils.BinderWrapper	CreateMemberCalls	1	Microsoft.CSharp.RuntimeBinder.Binder, Microsoft.CSharp, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	Microsoft.CSharp.RuntimeBinder.Binder, Microsoft.CSharp, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a	Newtonsoft.Json.Utilities.DynamicUtils.BinderWrapper	Init	2	Microsoft.CSharp.RuntimeBinder.Binder, Microsoft.CSharp, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	Microsoft.CSharp.RuntimeBinder.CSharpArgumentInfo, Microsoft.CSharp, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a	Newtonsoft.Json.Utilities.DynamicUtils.BinderWrapper	CreateMemberCalls	1	Microsoft.CSharp.RuntimeBinder.CSharpArgumentInfo, Microsoft.CSharp, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	Microsoft.CSharp.RuntimeBinder.CSharpArgumentInfo, Microsoft.CSharp, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a	Newtonsoft.Json.Utilities.DynamicUtils.BinderWrapper	CreateSharpArgumentInfoArray	1	Microsoft.CSharp.RuntimeBinder.CSharpArgumentInfo, Microsoft.CSharp, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	Microsoft.CSharp.RuntimeBinder.CSharpArgumentInfoFlags, Microsoft.CSharp, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a	Newtonsoft.Json.Utilities.DynamicUtils.BinderWrapper	CreateSharpArgumentInfoArray	1	Microsoft.CSharp.RuntimeBinder.CSharpArgumentInfoFlags, Microsoft.CSharp, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	Microsoft.CSharp.RuntimeBinder.CSharpBinderFlags, Microsoft.CSharp, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a	Newtonsoft.Json.Utilities.DynamicUtils.BinderWrapper	CreateMemberCalls	1	Microsoft.CSharp.RuntimeBinder.CSharpBinderFlags, Microsoft.CSharp, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	Microsoft.FSharp.Collections.FSharpMap	Newtonsoft.Json.Utilities.FSharpUtils	.ctor	1	Microsoft.FSharp.Collections.FSharpMap`2
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	Microsoft.FSharp.Collections.ListModule	Newtonsoft.Json.Utilities.FSharpUtils	.ctor	1	Microsoft.FSharp.Collections.ListModule
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	Microsoft.FSharp.Core.CompilationMappingAttribute	Newtonsoft.Json.Converters.DiscriminatedUnionConverter	CanConvert	1	Microsoft.FSharp.Core.CompilationMappingAttribute
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	Microsoft.FSharp.Reflection.FSharpType	Newtonsoft.Json.Utilities.FSharpUtils	.ctor	1	Microsoft.FSharp.Reflection.FSharpType
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	Microsoft.FSharp.Reflection.FSharpValue	Newtonsoft.Json.Utilities.FSharpUtils	.ctor	1	Microsoft.FSharp.Reflection.FSharpValue
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	Microsoft.FSharp.Reflection.UnionCaseInfo	Newtonsoft.Json.Utilities.FSharpUtils	.ctor	1	Microsoft.FSharp.Reflection.UnionCaseInfo
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	Newtonsoft.Json	Newtonsoft.Json.Serialization.DiagnosticsTraceWriter	Trace	2	Newtonsoft.Json
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	ObjectCreationHandling.Replace	Newtonsoft.Json.Serialization.JsonSerializerInternalBase	get_DefaultReferenceMappings	1	A different Id has already been assigned for value '{0}'. This error may be caused by an object being reused multiple times during deserialization and can be fixed with the setting ObjectCreationHandl.
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.Byte	Newtonsoft.Json.JsonReader	ReadIntoWrappedTypeObject	1	System.Byte[]
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.Byte	Newtonsoft.Json.JsonTextReader.<ReadIntoWrappedTypeObjectAsync>d__43	MoveNext	1	System.Byte[]
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.Collections.Concurrent.ConcurrentBag	Newtonsoft.Json.Serialization.DefaultContractResolver	IsConcurrentOrObservableCollection	1	System.Collections.Concurrent.ConcurrentBag`1
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.Collections.Concurrent.ConcurrentDictionary	Newtonsoft.Json.Serialization.DefaultContractResolver	IsConcurrentOrObservableCollection	1	System.Collections.Concurrent.ConcurrentDictionary`2
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.Collections.Concurrent.ConcurrentDictionary	Newtonsoft.Json.Serialization.JsonDictionaryContract	.ctor	1	System.Collections.Concurrent.ConcurrentDictionary`2
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.Collections.Concurrent.ConcurrentQueue	Newtonsoft.Json.Serialization.DefaultContractResolver	IsConcurrentOrObservableCollection	1	System.Collections.Concurrent.ConcurrentQueue`1
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.Collections.Concurrent.ConcurrentStack	Newtonsoft.Json.Serialization.DefaultContractResolver	IsConcurrentOrObservableCollection	1	System.Collections.Concurrent.ConcurrentStack`1
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.Collections.Immutable.IImmutableDictionary	Newtonsoft.Json.Utilities.ImmutableCollectionsUtils	.cctor	1	System.Collections.Immutable.IImmutableDictionary`2
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.Collections.Immutable.IImmutableList	Newtonsoft.Json.Utilities.ImmutableCollectionsUtils	.cctor	1	System.Collections.Immutable.IImmutableList`1
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.Collections.Immutable.IImmutableQueue	Newtonsoft.Json.Utilities.ImmutableCollectionsUtils	.cctor	1	System.Collections.Immutable.IImmutableQueue`1
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.Collections.Immutable.IImmutableSet	Newtonsoft.Json.Utilities.ImmutableCollectionsUtils	.cctor	1	System.Collections.Immutable.IImmutableSet`1
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.Collections.Immutable.IImmutableStack	Newtonsoft.Json.Utilities.ImmutableCollectionsUtils	.cctor	1	System.Collections.Immutable.IImmutableStack`1
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.Collections.Immutable.ImmutableArray	Newtonsoft.Json.Utilities.ImmutableCollectionsUtils	.cctor	3	System.Collections.Immutable.ImmutableArray`1
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.Collections.Immutable.ImmutableDictionary	Newtonsoft.Json.Utilities.ImmutableCollectionsUtils	.cctor	5	System.Collections.Immutable.ImmutableDictionary`2
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.Collections.Immutable.ImmutableHashSet	Newtonsoft.Json.Utilities.ImmutableCollectionsUtils	.cctor	5	System.Collections.Immutable.ImmutableHashSet`1
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.Collections.Immutable.ImmutableList	Newtonsoft.Json.Utilities.ImmutableCollectionsUtils	.cctor	5	System.Collections.Immutable.ImmutableList`1
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.Collections.Immutable.ImmutableQueue	Newtonsoft.Json.Utilities.ImmutableCollectionsUtils	.cctor	5	System.Collections.Immutable.ImmutableQueue`1
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.Collections.Immutable.ImmutableSortedDictionary	Newtonsoft.Json.Utilities.ImmutableCollectionsUtils	.cctor	3	System.Collections.Immutable.ImmutableSortedDictionary`2
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.Collections.Immutable.ImmutableSortedSet	Newtonsoft.Json.Utilities.ImmutableCollectionsUtils	.cctor	3	System.Collections.Immutable.ImmutableSortedSet`1
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.Collections.Immutable.ImmutableStack	Newtonsoft.Json.Utilities.ImmutableCollectionsUtils	.cctor	5	System.Collections.Immutable.ImmutableStack`1
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.Collections.ObjectModel.ObservableCollection	Newtonsoft.Json.Serialization.DefaultContractResolver	IsConcurrentOrObservableCollection	1	System.Collections.ObjectModel.ObservableCollection`1
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.ComponentModel.ComponentConverter	Newtonsoft.Json.Serialization.JsonTypeReflector	CanTypeDescriptorConvertString	1	System.ComponentModel.ComponentConverter
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.ComponentModel.DataAnnotations.MetadataTypeAttribute	Newtonsoft.Json.Serialization.JsonTypeReflector	GetAssociateMetadataTypeFromAttribute	1	System.ComponentModel.DataAnnotations.MetadataTypeAttribute
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.ComponentModel.ReferenceConverter	Newtonsoft.Json.Serialization.JsonTypeReflector	CanTypeDescriptorConvertString	1	System.ComponentModel.ReferenceConverter
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.Data.EntityKeyMember	Newtonsoft.Json.Converters.EntityKeyMemberConverter	CanConvert	1	System.Data.EntityKeyMember
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.Data.Linq.Binary	Newtonsoft.Json.Converters.BinaryConverter	CanConvert	1	System.Data.Linq.Binary
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.Data.Linq.Binary	Newtonsoft.Json.Converters.BinaryConverter	GetByteArray	1	System.Data.Linq.Binary
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.Data.Linq.Binary	Newtonsoft.Json.Converters.BinaryConverter	ReadJson	1	System.Data.Linq.Binary
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.Data.Objects.DataClasses.EntityObject	Newtonsoft.Json.Serialization.DefaultContractResolver	GetSerializableMembers	1	System.Data.Objects.DataClasses.EntityObject
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.Data.Objects.DataClasses.EntityReference	Newtonsoft.Json.Serialization.DefaultContractResolver	ShouldSerializeEntityMember	1	System.Data.Objects.DataClasses.EntityReference`1
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.IO.DirectoryInfo	Newtonsoft.Json.Serialization.DefaultContractResolver	.cctor	1	System.IO.DirectoryInfo
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.IO.DriveInfo	Newtonsoft.Json.Serialization.DefaultContractResolver	.cctor	1	System.IO.DriveInfo
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.IO.FileInfo	Newtonsoft.Json.Serialization.DefaultContractResolver	.cctor	1	System.IO.FileInfo
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.Linq.EmptyPartition	Newtonsoft.Json.Serialization.JsonArrayContract	.ctor	1	System.Linq.EmptyPartition`1
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.Runtime.CompilerServices.IsByRefLikeAttribute	Newtonsoft.Json.Utilities.ReflectionUtils	IsByRefLikeType	1	System.Runtime.CompilerServices.IsByRefLikeAttribute
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.Windows.Forms.Design.DataSourceConverter	Newtonsoft.Json.Serialization.JsonTypeReflector	CanTypeDescriptorConvertString	1	System.Windows.Forms.Design.DataSourceConverter
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.Xml.Linq.XObject	Newtonsoft.Json.Converters.XmlNodeConverter	CanConvert	1	System.Xml.Linq.XObject
+Newtonsoft.Json	13.0.3	net6.0	Newtonsoft.Json.dll	ReflectionTypeName	System.Xml.XmlNode	Newtonsoft.Json.Converters.XmlNodeConverter	CanConvert	1	System.Xml.XmlNode
+Polly	8.5.0	net6.0	Polly.dll	ReflectionTypeName	TimeSpan.Zero	Polly.RateLimit.RateLimitRejectedException	SetRetryAfter	1	The retryAfter parameter must be a TimeSpan greater than or equal to TimeSpan.Zero.
+Polly	8.5.0	net6.0	Polly.dll	ReflectionTypeName	Timeout.InfiniteTimeSpan	Polly.Timeout.TimeoutValidator	ValidateTimeSpanTimeout	1	timeout must be a positive TimeSpan (or Timeout.InfiniteTimeSpan to indicate no timeout)
+RestSharp	112.1.0	net8.0	RestSharp.dll	ReflectionTypeName	HttpClient.Timeout	RestSharp.RestClient	<GetErrorResponse>g__TimedOut|3_0	1	HttpClient.Timeout
+RestSharp	112.1.0	net8.0	RestSharp.dll	ReflectionTypeName	Request.AddBody	RestSharp.DefaultParameters	AddParameter	1	Cannot set request body using default parameters. Use Request.AddBody() instead.
+Serilog	4.2.0	net9.0	Serilog.dll	ReflectionTypeName	Serilog.Capturing.IsCompilerGeneratedCodeSupported	Serilog.Capturing.TrimConfiguration	.cctor	1	Serilog.Capturing.IsCompilerGeneratedCodeSupported
+SharpZipLib	1.4.2	net6.0	ICSharpCode.SharpZipLib.dll	ReflectionTypeName	Inflater.Decode	ICSharpCode.SharpZipLib.Zip.Compression.Inflater	Decode	1	Inflater.Decode unknown mode
+SharpZipLib	1.4.2	net6.0	ICSharpCode.SharpZipLib.dll	ReflectionTypeName	TarBuffer.ReadBlock	ICSharpCode.SharpZipLib.Tar.TarBuffer	ReadBlock	1	TarBuffer.ReadBlock - no input stream defined
+SharpZipLib	1.4.2	net6.0	ICSharpCode.SharpZipLib.dll	ReflectionTypeName	TarBuffer.ReadBlock	ICSharpCode.SharpZipLib.Tar.TarBuffer.<ReadBlockIntAsync>d__21	MoveNext	1	TarBuffer.ReadBlock - no input stream defined
+SharpZipLib	1.4.2	net6.0	ICSharpCode.SharpZipLib.dll	ReflectionTypeName	TarBuffer.WriteBlock	ICSharpCode.SharpZipLib.Tar.TarBuffer.<WriteBlockAsync>d__37	MoveNext	2	TarBuffer.WriteBlock - no output stream defined
+SharpZipLib	1.4.2	net6.0	ICSharpCode.SharpZipLib.dll	ReflectionTypeName	TarBuffer.WriteFinalRecord	ICSharpCode.SharpZipLib.Tar.TarBuffer.<WriteFinalRecordAsync>d__39	MoveNext	1	TarBuffer.WriteFinalRecord no output stream defined
+SharpZipLib	1.4.2	net6.0	ICSharpCode.SharpZipLib.dll	ReflectionTypeName	TarBuffer.WriteRecord	ICSharpCode.SharpZipLib.Tar.TarBuffer.<WriteRecordAsync>d__38	MoveNext	1	TarBuffer.WriteRecord no output stream defined
+Spectre.Console	0.49.1	net8.0	Spectre.Console.dll	GenericUrl	emptylink	Spectre.Console.AnsiBuilder	Build	1	https://emptylink
+Spectre.Console	0.49.1	net8.0	Spectre.Console.dll	GenericUrl	emptylink	Spectre.Console.StyleParser	Parse	1	https://emptylink
+Spectre.Console	0.49.1	net8.0	Spectre.Console.dll	ReflectionTypeName	ContinuaCI.Version	Spectre.Console.Enrichment.ContinuaEnricher	Enabled	1	ContinuaCI.Version
+Spectre.Console	0.49.1	net8.0	Spectre.Console.dll	ReflectionTypeName	FSharp.Core	Spectre.Console.TypeNameHelper	ProcessGenericType	1	FSharp.Core.dll
+Spectre.Console	0.49.1	net8.0	Spectre.Console.dll	ReflectionTypeName	FSharp.Core	Spectre.Console.TypeNameHelper	ProcessType	1	FSharp.Core.dll
+Spectre.Console	0.49.1	net8.0	Spectre.Console.dll	ReflectionTypeName	Spectre.Console	Spectre.Console.FigletFont.<>c	<.cctor>b__16_0	1	Spectre.Console/Widgets/Figlet/Fonts/Standard.flf
+Spectre.Console	0.49.1	net8.0	Spectre.Console.dll	ReflectionTypeName	System.Runtime.CompilerServices	Spectre.Console.ExceptionFormatter.<>c	<TryGetTupleName>b__11_0	1	System.Runtime.CompilerServices
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	Microsoft.FSharp.Collections.FSharpList	System.Text.Json.Serialization.Metadata.FSharpCoreReflectionProxy	.ctor	1	Microsoft.FSharp.Collections.FSharpList`1
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	Microsoft.FSharp.Collections.FSharpMap	System.Text.Json.Serialization.Metadata.FSharpCoreReflectionProxy	.ctor	1	Microsoft.FSharp.Collections.FSharpMap`2
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	Microsoft.FSharp.Collections.FSharpSet	System.Text.Json.Serialization.Metadata.FSharpCoreReflectionProxy	.ctor	1	Microsoft.FSharp.Collections.FSharpSet`1
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	Microsoft.FSharp.Collections.ListModule	System.Text.Json.Serialization.Metadata.FSharpCoreReflectionProxy	.ctor	1	Microsoft.FSharp.Collections.ListModule
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	Microsoft.FSharp.Collections.ListModule.OfSeq	System.Text.Json.Serialization.Metadata.FSharpCoreReflectionProxy	CreateFSharpListConstructor	1	Microsoft.FSharp.Collections.ListModule.OfSeq<T>(IEnumerable<T> source)
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	Microsoft.FSharp.Collections.MapModule	System.Text.Json.Serialization.Metadata.FSharpCoreReflectionProxy	.ctor	1	Microsoft.FSharp.Collections.MapModule
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	Microsoft.FSharp.Collections.MapModule.OfSeq	System.Text.Json.Serialization.Metadata.FSharpCoreReflectionProxy	CreateFSharpMapConstructor	1	Microsoft.FSharp.Collections.MapModule.OfSeq<TKey, TValue>(IEnumerable<Tuple<TKey, TValue>> source)
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	Microsoft.FSharp.Collections.SetModule	System.Text.Json.Serialization.Metadata.FSharpCoreReflectionProxy	.ctor	1	Microsoft.FSharp.Collections.SetModule
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	Microsoft.FSharp.Collections.SetModule.OfSeq	System.Text.Json.Serialization.Metadata.FSharpCoreReflectionProxy	CreateFSharpSetConstructor	1	Microsoft.FSharp.Collections.SetModule.OfSeq<T>(IEnumerable<T> source)
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	Microsoft.FSharp.Core.CompilationMappingAttribute	System.Text.Json.Serialization.Metadata.FSharpCoreReflectionProxy	.ctor	1	Microsoft.FSharp.Core.CompilationMappingAttribute
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	Microsoft.FSharp.Core.CompilationMappingAttribute	System.Text.Json.Serialization.Metadata.FSharpCoreReflectionProxy	GetFSharpCoreAssembly	1	Microsoft.FSharp.Core.CompilationMappingAttribute
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	Microsoft.FSharp.Core.FSharpOption	System.Text.Json.Serialization.Metadata.FSharpCoreReflectionProxy	.ctor	1	Microsoft.FSharp.Core.FSharpOption`1
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	Microsoft.FSharp.Core.FSharpOption	System.Text.Json.Serialization.Metadata.FSharpCoreReflectionProxy	CreateFSharpOptionSomeConstructor	1	Microsoft.FSharp.Core.FSharpOption<T>.Some(T value)
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	Microsoft.FSharp.Core.FSharpOption	System.Text.Json.Serialization.Metadata.FSharpCoreReflectionProxy	CreateFSharpOptionValueGetter	1	Microsoft.FSharp.Core.FSharpOption<T>.get_Value()
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	Microsoft.FSharp.Core.FSharpValueOption	System.Text.Json.Serialization.Metadata.FSharpCoreReflectionProxy	.ctor	1	Microsoft.FSharp.Core.FSharpValueOption`1
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	Microsoft.FSharp.Core.FSharpValueOption	System.Text.Json.Serialization.Metadata.FSharpCoreReflectionProxy	CreateFSharpValueOptionSomeConstructor	1	Microsoft.FSharp.Core.FSharpValueOption<T>.ValueSome(T value)
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	Microsoft.FSharp.Core.FSharpValueOption	System.Text.Json.Serialization.Metadata.FSharpCoreReflectionProxy	CreateFSharpValueOptionValueGetter	1	Microsoft.FSharp.Core.FSharpValueOption<T>.get_Value()
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Collections.Immutable	System.Text.Json.Reflection.ReflectionExtensions	IsImmutableDictionaryType	1	System.Collections.Immutable
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Collections.Immutable	System.Text.Json.Reflection.ReflectionExtensions	IsImmutableEnumerableType	1	System.Collections.Immutable
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Collections.Immutable.IImmutableDictionary	System.Text.Json.Reflection.ReflectionExtensions	GetImmutableDictionaryConstructingTypeName	1	System.Collections.Immutable.IImmutableDictionary`2
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Collections.Immutable.IImmutableDictionary	System.Text.Json.Reflection.ReflectionExtensions	IsImmutableDictionaryType	1	System.Collections.Immutable.IImmutableDictionary`2
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Collections.Immutable.IImmutableList	System.Text.Json.Reflection.ReflectionExtensions	GetImmutableEnumerableConstructingTypeName	1	System.Collections.Immutable.IImmutableList`1
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Collections.Immutable.IImmutableList	System.Text.Json.Reflection.ReflectionExtensions	IsImmutableEnumerableType	1	System.Collections.Immutable.IImmutableList`1
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Collections.Immutable.IImmutableQueue	System.Text.Json.Reflection.ReflectionExtensions	GetImmutableEnumerableConstructingTypeName	1	System.Collections.Immutable.IImmutableQueue`1
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Collections.Immutable.IImmutableQueue	System.Text.Json.Reflection.ReflectionExtensions	IsImmutableEnumerableType	1	System.Collections.Immutable.IImmutableQueue`1
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Collections.Immutable.IImmutableSet	System.Text.Json.Reflection.ReflectionExtensions	GetImmutableEnumerableConstructingTypeName	1	System.Collections.Immutable.IImmutableSet`1
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Collections.Immutable.IImmutableSet	System.Text.Json.Reflection.ReflectionExtensions	IsImmutableEnumerableType	1	System.Collections.Immutable.IImmutableSet`1
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Collections.Immutable.IImmutableStack	System.Text.Json.Reflection.ReflectionExtensions	GetImmutableEnumerableConstructingTypeName	1	System.Collections.Immutable.IImmutableStack`1
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Collections.Immutable.IImmutableStack	System.Text.Json.Reflection.ReflectionExtensions	IsImmutableEnumerableType	1	System.Collections.Immutable.IImmutableStack`1
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Collections.Immutable.ImmutableArray	System.Text.Json.Reflection.ReflectionExtensions	GetImmutableEnumerableConstructingTypeName	2	System.Collections.Immutable.ImmutableArray`1
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Collections.Immutable.ImmutableArray	System.Text.Json.Reflection.ReflectionExtensions	IsImmutableEnumerableType	1	System.Collections.Immutable.ImmutableArray`1
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Collections.Immutable.ImmutableDictionary	System.Text.Json.Reflection.ReflectionExtensions	GetImmutableDictionaryConstructingTypeName	2	System.Collections.Immutable.ImmutableDictionary`2
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Collections.Immutable.ImmutableDictionary	System.Text.Json.Reflection.ReflectionExtensions	IsImmutableDictionaryType	1	System.Collections.Immutable.ImmutableDictionary`2
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Collections.Immutable.ImmutableHashSet	System.Text.Json.Reflection.ReflectionExtensions	GetImmutableEnumerableConstructingTypeName	2	System.Collections.Immutable.ImmutableHashSet`1
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Collections.Immutable.ImmutableHashSet	System.Text.Json.Reflection.ReflectionExtensions	IsImmutableEnumerableType	1	System.Collections.Immutable.ImmutableHashSet`1
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Collections.Immutable.ImmutableList	System.Text.Json.Reflection.ReflectionExtensions	GetImmutableEnumerableConstructingTypeName	2	System.Collections.Immutable.ImmutableList`1
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Collections.Immutable.ImmutableList	System.Text.Json.Reflection.ReflectionExtensions	IsImmutableEnumerableType	1	System.Collections.Immutable.ImmutableList`1
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Collections.Immutable.ImmutableQueue	System.Text.Json.Reflection.ReflectionExtensions	GetImmutableEnumerableConstructingTypeName	2	System.Collections.Immutable.ImmutableQueue`1
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Collections.Immutable.ImmutableQueue	System.Text.Json.Reflection.ReflectionExtensions	IsImmutableEnumerableType	1	System.Collections.Immutable.ImmutableQueue`1
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Collections.Immutable.ImmutableSortedDictionary	System.Text.Json.Reflection.ReflectionExtensions	GetImmutableDictionaryConstructingTypeName	2	System.Collections.Immutable.ImmutableSortedDictionary`2
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Collections.Immutable.ImmutableSortedDictionary	System.Text.Json.Reflection.ReflectionExtensions	IsImmutableDictionaryType	1	System.Collections.Immutable.ImmutableSortedDictionary`2
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Collections.Immutable.ImmutableSortedSet	System.Text.Json.Reflection.ReflectionExtensions	GetImmutableEnumerableConstructingTypeName	2	System.Collections.Immutable.ImmutableSortedSet`1
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Collections.Immutable.ImmutableSortedSet	System.Text.Json.Reflection.ReflectionExtensions	IsImmutableEnumerableType	1	System.Collections.Immutable.ImmutableSortedSet`1
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Collections.Immutable.ImmutableStack	System.Text.Json.Reflection.ReflectionExtensions	GetImmutableEnumerableConstructingTypeName	2	System.Collections.Immutable.ImmutableStack`1
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Collections.Immutable.ImmutableStack	System.Text.Json.Reflection.ReflectionExtensions	IsImmutableEnumerableType	1	System.Collections.Immutable.ImmutableStack`1
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Collections.NonGeneric	System.Text.Json.Serialization.IEnumerableConverterFactoryHelpers	IsNonGenericStackOrQueue	2	System.Collections.Stack, System.Collections.NonGeneric
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Collections.Queue	System.Text.Json.Serialization.IEnumerableConverterFactoryHelpers	IsNonGenericStackOrQueue	1	System.Collections.Queue, System.Collections.NonGeneric
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Collections.Stack	System.Text.Json.Serialization.IEnumerableConverterFactoryHelpers	IsNonGenericStackOrQueue	1	System.Collections.Stack, System.Collections.NonGeneric
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Diagnostics.CodeAnalysis.SetsRequiredMembersAttribute	System.Text.Json.Reflection.ReflectionExtensions	HasSetsRequiredMembersAttribute	1	System.Diagnostics.CodeAnalysis.SetsRequiredMembersAttribute
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Resources.UseSystemResourceKeys	System.SR	GetUsingResourceKeysSwitchValue	1	System.Resources.UseSystemResourceKeys
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Runtime.CompilerServices.RequiredMemberAttribute	System.Text.Json.Reflection.ReflectionExtensions	HasRequiredMemberAttribute	1	System.Runtime.CompilerServices.RequiredMemberAttribute
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Text.Json.JsonSerializer.IsReflectionEnabledByDefault	System.Text.Json.JsonSerializer	.cctor	1	System.Text.Json.JsonSerializer.IsReflectionEnabledByDefault
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Text.Json.Nodes.JsonObject	System.Text.Json.JsonSerializer	CreateExtensionDataProperty	1	System.Text.Json.Nodes.JsonObject
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Text.Json.Nodes.JsonObject	System.Text.Json.Serialization.Metadata.JsonTypeInfo	IsValidExtensionDataProperty	1	System.Text.Json.Nodes.JsonObject
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Text.Json.Rethrowable	System.Text.Json.Serialization.JsonConverter	ReadCore	2	System.Text.Json.Rethrowable
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Text.Json.Rethrowable	System.Text.Json.Serialization.JsonConverter	WriteCore	1	System.Text.Json.Rethrowable
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Text.Json.Rethrowable	System.Text.Json.ThrowHelper	GetInvalidOperationException	3	System.Text.Json.Rethrowable
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Text.Json.Rethrowable	System.Text.Json.ThrowHelper	ThrowFormatException	3	System.Text.Json.Rethrowable
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Text.Json.Serialization.EnableSourceGenReflectionFallback	System.Text.Json.AppContextSwitchHelper	.cctor	1	System.Text.Json.Serialization.EnableSourceGenReflectionFallback
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Text.Json.Serialization.RespectNullableAnnotationsDefault	System.Text.Json.AppContextSwitchHelper	.cctor	1	System.Text.Json.Serialization.RespectNullableAnnotationsDefault
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.Text.Json.Serialization.RespectRequiredConstructorParametersDefault	System.Text.Json.AppContextSwitchHelper	.cctor	1	System.Text.Json.Serialization.RespectRequiredConstructorParametersDefault
+System.Text.Json	9.0.0	net9.0	System.Text.Json.dll	ReflectionTypeName	System.TimeSpan	System.Text.Json.Serialization.Converters.TimeSpanConverter	GetSchema	1	Represents a System.TimeSpan value.
+YamlDotNet	16.2.1	net8.0	YamlDotNet.dll	ReflectionTypeName	Microsoft.FSharp.Collections	YamlDotNet.Helpers.DefaultFsharpHelper	IsFsharpListType	1	Microsoft.FSharp.Collections
+YamlDotNet	16.2.1	net8.0	YamlDotNet.dll	ReflectionTypeName	Microsoft.FSharp.Collections.ListModule	YamlDotNet.Helpers.DefaultFsharpHelper	CreateFsharpListFromArray	1	Microsoft.FSharp.Collections.ListModule
+YamlDotNet	16.2.1	net8.0	YamlDotNet.dll	ReflectionTypeName	Microsoft.FSharp.Core	YamlDotNet.Helpers.DefaultFsharpHelper	IsFsharpCore	1	Microsoft.FSharp.Core
+YamlDotNet	16.2.1	net8.0	YamlDotNet.dll	ReflectionTypeName	System.DBNull	YamlDotNet.ReflectionExtensions	IsDbNull	1	System.DBNull
+YamlDotNet	16.2.1	net8.0	YamlDotNet.dll	ReflectionTypeName	System.Dynamic.ExpandoObject	YamlDotNet.Serialization.ObjectGraphTraversalStrategies.FullObjectGraphTraversalStrategy	TraverseDictionary	1	System.Dynamic.ExpandoObject
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	DataFormat.Default	ProtoBuf.Meta.ValueMember	BuildSerializer	1	NullWrappedValue can only be used with DataFormat.Default
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	ProtoBuf.ProtoAfterDeserializationAttribute	ProtoBuf.Meta.MetaType	ApplyDefaultBehaviourImpl	1	ProtoBuf.ProtoAfterDeserializationAttribute
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	ProtoBuf.ProtoAfterSerializationAttribute	ProtoBuf.Meta.MetaType	ApplyDefaultBehaviourImpl	1	ProtoBuf.ProtoAfterSerializationAttribute
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	ProtoBuf.ProtoBeforeDeserializationAttribute	ProtoBuf.Meta.MetaType	ApplyDefaultBehaviourImpl	1	ProtoBuf.ProtoBeforeDeserializationAttribute
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	ProtoBuf.ProtoBeforeSerializationAttribute	ProtoBuf.Meta.MetaType	ApplyDefaultBehaviourImpl	1	ProtoBuf.ProtoBeforeSerializationAttribute
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	ProtoBuf.ProtoContractAttribute	ProtoBuf.Meta.MetaType	ApplyDefaultBehaviourImpl	1	ProtoBuf.ProtoContractAttribute
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	ProtoBuf.ProtoContractAttribute	ProtoBuf.Meta.MetaType	GetAsReferenceDefault	1	ProtoBuf.ProtoContractAttribute
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	ProtoBuf.ProtoContractAttribute	ProtoBuf.Meta.MetaType	GetContractFamily	1	ProtoBuf.ProtoContractAttribute
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	ProtoBuf.ProtoEnumAttribute	ProtoBuf.Meta.MetaType	NormalizeProtoMember	1	ProtoBuf.ProtoEnumAttribute
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	ProtoBuf.ProtoIgnoreAttribute	ProtoBuf.Meta.MetaType	NormalizeProtoMember	2	ProtoBuf.ProtoIgnoreAttribute
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	ProtoBuf.ProtoIncludeAttribute	ProtoBuf.Meta.MetaType	ApplyDefaultBehaviourImpl	1	ProtoBuf.ProtoIncludeAttribute
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	ProtoBuf.ProtoMapAttribute	ProtoBuf.Meta.MetaType	ApplyDefaultBehaviour	1	ProtoBuf.ProtoMapAttribute
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	ProtoBuf.ProtoMemberAttribute	ProtoBuf.Meta.MetaType	NormalizeProtoMember	1	ProtoBuf.ProtoMemberAttribute
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	ProtoBuf.ProtoPartialIgnoreAttribute	ProtoBuf.Meta.MetaType	ApplyDefaultBehaviourImpl	1	ProtoBuf.ProtoPartialIgnoreAttribute
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	ProtoBuf.ProtoPartialMemberAttribute	ProtoBuf.Meta.MetaType	ApplyDefaultBehaviourImpl	1	ProtoBuf.ProtoPartialMemberAttribute
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	ProtoBuf.ProtoReservedAttribute	ProtoBuf.Meta.MetaType	ApplyDefaultBehaviourImpl	1	ProtoBuf.ProtoReservedAttribute
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	System.ComponentModel.DefaultValueAttribute	ProtoBuf.Meta.MetaType	ApplyDefaultBehaviour	1	System.ComponentModel.DefaultValueAttribute
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	System.NonSerializedAttribute	ProtoBuf.Meta.MetaType	NormalizeProtoMember	1	System.NonSerializedAttribute
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	System.Runtime.CompilerServices.IsExternalInit	ProtoBuf.Meta.MetaType	<ResolveTupleConstructor>g__IsPublicSetter|76_0	1	System.Runtime.CompilerServices.IsExternalInit
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	System.Runtime.Serialization.DataContractAttribute	ProtoBuf.Meta.MetaType	ApplyDefaultBehaviourImpl	1	System.Runtime.Serialization.DataContractAttribute
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	System.Runtime.Serialization.DataContractAttribute	ProtoBuf.Meta.MetaType	GetContractFamily	1	System.Runtime.Serialization.DataContractAttribute
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	System.Runtime.Serialization.DataMemberAttribute	ProtoBuf.Meta.MetaType	NormalizeProtoMember	1	System.Runtime.Serialization.DataMemberAttribute
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	System.Runtime.Serialization.OnDeserializedAttribute	ProtoBuf.Meta.MetaType	ApplyDefaultBehaviourImpl	1	System.Runtime.Serialization.OnDeserializedAttribute
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	System.Runtime.Serialization.OnDeserializingAttribute	ProtoBuf.Meta.MetaType	ApplyDefaultBehaviourImpl	1	System.Runtime.Serialization.OnDeserializingAttribute
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	System.Runtime.Serialization.OnSerializedAttribute	ProtoBuf.Meta.MetaType	ApplyDefaultBehaviourImpl	1	System.Runtime.Serialization.OnSerializedAttribute
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	System.Runtime.Serialization.OnSerializingAttribute	ProtoBuf.Meta.MetaType	ApplyDefaultBehaviourImpl	1	System.Runtime.Serialization.OnSerializingAttribute
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	System.Runtime.Versioning.TargetFrameworkAttribute	ProtoBuf.Meta.RuntimeTypeModel	WriteAssemblyAttributes	1	System.Runtime.Versioning.TargetFrameworkAttribute
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	System.Runtime.Versioning.TargetFrameworkAttribute	ProtoBuf.Meta.RuntimeTypeModel.CompilerOptions	SetFrameworkOptions	1	System.Runtime.Versioning.TargetFrameworkAttribute
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	System.Xml.Serialization.XmlArrayAttribute	ProtoBuf.Meta.MetaType	NormalizeProtoMember	1	System.Xml.Serialization.XmlArrayAttribute
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	System.Xml.Serialization.XmlElementAttribute	ProtoBuf.Meta.MetaType	NormalizeProtoMember	1	System.Xml.Serialization.XmlElementAttribute
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	System.Xml.Serialization.XmlIgnoreAttribute	ProtoBuf.Meta.MetaType	NormalizeProtoMember	1	System.Xml.Serialization.XmlIgnoreAttribute
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	System.Xml.Serialization.XmlTypeAttribute	ProtoBuf.Meta.MetaType	ApplyDefaultBehaviourImpl	1	System.Xml.Serialization.XmlTypeAttribute
+protobuf-net	3.2.30	net6.0	protobuf-net.dll	ReflectionTypeName	System.Xml.Serialization.XmlTypeAttribute	ProtoBuf.Meta.MetaType	GetContractFamily	1	System.Xml.Serialization.XmlTypeAttribute

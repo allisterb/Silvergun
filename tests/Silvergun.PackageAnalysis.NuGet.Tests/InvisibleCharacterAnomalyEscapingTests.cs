@@ -14,7 +14,7 @@ using Xunit;
 
 /// <summary>
 /// End-to-end cover for the ADR 0031 decision 4 defect measured in
-/// <c>docs/agent/measurements/packaging-anomalies-top100-2026-08-22.md</c>: <b>an <c>InvisibleCharacter</c>
+/// <c>data/results/packaging-anomalies-top100-2026-08-22.md</c>: <b>an <c>InvisibleCharacter</c>
 /// anomaly was reported with the invisible character still in it</b> — the one category whose entire premise is
 /// "you cannot see this". A real <c>.nupkg</c> on disk goes through <see cref="PackageScanner.Scan"/> and the
 /// reported <see cref="PackagingAnomaly.EntryName"/> is checked, in the DTO and in the JSON, for raw invisible

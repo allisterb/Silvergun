@@ -165,7 +165,7 @@ public static class ReachabilityCorpusReport
             $"| Manifest | `{Path.GetFileName(context.Manifest.Path)}` |",
             $"| Manifest hash (sha256 of normalized `id,version` list) | `{context.Manifest.Hash}` |",
             $"| Manifest entries | {context.Manifest.Entries.Count} |",
-            $"| Cache root (read only; no download in this mode) | `{context.CacheRoot}` |",
+            $"| Cache root (read only; no download in this mode) | `{Program.DisplayPath(context.CacheRoot)}` |",
             $"| Harness build: `git describe --always --dirty --abbrev=40`, `-dirty` also when `src/`, `ext/` or `tests/` has untracked files | `{SafeCommit(context.Identity.Commit)}`" +
             $"{(context.Identity.Commit.EndsWith(BuildIdentities.DirtySuffix, StringComparison.Ordinal) ? " **(uncommitted changes: not a corpus-run build)**" : string.Empty)} |",
             $"| Harness build: sha256 of the output directory's top-level assemblies | `{context.Identity.AssembliesSha256}` |",
@@ -743,9 +743,12 @@ public static class ReachabilityCorpusReport
         return kept.Length == 0 ? BuildIdentities.Unknown : dirty ? kept + BuildIdentities.DirtySuffix : kept;
     }
 
-    /// <summary>Masks what differs between two runs on one machine: the temp directory and a package's random extraction name.</summary>
+    /// <summary>
+    /// Masks what differs between two runs on one machine (the temp directory, a package's random extraction name),
+    /// then any remaining profile path (<see cref="Program.Redact(string)"/>).
+    /// </summary>
     public static string Deterministic(string text) =>
-        randomExtraction.Replace(text.Replace(Path.GetTempPath(), "<temp>/", StringComparison.OrdinalIgnoreCase), "pkg-<random>");
+        Program.Redact(randomExtraction.Replace(text.Replace(Path.GetTempPath(), "<temp>/", StringComparison.OrdinalIgnoreCase), "pkg-<random>"));
 
     /// <summary>
     /// A TSV field: metadata is attacker-influenced text, so a tab, CR or LF becomes a space (it would corrupt the record

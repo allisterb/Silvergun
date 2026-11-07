@@ -18,7 +18,7 @@ using Xunit;
 /// <summary>
 /// The rendered-report half of the ADR 0031 decision 4 fix, driven through a real <c>.nupkg</c> and the real
 /// <see cref="PackageScanner"/>. The defect measured in
-/// <c>docs/agent/measurements/packaging-anomalies-top100-2026-08-22.md</c> was that an <c>InvisibleCharacter</c>
+/// <c>data/results/packaging-anomalies-top100-2026-08-22.md</c> was that an <c>InvisibleCharacter</c>
 /// anomaly reached the human-readable report with the invisible character <b>still in it</b> — the literal bytes
 /// <c>E2 80 8B</c> were found in a report. A finding a reader cannot see is not a finding.
 ///

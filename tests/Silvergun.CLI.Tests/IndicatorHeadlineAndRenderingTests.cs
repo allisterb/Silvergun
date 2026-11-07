@@ -47,7 +47,7 @@ public sealed class IndicatorHeadlineAndRenderingTests
     }
 
     // B2 — a noisy-only finding must NOT move the headline off "Clean": ReflectionTypeName/GenericUrl/
-    // PrivateIpLiteral are 92%/28%/4% on benign input (measurements/indicator-prevalence-2026-08-03.md), so
+    // PrivateIpLiteral are 92%/28%/4% on benign input (data/results/indicator-prevalence-2026-08-03.md), so
     // gating the headline on them would make it fire on nearly every package.
     [Fact]
     public void Analyze_NoisyIndicatorOnly_HeadlineStaysClean()

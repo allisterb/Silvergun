@@ -31,7 +31,7 @@ using Xunit;
 /// the Unicode Tag block (U+E0000–U+E007F) is a full invisible ASCII alphabet, it is <b>astral</b>, and a
 /// char-wise domain only ever presents its surrogate halves — which are ≥ 0xD800 and match no predicate. The
 /// escaper was structurally unable to see the block and the property was structurally unable to notice. Measured
-/// in <c>docs/agent/measurements/packaging-anomalies-top100-2026-08-22.md</c>. Exhaustive over the wrong domain
+/// in <c>data/results/packaging-anomalies-top100-2026-08-22.md</c>. Exhaustive over the wrong domain
 /// reads exactly like exhaustive, so <see cref="EveryCodePointUnderTest"/> now covers the whole BMP, the whole
 /// Tag block, and a sample of every other plane — and
 /// <see cref="EveryCodePointUnderTest_CoversTheWholeTagBlockAndASampleOfEveryOtherPlane"/> guards the domain

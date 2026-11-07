@@ -93,7 +93,7 @@ internal sealed record ProbeOptions(
         var repoRoot = FindRepoRoot();
         var pkg = Path.Combine(repoRoot, "scratch-yara", "pkg");
         var synthetic = Path.Combine(repoRoot, "scratch-yara", "synthetic");
-        var tsv = Path.Combine(repoRoot, "docs", "agent", "measurements", "yara-inprocess-timing-2026-08-21.tsv");
+        var tsv = Path.Combine(repoRoot, "data", "results", "yara-inprocess-timing-2026-08-21.tsv");
         var watchdog = TimeSpan.FromSeconds(120);
         var maxRules = int.MaxValue;
         var append = false;

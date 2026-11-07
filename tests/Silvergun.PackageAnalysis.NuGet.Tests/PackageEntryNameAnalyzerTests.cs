@@ -643,7 +643,7 @@ public sealed class PackageEntryNameAnalyzerTests
         //
         // This literal used to end in a RAW U+200B, defended by a comment asserting that zero-width was outside
         // the escaper's alphabet and "survives verbatim". That was the ADR 0031 decision 4 defect measured in
-        // docs/agent/measurements/packaging-anomalies-top100-2026-08-22.md, not a property worth pinning: an
+        // data/results/packaging-anomalies-top100-2026-08-22.md, not a property worth pinning: an
         // InvisibleCharacter anomaly whose EntryName still contains the invisible character reports nothing a
         // reader can see. A raw U+200B here is therefore a REGRESSION, never a literal to re-baseline.
         const string expectedEntryName = @"../content/pay\nload\u202e\u200b.dll ";

@@ -99,7 +99,7 @@ internal static class ReportTheme
     /// <summary>
     /// The <see cref="IndicatorCategory"/> values rendered as full detail rows in the human report — the seven
     /// categories measured at 0% (or, for <see cref="IndicatorCategory.PublicIpLiteral"/>, still judged
-    /// discriminating) benign-corpus share in <c>docs/agent/measurements/indicator-prevalence-2026-08-03.md</c>.
+    /// discriminating) benign-corpus share in <c>data/results/indicator-prevalence-2026-08-03.md</c>.
     /// Every other category (<see cref="IndicatorCategory.ReflectionTypeName"/>, <see cref="IndicatorCategory.GenericUrl"/>,
     /// <see cref="IndicatorCategory.PrivateIpLiteral"/>) is counts-only in the terminal — <c>--json</c> always
     /// carries every category in full regardless of this list (indicator-cli-integration task).

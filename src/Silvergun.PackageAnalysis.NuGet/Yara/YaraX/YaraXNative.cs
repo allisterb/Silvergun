@@ -44,7 +44,7 @@ internal unsafe struct YaraXBuffer
 /// missing or unloadable DLL is a returned failure ("engine unavailable"), never a crash at first use. Every managed
 /// entry point of the binding calls <see cref="EnsureLoaded"/> before its first native call.</para>
 ///
-/// <para><b>Process-fatal hazards</b> (C API spike, <c>docs/agent/measurements/yara-x-capi-spike-2026-10-21.md</c>): a
+/// <para><b>Process-fatal hazards</b> (C API spike, <c>data/results/yara-x-capi-spike-2026-10-21.md</c>): a
 /// Rust panic aborts the host (0xC0000409) and no managed handler runs, which is why this binding only ever runs inside
 /// the <c>__worker yara</c> child process. The only panic observed came from one scanner used by two threads at once;
 /// <see cref="YaraXScanner"/> refuses use from any thread but its creator's.</para>

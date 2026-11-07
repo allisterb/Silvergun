@@ -237,7 +237,7 @@ public static class CorpusReport
             $"| Methods analysed | {counted.Sum(r => r.MethodsAnalyzed)} |",
             $"| Methods skipped | {counted.Sum(r => r.MethodsSkipped)} |",
             $"| Total findings | {counted.Sum(r => r.Findings.Count())} |",
-            $"| Cache root (outside the repo; no `.nupkg` is ever written into it) | `{cacheRoot}` |",
+            $"| Cache root (outside the repo; no `.nupkg` is ever written into it) | `{Program.DisplayPath(cacheRoot)}` |",
             $"| Classified findings | `{tsvName}` |",
             string.Empty,
             "## Method",
@@ -323,7 +323,7 @@ public static class CorpusReport
             ]);
             lines.AddRange(incomplete.Select(r =>
                 $"| {r.Entry.Id} | {r.Entry.Version} | {r.Status} | {(r.Counted ? "yes" : "**no**")} | " +
-                $"{r.Note ?? "-"} |"));
+                $"{(r.Note is { } note ? Program.Redact(note) : "-")} |"));
         }
 
         Write(path, lines);
@@ -366,7 +366,7 @@ public static class CorpusReport
             $"| Methods skipped | {counted.Sum(r => r.MethodsSkipped)} |",
             $"| Total indicator findings (raw occurrences) | {counted.Sum(r => r.Indicators.Sum(f => f.Occurrences))} |",
             $"| Distinct-indicator cap (10,000/assembly) hit anywhere | {(truncatedPackages.Length == 0 ? "no" : $"**yes - {truncatedPackages.Length} package(s), see Truncation below**")} |",
-            $"| Cache root (outside the repo; no `.nupkg` is ever written into it) | `{cacheRoot}` |",
+            $"| Cache root (outside the repo; no `.nupkg` is ever written into it) | `{Program.DisplayPath(cacheRoot)}` |",
             $"| Classified indicator findings | `{tsvName}` |",
             string.Empty,
             "## Method",
@@ -525,7 +525,7 @@ public static class CorpusReport
             ]);
             lines.AddRange(incomplete.Select(r =>
                 $"| {r.Entry.Id} | {r.Entry.Version} | {r.Status} | {(r.Counted ? "yes" : "**no**")} | " +
-                $"{r.Note ?? "-"} |"));
+                $"{(r.Note is { } note ? Program.Redact(note) : "-")} |"));
         }
 
         Write(path, lines);

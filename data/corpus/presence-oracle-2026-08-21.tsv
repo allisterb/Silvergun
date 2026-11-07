@@ -1,5 +1,5 @@
 # Presence regression oracle for reachability R2 (docs/agent/tasks/reachability-r2.md, "Populations").
-# Source: docs/agent/measurements/benign-corpus-top100-2026-08-21.md - this repository's own benign-corpus
+# Source: data/results/benign-corpus-top100-2026-08-21.md - this repository's own benign-corpus
 # harness output of 2026-08-21 (tables "Capability density", "Per package", "Findings by capability, per
 # package" and the parameter table). Derived 2026-11-05 by a one-off script that cross-checked the tables
 # against each other; every number is copied unchanged. Project-internal data, no third-party licence.

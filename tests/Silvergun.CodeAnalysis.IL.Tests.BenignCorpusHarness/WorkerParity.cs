@@ -161,9 +161,9 @@ public static class WorkerParity
                 if (!agrees)
                     mismatches.Add($"{Clean(name)} {Clean(folder)}: in-process {Clean(inOutcome)}, worker {Clean(workerOutcome)}, reports-equal {equal}" +
                         (differs.Count > 0 ? $", differs in {string.Join(",", differs)}" : string.Empty) +
-                        (b?.Reason is { } reason ? $" ({Clean(reason)})" : string.Empty));
+                        (b?.Reason is { } reason ? $" ({Clean(Program.Redact(reason))})" : string.Empty));
                 folderRows.Add(Row(name, folder, inOutcome, workerOutcome, equal, differs.Count == 0 ? "" : string.Join(",", differs),
-                    Num(b?.Nodes), Num(b?.Edges), Num(a?.Nodes), Num(a?.Edges), b?.SameAs ?? "", b?.Reason ?? ""));
+                    Num(b?.Nodes), Num(b?.Edges), Num(a?.Nodes), Num(a?.Edges), b?.SameAs ?? "", b?.Reason is { } why ? Program.Redact(why) : ""));
             }
 
             packageRows.Add(Row(name, inProcess.Status, Num(inProcess.WallMs), Num(inProcess.Payload?.BuildMs), worker.Status,
@@ -268,7 +268,7 @@ public static class WorkerParity
         text.AppendLine("through the real `Silvergun.CLI __worker graph` beside the harness, default options.");
         text.AppendLine();
         text.AppendLine($"- manifest: `{Path.GetFileName(manifest.Path)}`, hash `{manifest.Hash}`, {manifest.Entries.Count} entr(ies)");
-        text.AppendLine($"- cache: `{cacheRoot}` (read only; nothing downloaded)");
+        text.AppendLine($"- cache: `{Program.DisplayPath(cacheRoot)}` (read only; nothing downloaded)");
         text.AppendLine($"- packages measured: {totals.Packages}; not cached: {totals.NotCached}");
         text.AppendLine($"- folders: {totals.Folders}; agree in outcome, report, assemblies, load failures (paths and reasons), nodes and edges: {totals.Agreeing}; reports byte-equal: {totals.ReportsEqual}; shared (SameAs): {totals.SharedFolders}");
         text.AppendLine($"- mismatches: {mismatches.Count}");

@@ -4,11 +4,11 @@ using System;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 /// <summary>
 /// Resolved run configuration. Every default is chosen so that a bare <c>run</c> is a small, bounded, repeatable
-/// measurement: 25 pinned packages, a cache outside the repository, and output into
-/// <c>docs/agent/measurements</c>.
+/// measurement: 25 pinned packages, a cache outside the repository, and output into <c>data/results</c>.
 /// </summary>
 public sealed record HarnessOptions(
     string Manifest,
@@ -277,7 +277,7 @@ public static class Program
     /// <summary>
     /// The <c>--combine</c> options, or null when a required one is missing. <c>--cbuild-manifest</c> defaults to
     /// <see cref="CbuildManifestFileName"/> beside the harness, <c>--oracle</c> as for <c>--reachability</c>
-    /// (<see cref="OracleOf"/>), <c>--out</c> to <c>docs/agent/measurements</c>, <c>--date</c> to today (UTC).
+    /// (<see cref="OracleOf"/>), <c>--out</c> to <c>data/results</c>, <c>--date</c> to today (UTC).
     /// </summary>
     public static CombineOptions? ParseCombine(string[] args)
     {
@@ -295,7 +295,7 @@ public static class Program
             Path.GetFullPath(Value("--cbuild-manifest") ?? Path.Combine(AppContext.BaseDirectory, CbuildManifestFileName)),
             Path.GetFullPath(cbuildResults), Path.GetFullPath(cbuildRepeat),
             OracleOf(args),
-            Path.GetFullPath(Value("--out") ?? Path.Combine(RepositoryRoot(), "docs", "agent", "measurements")),
+            Path.GetFullPath(Value("--out") ?? DefaultOutputDirectory()),
             DateOf(args));
     }
 
@@ -355,9 +355,12 @@ public static class Program
             Path.GetFullPath(Value("--manifest", Path.Combine(AppContext.BaseDirectory, ManifestFileName))),
             take,
             Path.GetFullPath(Value("--cache", DefaultCacheRoot())),
-            Path.GetFullPath(Value("--out", Path.Combine(RepositoryRoot(), "docs", "agent", "measurements"))),
+            Path.GetFullPath(Value("--out", DefaultOutputDirectory())),
             TimeSpan.FromSeconds(timeout));
     }
+
+    // Reports are tracked results: <repo>/data/results.
+    private static string DefaultOutputDirectory() => Path.Combine(RepositoryRoot(), "data", "results");
 
     // Outside the repository by construction: the machine's local app-data, never a path under the checkout.
     private static string DefaultCacheRoot() =>
@@ -390,6 +393,50 @@ public static class Program
 
     private static bool IsInsideRepository(string path) =>
         path.StartsWith(RepositoryRoot() + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// <paramref name="path"/> as a committed report shows it: under the local app-data or the user-profile folder it
+    /// starts <c>%LOCALAPPDATA%</c> or <c>%USERPROFILE%</c> instead (<c>~</c> for the home folder off Windows), so no
+    /// report names the machine's account. Only the spelling the OS reports is matched, not <c>\\?\</c> or 8.3 forms.
+    /// </summary>
+    public static string DisplayPath(string path) => DisplayPath(path, ProfileRoots());
+
+    /// <summary>
+    /// <paramref name="text"/> (an exception message, a child's stderr line) with every profile root in it replaced as
+    /// <see cref="DisplayPath(string)"/> does. Apply before any escaping that rewrites separators.
+    /// </summary>
+    public static string Redact(string text) => Redact(text, ProfileRoots());
+
+    /// <summary>
+    /// <paramref name="text"/> with every occurrence of each root (case-insensitive, not followed by a name character)
+    /// replaced by its name, roots in order; empty and bare drive or <c>/</c> roots are ignored.
+    /// </summary>
+    public static string Redact(string text, IReadOnlyList<(string Root, string Name)> roots) =>
+        roots
+            .Select(r => (Root: Path.TrimEndingDirectorySeparator(r.Root), r.Name))
+            .Where(r => r.Root.Length > 0 && Path.GetPathRoot(r.Root)?.Length != r.Root.Length)
+            .Aggregate(text, (t, r) => Regex.Replace(t, Regex.Escape(r.Root) + @"(?![\w-])", r.Name.Replace("$", "$$"),
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant));
+
+    private static IReadOnlyList<(string Root, string Name)> ProfileRoots() =>
+        OperatingSystem.IsWindows()
+            ?
+            [
+                (Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.DoNotVerify), "%LOCALAPPDATA%"),
+                (Environment.GetFolderPath(Environment.SpecialFolder.UserProfile, Environment.SpecialFolderOption.DoNotVerify), "%USERPROFILE%"),
+            ]
+            : [(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile, Environment.SpecialFolderOption.DoNotVerify), "~")];
+
+    /// <summary><paramref name="path"/> with the first matching root (case-insensitive, whole segments) replaced by its name.</summary>
+    public static string DisplayPath(string path, IReadOnlyList<(string Root, string Name)> roots) =>
+        roots
+            .Select(r => (Root: Path.TrimEndingDirectorySeparator(r.Root), r.Name))
+            .Where(r => r.Root.Length > 0)
+            .Where(r => path.Equals(r.Root, StringComparison.OrdinalIgnoreCase)
+                || (path.StartsWith(r.Root, StringComparison.OrdinalIgnoreCase) && path.Length > r.Root.Length
+                    && (path[r.Root.Length] == Path.DirectorySeparatorChar || path[r.Root.Length] == Path.AltDirectorySeparatorChar)))
+            .Select(r => r.Name + path[r.Root.Length..])
+            .FirstOrDefault() ?? path;
     #endregion
 
     #region Fields
@@ -431,7 +478,7 @@ public static class Program
           --take      keep the first n manifest entries; 0 keeps all. Default 25.
           --cache     .nupkg/extraction cache. Default %LOCALAPPDATA%/Silvergun/benign-corpus.
                       MUST be outside the repository - a .nupkg is never committed.
-          --out       report directory. Default <repo>/docs/agent/measurements.
+          --out       report directory. Default <repo>/data/results.
           --timeout   per-child-process timeout in seconds. Default 300.
 
           <harness> --reachability --results <dir> [--max-children <n>] [--date <yyyy-MM-dd>] [--oracle <path>] [common options]

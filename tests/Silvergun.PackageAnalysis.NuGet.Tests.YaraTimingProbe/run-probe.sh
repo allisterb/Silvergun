@@ -80,4 +80,4 @@ run "E7 against the trigger rule file (expect exit 2 on ScanMemory)" \
     --append --experiments E1,E7 --max-rules 1 --rule-offset $((hi - 1))
 
 echo
-echo "TSV: $ROOT/docs/agent/measurements/yara-inprocess-timing-2026-08-21.tsv"
+echo "TSV: $ROOT/data/results/yara-inprocess-timing-2026-08-21.tsv"

@@ -49,7 +49,7 @@ internal static class YaraPathSafety
     /// Iteration is by <b>rune</b>, not by <c>char</c>: the Unicode Tag block (U+E0000–U+E007F) is astral, so a
     /// char-wise loop only ever sees its surrogate halves, which are ≥ 0xD800 and match no predicate — the block
     /// was structurally unreachable, and an escaper property-tested exhaustively "over the BMP" could not have
-    /// caught it (measured in <c>docs/agent/measurements/packaging-anomalies-top100-2026-08-22.md</c>). Escapes are
+    /// caught it (measured in <c>data/results/packaging-anomalies-top100-2026-08-22.md</c>). Escapes are
     /// <c>\n</c>/<c>\r</c>/<c>\t</c>, then <c>\xNN</c> below U+0100, <c>\uXXXX</c> through the BMP, and
     /// <c>\U000E0041</c> beyond it. A lone surrogate is not a code point at all; it decodes to U+FFFD and is
     /// emitted as such, so no ill-formed UTF-16 reaches a log line or a JSON writer.
