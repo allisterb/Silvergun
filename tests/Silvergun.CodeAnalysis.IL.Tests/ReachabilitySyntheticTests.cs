@@ -1594,6 +1594,84 @@ public sealed class ReachabilitySyntheticTests
         Assert.Equal(Reachability.BoundName(prefix + "A"), a);   // and the same name bounds the same way every time
     }
 
+    // BoundNameTo(name, maxChars) (reachability R3, S0): the same cut at a caller's limit.
+    [Theory]
+    [InlineData(1, 0)]
+    [InlineData(1, 1)]
+    [InlineData(256, 255)]
+    [InlineData(256, 256)]
+    public void BoundNameTo_ANameOfAtMostMaxChars_IsUnchanged(int maxChars, int length)
+    {
+        var name = new string('n', length);
+
+        Assert.Equal(name, Reachability.BoundNameTo(name, maxChars));
+    }
+
+    [Theory]
+    [InlineData(256, 257)]
+    [InlineData(256, 1000)]
+    [InlineData(1, 2)]
+    public void BoundNameTo_OverTheLimit_KeepsTheFirstMaxChars_ThenTheCutCountAndHash(int maxChars, int length)
+    {
+        var name = string.Concat(Enumerable.Range(0, length).Select(i => (char)('a' + i % 26)));
+
+        Assert.Equal($"{name[..maxChars]}…[+{length - maxChars} chars, sha256:{Hash8(name)}]", Reachability.BoundNameTo(name, maxChars));
+    }
+
+    [Fact]
+    public void BoundNameTo_ASurrogatePairStraddlingTheLimit_IsNotSplit()
+    {
+        var name = new string('a', 255) + "\U0001F600" + new string('b', 4);
+        Assert.True(char.IsHighSurrogate(name[255]) && char.IsLowSurrogate(name[256]));   // the premise
+
+        var bounded = Reachability.BoundNameTo(name, 256);
+
+        Assert.Equal(new string('a', 255) + $"…[+6 chars, sha256:{Hash8(name)}]", bounded);
+        AssertWellFormed(bounded);
+    }
+
+    // At a limit of one, a leading pair is cut whole: nothing of the name is kept, only the suffix.
+    [Fact]
+    public void BoundNameTo_OfOne_ALeadingSurrogatePair_IsCutWhole()
+    {
+        var name = "\U0001F600x";
+
+        var bounded = Reachability.BoundNameTo(name, 1);
+
+        Assert.Equal($"…[+3 chars, sha256:{Hash8(name)}]", bounded);
+        AssertWellFormed(bounded);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(int.MinValue)]
+    public void BoundNameTo_AMaxBelowOne_ThrowsArgumentOutOfRange(int maxChars)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => Reachability.BoundNameTo(string.Empty, maxChars));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Reachability.BoundNameTo(new string('a', 2000), maxChars));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1024)]
+    [InlineData(1025)]
+    [InlineData(3000)]
+    public void BoundName_EqualsBoundNameToAt1024(int length)
+    {
+        var name = new string('q', length);
+
+        Assert.Equal(Reachability.BoundNameTo(name, 1024), Reachability.BoundName(name));
+    }
+
+    [Fact]
+    public void BoundName_EqualsBoundNameToAt1024_ForAPairStraddlingTheLimit()
+    {
+        var name = new string('a', 1023) + "\U0001F600" + new string('b', 10);
+
+        Assert.Equal(Reachability.BoundNameTo(name, 1024), Reachability.BoundName(name));
+    }
+
     // In a report, every name field is bounded - hop node ids and assemblies, path roots, profile example roots, ignored
     // edge keys, and a gap reason's assembly - and NamesCut counts each distinct long name once, however often it is
     // reported: longA (two rows, a profile, its hops), longB (sharing longA's first 1,024 chars), the assembly (every own

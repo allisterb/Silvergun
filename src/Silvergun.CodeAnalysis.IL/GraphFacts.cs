@@ -113,6 +113,12 @@ public sealed record GraphFacts(IReadOnlyList<OwnMethodFacts> Methods, IReadOnly
     #endregion
 
     #region Fields
+    /// <summary>The <see cref="RootClass.LoadTime"/> gap reason of an assembly with a module initializer (<c>&lt;Module&gt;..cctor</c>).</summary>
+    public const string ModuleInitializerGap = "<Module>..cctor runs at load and is invisible to the model";
+
+    /// <summary>The <see cref="RootClass.LoadTime"/> gap reason of an assembly whose module metadata could not be read.</summary>
+    public const string ModuleUnreadableGap = "module metadata unreadable: whether a module initializer runs at load is unknown";
+
     private static readonly HashSet<string> delegateRuntimeMethods = new(StringComparer.Ordinal) { ".ctor", "Invoke", "BeginInvoke", "EndInvoke" };
 
     private const RootClass AllClasses =
@@ -252,9 +258,9 @@ public sealed record GraphFacts(IReadOnlyList<OwnMethodFacts> Methods, IReadOnly
 
         private static IEnumerable<RootGap> ModuleGaps((string Assembly, ModuleMetadata Module) module) =>
             !module.Module.IsReadable
-                ? [new RootGap(module.Assembly, RootClass.LoadTime, "module metadata unreadable: whether a module initializer runs at load is unknown")]
+                ? [new RootGap(module.Assembly, RootClass.LoadTime, ModuleUnreadableGap)]
                 : module.Module.HasModuleInitializer
-                    ? [new RootGap(module.Assembly, RootClass.LoadTime, "<Module>..cctor runs at load and is invisible to the model")]
+                    ? [new RootGap(module.Assembly, RootClass.LoadTime, ModuleInitializerGap)]
                     : [];
 
         private static IEnumerable<string> Attributes(MethodDefinition method) =>

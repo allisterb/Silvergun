@@ -54,11 +54,19 @@ public static class Reachability
     /// code units, so names differing only in a lone surrogate differ too. Eight hex digits tell benign names apart; a
     /// crafted collision costs about 2^16 tries, so the suffix is no identity for hostile ones.
     /// </summary>
-    public static string BoundName(string name)
+    public static string BoundName(string name) => BoundNameTo(name, MaxNameChars);
+
+    /// <summary>
+    /// <see cref="BoundName"/> at <paramref name="maxChars"/> instead of <see cref="MaxNameChars"/>. Throws
+    /// <see cref="ArgumentOutOfRangeException"/> when <paramref name="maxChars"/> is below 1. Not an overload of
+    /// <see cref="BoundName"/>, so that stays usable as a <c>Select</c> method group (S0 review W3).
+    /// </summary>
+    public static string BoundNameTo(string name, int maxChars)
     {
-        if (name.Length <= MaxNameChars)
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxChars, 1);
+        if (name.Length <= maxChars)
             return name;
-        var keep = char.IsHighSurrogate(name[MaxNameChars - 1]) ? MaxNameChars - 1 : MaxNameChars;
+        var keep = char.IsHighSurrogate(name[maxChars - 1]) ? maxChars - 1 : maxChars;
         var hash = Convert.ToHexStringLower(SHA256.HashData(MemoryMarshal.AsBytes(name.AsSpan())))[..8];
         return $"{name[..keep]}…[+{name.Length - keep} chars, sha256:{hash}]";
     }

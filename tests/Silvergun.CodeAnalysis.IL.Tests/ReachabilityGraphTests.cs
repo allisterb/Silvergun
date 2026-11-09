@@ -205,6 +205,7 @@ public sealed class ReachabilityGraphTests : IClassFixture<RootFixtureModel>
         var report = Reachability.Analyze(fixture.Graph);
 
         var gap = Assert.Single(fixture.Graph.Facts.Gaps);
+        Assert.Equal(GraphFacts.ModuleInitializerGap, gap.Reason);   // the text ReachabilitySummary's LoadTime note matches by suffix
         var status = Status(report, RootClass.LoadTime);
         Assert.Equal(RootClassVerdict.Unknown, status.Verdict);
         Assert.Contains($"{gap.Assembly}: {gap.Reason}", status.Reasons);
