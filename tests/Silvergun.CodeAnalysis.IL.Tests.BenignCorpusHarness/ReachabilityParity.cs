@@ -18,8 +18,9 @@ using System.Text;
 /// whose facts say NativeImport.</description></item>
 /// </list>
 /// A scanner-only triple is <c>NameShadowed</c> only when the graph has a call-site edge from that caller to an own node
-/// keyed as the callee (S3 review N1). Any other difference is unexplained. Duplicated here rather than shared because
-/// the test is an xUnit class this console harness does not reference; <c>ReachabilityHarnessTests</c> pins the copy.
+/// keyed as the callee (S3 review N1), the own node's key reduced by <see cref="ScannerKey"/>. Any other difference is
+/// unexplained. Duplicated here rather than shared because the test is an xUnit class this console harness does not
+/// reference; <c>ReachabilityHarnessTests</c> pins the copy.
 /// </summary>
 public static class ReachabilityParity
 {
@@ -69,12 +70,15 @@ public static class ReachabilityParity
 
     private static string Render(Triple t) => $"{t.Caller} -[{t.Capability}]-> {t.Callee}";
 
+    // The callee key goes through ScannerKey, as the scanner's callee does: an explicit generic-interface
+    // implementation's name keeps its argument list in the graph's key (IEnumerable<T>.GetEnumerator) but loses it in
+    // the scanner's (C-build S4, ReportGenerator tools/net47).
     private static HashSet<(string Caller, string Callee)> OwnCallKeys(MethodGraph graph) =>
         graph.Edges
             .Where(e => callSiteKinds.Contains(e.Kind))
             .Select(e => (From: graph.Node(e.From), To: graph.Node(e.To)))
             .Where(e => e.From is { Kind: not MethodNodeKind.External } && e.To is { Kind: not MethodNodeKind.External })
-            .Select(e => (e.From!.ClassificationKey, e.To!.ClassificationKey))
+            .Select(e => (e.From!.ClassificationKey, ScannerKey(e.To!.ClassificationKey)))
             .ToHashSet();
 
     private static HashSet<Triple> ScannerTriples(IEnumerable<ApiCallFinding> findings) =>

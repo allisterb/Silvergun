@@ -763,6 +763,61 @@ public sealed class ReachabilityHarnessTests
         Assert.Equal("DIFFERS", parity.Verdict);
     }
 
+    // C-build S4 (ReportGenerator 5.5.12 tools/net47, bundled Microsoft.CSharp.dll): the own callee's graph key keeps an
+    // explicit generic-interface implementation's argument list, the scanner's drops it; the copy reduces the own callee's
+    // key by ScannerKey, as PresenceParityTests does, so the triple is NameShadowed and the folder NAMED.
+    [Fact]
+    public void Parity_NameShadowed_MatchesAnExplicitGenericInterfaceCallee_ByItsScannerKey()
+    {
+        const string iterator = "Microsoft.CSharp.RuntimeBinder.Semantics.AggregateType.<get_TypeHierarchy>d__17";
+        const string callerMethod = "System.Collections.IEnumerable.GetEnumerator";
+        const string calleeKey = iterator + ".System.Collections.Generic.IEnumerable<Microsoft.CSharp.RuntimeBinder.Semantics.AggregateType>.GetEnumerator";
+        var graph = MethodGraph.FromParts(
+            [
+                new MethodNode($"{iterator}.{callerMethod}()", $"{iterator}.{callerMethod}", MethodNodeKind.OwnWithBody),
+                new MethodNode(calleeKey + "()", calleeKey, MethodNodeKind.OwnWithBody),
+            ],
+            [new MethodEdge($"{iterator}.{callerMethod}()", calleeKey + "()", MethodEdgeKind.Call, 1)],
+            [], completeCoverage, GraphFacts.None);
+        var findings = new[] { new ApiCallFinding(Capability.DynamicCodeLoading, ApiCallKind.Call, iterator, callerMethod, calleeKey) };
+
+        var parity = ReachabilityParity.Compare(findings, graph);
+
+        Assert.Equal(1, parity.NameShadowed.Count);
+        Assert.Equal([$"{iterator}.{callerMethod} -[DynamicCodeLoading]-> {iterator}.System.Collections.Generic.IEnumerable.GetEnumerator"], parity.NameShadowed.Items);
+        Assert.Equal(0, parity.ScannerOnly.Count);
+        Assert.Equal(0, parity.GraphOnly.Count);
+        Assert.Equal("NAMED", parity.Verdict);
+    }
+
+    // PresenceParityTests' caller rule: only the callee is reduced. The scanner's caller key is ScannerKey(CallerType).CallerMethod,
+    // the method name verbatim, as the graph keys it: a caller that is itself an explicit generic-interface implementation
+    // matches unreduced, and a finding whose caller method had that argument list dropped is explained by nothing.
+    [Fact]
+    public void Parity_NameShadowed_MatchesTheCallerKeyVerbatim()
+    {
+        const string callerKey = "App.Items.System.Collections.Generic.IEnumerable<App.Item>.GetEnumerator";
+        const string shadowKey = "System.Environment.GetEnvironmentVariable";
+        var graph = MethodGraph.FromParts(
+            [new MethodNode(callerKey + "()", callerKey, MethodNodeKind.OwnWithBody), new MethodNode(shadowKey + "(System.String)", shadowKey, MethodNodeKind.OwnWithBody)],
+            [new MethodEdge(callerKey + "()", shadowKey + "(System.String)", MethodEdgeKind.Call, 1)],
+            [], completeCoverage, GraphFacts.None);
+        var findings = new[]
+        {
+            new ApiCallFinding(Capability.EnvironmentProbe, ApiCallKind.Call, "App.Items", "System.Collections.Generic.IEnumerable<App.Item>.GetEnumerator", shadowKey),
+            new ApiCallFinding(Capability.EnvironmentProbe, ApiCallKind.Call, "App.Items", "System.Collections.Generic.IEnumerable.GetEnumerator", shadowKey),
+        };
+
+        var parity = ReachabilityParity.Compare(findings, graph);
+
+        Assert.Equal(1, parity.NameShadowed.Count);
+        Assert.Equal([$"{callerKey} -[EnvironmentProbe]-> {shadowKey}"], parity.NameShadowed.Items);
+        Assert.Equal(1, parity.ScannerOnly.Count);
+        Assert.Equal([$"App.Items.System.Collections.Generic.IEnumerable.GetEnumerator -[EnvironmentProbe]-> {shadowKey}"], parity.ScannerOnly.Items);
+        Assert.Equal(0, parity.GraphOnly.Count);
+        Assert.Equal("DIFFERS", parity.Verdict);
+    }
+
     // The keying matches the scanner's: generic argument lists dropped, NativeImport keyed as one callee, both sides.
     [Fact]
     public void Parity_KeysGenericsAndNativeImportsAsThePinnedRuleDoes()
@@ -807,6 +862,7 @@ public sealed class ReachabilityHarnessTests
     [InlineData("System.Linq.Expressions.Expression<System.Func<System.String>>.Compile", "System.Linq.Expressions.Expression.Compile")]
     [InlineData("A.<<Run>b__0_0>d.MoveNext", "A.<<Run>b__0_0>d.MoveNext")]
     [InlineData("A.Box<System.Int32>.<Wraps>b__0", "A.Box.<Wraps>b__0")]
+    [InlineData("A.<get_X>d__17.System.Collections.Generic.IEnumerable<A.T>.GetEnumerator", "A.<get_X>d__17.System.Collections.Generic.IEnumerable.GetEnumerator")]
     public void ScannerKey_IsThePinnedProjection(string rendered, string expected)
     {
         Assert.Equal(expected, ReachabilityParity.ScannerKey(rendered));

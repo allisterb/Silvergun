@@ -143,6 +143,56 @@ public sealed class PresenceParityTests : IClassFixture<MechanismFixtureFixture>
         Assert.Empty(comparison.GraphOnly);
     }
 
+    // C-build S4 (ReportGenerator 5.5.12 tools/net47, bundled Microsoft.CSharp.dll): the graph keys an explicit
+    // generic-interface implementation with its argument list (IEnumerable<T>.GetEnumerator), the scanner's callee key
+    // drops it. The own callee's key is reduced by ScannerKey before the lookup, so the call is NameShadowed, not unexplained.
+    [Fact]
+    public void NameShadowed_MatchesAnExplicitGenericInterfaceCallee_ByItsScannerKey()
+    {
+        const string iterator = "Microsoft.CSharp.RuntimeBinder.Semantics.AggregateType.<get_TypeHierarchy>d__17";
+        const string callerKey = iterator + ".System.Collections.IEnumerable.GetEnumerator";
+        const string calleeKey = iterator + ".System.Collections.Generic.IEnumerable<Microsoft.CSharp.RuntimeBinder.Semantics.AggregateType>.GetEnumerator";
+        const string scannerCallee = iterator + ".System.Collections.Generic.IEnumerable.GetEnumerator";
+        var graph = MethodGraph.FromParts(
+            [new MethodNode(callerKey + "()", callerKey, MethodNodeKind.OwnWithBody), new MethodNode(calleeKey + "()", calleeKey, MethodNodeKind.OwnWithBody)],
+            [new MethodEdge(callerKey + "()", calleeKey + "()", MethodEdgeKind.Call, 1)],
+            [], complete, GraphFacts.None);
+        HashSet<Triple> scanner = [new(callerKey, Capability.DynamicCodeLoading, scannerCallee)];
+
+        var comparison = Compare(scanner, graph);
+
+        Assert.Equal(scannerCallee, ScannerKey(calleeKey));
+        Assert.Equal([new Triple(callerKey, Capability.DynamicCodeLoading, scannerCallee)], comparison.Gaps[NameShadowed]);
+        Assert.Empty(comparison.ScannerOnly);
+        Assert.Empty(comparison.GraphOnly);
+    }
+
+    // Only the callee is reduced. The scanner's caller key is ScannerKey(CallerType).CallerMethod, the method name verbatim,
+    // as the graph keys it: a caller that is itself an explicit generic-interface implementation matches unreduced, and a
+    // triple whose caller had that argument list dropped is explained by nothing.
+    [Fact]
+    public void NameShadowed_MatchesTheCallerKeyVerbatim()
+    {
+        const string callerKey = "App.Items.System.Collections.Generic.IEnumerable<App.Item>.GetEnumerator";
+        const string reducedCaller = "App.Items.System.Collections.Generic.IEnumerable.GetEnumerator";
+        const string shadowKey = "System.Environment.GetEnvironmentVariable";
+        var graph = MethodGraph.FromParts(
+            [new MethodNode(callerKey + "()", callerKey, MethodNodeKind.OwnWithBody), new MethodNode(shadowKey + "(System.String)", shadowKey, MethodNodeKind.OwnWithBody)],
+            [new MethodEdge(callerKey + "()", shadowKey + "(System.String)", MethodEdgeKind.Call, 1)],
+            [], complete, GraphFacts.None);
+        HashSet<Triple> scanner =
+        [
+            new(callerKey, Capability.EnvironmentProbe, shadowKey),
+            new(reducedCaller, Capability.EnvironmentProbe, shadowKey),
+        ];
+
+        var comparison = Compare(scanner, graph);
+
+        Assert.Equal([new Triple(callerKey, Capability.EnvironmentProbe, shadowKey)], comparison.Gaps[NameShadowed]);
+        Assert.Equal([new Triple(reducedCaller, Capability.EnvironmentProbe, shadowKey)], comparison.ScannerOnly);
+        Assert.Empty(comparison.GraphOnly);
+    }
+
     // ---------------------------------------------------------------------------------------------------
     // The keying, pinned
     // ---------------------------------------------------------------------------------------------------
@@ -155,6 +205,7 @@ public sealed class PresenceParityTests : IClassFixture<MechanismFixtureFixture>
     [InlineData("MechanismFixture.Lambda.LinqCase.<>c.<CountsSetVariables>b__0_0", "MechanismFixture.Lambda.LinqCase.<>c.<CountsSetVariables>b__0_0")]
     [InlineData("A.<<Run>b__0_0>d.MoveNext", "A.<<Run>b__0_0>d.MoveNext")]
     [InlineData("A.Box<System.Int32>.<Wraps>b__0", "A.Box.<Wraps>b__0")]
+    [InlineData("A.<get_X>d__17.System.Collections.Generic.IEnumerable<A.T>.GetEnumerator", "A.<get_X>d__17.System.Collections.Generic.IEnumerable.GetEnumerator")]
     public void ScannerKey_DropsGenericArgumentLists_ButNotCompilerGeneratedNames(string rendered, string expected)
     {
         Assert.Equal(expected, ScannerKey(rendered));
@@ -191,13 +242,15 @@ public sealed class PresenceParityTests : IClassFixture<MechanismFixtureFixture>
             new Dictionary<string, IReadOnlyList<Triple>>(StringComparer.Ordinal) { [NameShadowed] = shadowed });
     }
 
-    // (caller key, callee key) of every call-site edge from an own node to an own node.
+    // (caller key, callee key) of every call-site edge from an own node to an own node. The callee key goes through
+    // ScannerKey, as the scanner's callee does: an explicit generic-interface implementation's name keeps its argument
+    // list in the graph's key (IEnumerable<T>.GetEnumerator) but loses it in the scanner's.
     private static HashSet<(string Caller, string Callee)> OwnCallKeys(MethodGraph graph) =>
         graph.Edges
             .Where(e => callSiteKinds.Contains(e.Kind))
             .Select(e => (From: graph.Node(e.From), To: graph.Node(e.To)))
             .Where(e => e.From is { Kind: not MethodNodeKind.External } && e.To is { Kind: not MethodNodeKind.External })
-            .Select(e => (e.From!.ClassificationKey, e.To!.ClassificationKey))
+            .Select(e => (e.From!.ClassificationKey, ScannerKey(e.To!.ClassificationKey)))
             .ToHashSet();
 
     private static HashSet<Triple> ScannerTriples(IEnumerable<ApiCallFinding> findings) =>

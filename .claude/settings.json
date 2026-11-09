@@ -1,5 +1,4 @@
 {
-  "agent": "architect",
   "permissions": {
 	"allow": [
 		"Bash(powershell -NoProfile -ExecutionPolicy Bypass -File:*)",
