@@ -79,6 +79,10 @@ internal sealed partial class CciModuleSource
             throw new SsaAdapterException("An unreadable type reference");
         if (Primitive(type.TypeCode) is { } primitive)
         {
+            // Only the host framework defines primitives: a folder module's own definition is never one, whatever CCI typed
+            // it as (a weakly named folder "System.Private.CoreLib" with no core of its own is taken by CCI as the core).
+            if (isFolder && type is INamedTypeDefinition own)
+                return Definition(own, depth + 1);
             // CCI types a TypeRef as a primitive when it is scoped to the assembly it took as the core library (its own
             // guess); it is one only if that row names a framework assembly. Otherwise it binds by name like any other.
             if (type is INamedTypeReference reference and not INamedTypeDefinition
@@ -88,9 +92,15 @@ internal sealed partial class CciModuleSource
                 return Definition(reference, depth + 1);
             return primitive;
         }
-        return type is INamedTypeReference named
-            ? Definition(named, depth + 1)
-            : throw new SsaAdapterException($"An unsupported kind of type reference ({type.GetType().Name})");
+        return type switch
+        {
+            // A row-less platform reference may be an element type (ByName); everything else is its definition.
+            INamedTypeReference named and not INamedTypeDefinition
+                when named is not IMetadataObjectWithToken { TokenValue: var t } || MetadataFacts.TableOf(t) != (int)TableIndex.TypeRef
+                => ByName(named, depth + 1),
+            INamedTypeReference named => Definition(named, depth + 1),
+            _ => throw new SsaAdapterException($"An unsupported kind of type reference ({type.GetType().Name})"),
+        };
     }
 
     /// <summary>A signature type: leading modifiers, an optional by-ref, and the element's own modifiers inside it.</summary>
@@ -142,7 +152,7 @@ internal sealed partial class CciModuleSource
         if (named is INamedTypeDefinition definition)
             return TypeOf(definition);
         var token = named is IMetadataObjectWithToken withToken ? withToken.TokenValue : uint.MaxValue;
-        return MetadataFacts.TableOf(token) == (int)TableIndex.TypeRef ? ResolveTypeRef(token, depth) : ByName(named, depth);
+        return MetadataFacts.TableOf(token) == (int)TableIndex.TypeRef ? ResolveTypeRef(token, depth) : ByNameDefinition(named, depth);
     }
 
     // A TypeRef row resolves by its exact names and scope, never by CCI's resolution (which probes its own way).
@@ -183,8 +193,20 @@ internal sealed partial class CciModuleSource
         return null;
     }
 
-    // A named reference with no TypeRef row (CCI synthesises some core references): by CCI's names, the arity suffix restored.
-    private TypeDef ByName(INamedTypeReference named, int depth)
+    // A named reference with no TypeRef row: CCI synthesises these for the platform types an element type denotes, scoped to
+    // the assembly it took as the core. ELEMENT_TYPE_OBJECT and _TYPEDBYREF (the two with no primitive type code) mean those
+    // types whatever that guess; anything else binds by CCI's names, the arity suffix restored.
+    private TypeDesc ByName(INamedTypeReference named, int depth)
+    {
+        if (named is INamespaceTypeReference { GenericParameterCount: 0 } platform && Namespace(platform.ContainingUnitNamespace) == "System")
+        {
+            if (platform.Name.Value == "Object") return PrimType.Object;
+            if (platform.Name.Value == "TypedReference") return PrimType.TypedRef;
+        }
+        return ByNameDefinition(named, depth);
+    }
+
+    private TypeDef ByNameDefinition(INamedTypeReference named, int depth)
     {
         var name = named.Name.Value + (named.MangleName && named.GenericParameterCount > 0 ? "`" + named.GenericParameterCount : "");
         switch (named)

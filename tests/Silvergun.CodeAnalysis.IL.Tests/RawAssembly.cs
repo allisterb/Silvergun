@@ -24,12 +24,12 @@ using System.Text;
 internal sealed class RawAssembly
 {
     #region Constructors
-    public RawAssembly(string name, bool withRuntime = true)
+    public RawAssembly(string name, bool withRuntime = true, Version? version = null)
     {
         Name = name;
         bodies = new MethodBodyStreamEncoder(ilStream);
         Metadata.AddModule(0, Metadata.GetOrAddString(name + ".dll"), Metadata.GetOrAddGuid(Mvid(name)), default, default);
-        Metadata.AddAssembly(Metadata.GetOrAddString(name), new Version(1, 0, 0, 0), default, default, 0, AssemblyHashAlgorithm.None);
+        Metadata.AddAssembly(Metadata.GetOrAddString(name), version ?? new Version(1, 0, 0, 0), default, default, 0, AssemblyHashAlgorithm.None);
         if (withRuntime)
         {
             Runtime = Metadata.AddAssemblyReference(Metadata.GetOrAddString("System.Runtime"), new Version(10, 0, 0, 0), default,
@@ -100,6 +100,13 @@ internal sealed class RawAssembly
         return Metadata.AddMethodDefinition(attributes, MethodImplAttributes.IL, Metadata.GetOrAddString(name),
             Metadata.GetOrAddBlob(signature), offset, MetadataTokens.ParameterHandle(Metadata.GetRowCount(TableIndex.Param) + 1));
     }
+
+    /// <summary>A public abstract virtual method of the last type (an interface's), with no body.</summary>
+    public MethodDefinitionHandle Abstract(string name, BlobBuilder signature) =>
+        Metadata.AddMethodDefinition(
+            MethodAttributes.Public | MethodAttributes.Abstract | MethodAttributes.Virtual | MethodAttributes.HideBySig | MethodAttributes.NewSlot,
+            MethodImplAttributes.IL, Metadata.GetOrAddString(name), Metadata.GetOrAddBlob(signature), -1,
+            MetadataTokens.ParameterHandle(Metadata.GetRowCount(TableIndex.Param) + 1));
 
     /// <summary>A public static method of the last type.</summary>
     public MethodDefinitionHandle Static(string name, BlobBuilder signature, Action<InstructionEncoder> emit) =>

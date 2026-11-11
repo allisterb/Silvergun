@@ -87,8 +87,21 @@ internal sealed class SsaUniverse : ModuleResolver
 
     public StubModuleSource StubSource(ModuleDef module) => stubSources[module];
 
-    /// <summary>Whether the CCI module defining <paramref name="type"/> left a member of this name out, unreadable.</summary>
-    public bool IsOmitted(TypeDef type, string name) => cciSources.TryGetValue(type.Module, out var source) && source.HasOmitted(type, name);
+    /// <summary>
+    /// Marks a forwarded lookup of <paramref name="ns"/>.<paramref name="name"/> in <paramref name="module"/> as in progress;
+    /// false if it already is (the forwarders form a cycle). Dispose <paramref name="scope"/> to end it.
+    /// </summary>
+    public bool TryForwarding(ModuleDef module, string? ns, string name, out ForwardingScope scope)
+    {
+        var key = ((object)module, ns, name);
+        var added = forwarding.Add(key);
+        // A refused lookup gets an inert scope: disposing it must not end the outer lookup that holds the key.
+        scope = added ? new ForwardingScope(forwarding, key) : default;
+        return added;
+    }
+
+    /// <summary>Why the CCI module defining <paramref name="type"/> left a member of this name out, or null if it did not.</summary>
+    public Exception? Omitted(TypeDef type, string name) => cciSources.TryGetValue(type.Module, out var source) ? source.OmittedReason(type, name) : null;
 
     /// <summary>
     /// The CLASS/VALUETYPE encodings the folder's signatures use for references to this stub type, by its assembly, namespace
@@ -244,9 +257,16 @@ internal sealed class SsaUniverse : ModuleResolver
     private readonly Dictionary<ModuleDef, StubModuleSource> stubSources = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<ModuleDef> stubModules = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<(string, string?, string), TypeEncoding> encodings = new();
+    private readonly HashSet<(object, string?, string)> forwarding = new();
     #endregion
 
     #region Child types
+    /// <summary>Ends a forwarded lookup (<see cref="TryForwarding"/>).</summary>
+    internal readonly struct ForwardingScope(HashSet<(object, string?, string)> set, (object, string?, string) key) : IDisposable
+    {
+        public void Dispose() => set?.Remove(key);
+    }
+
     /// <summary>
     /// A bounded count of nested calls on one thread. <see cref="Enter"/> throws past the bound (a path-dependent failure,
     /// so never memoised) and otherwise returns a scope that undoes exactly its own increment.
@@ -255,10 +275,10 @@ internal sealed class SsaUniverse : ModuleResolver
     {
         public int Depth { get; private set; }
 
-        public Scope Enter()
+        public Scope Enter(string? detail = null)
         {
             if (Depth >= max)
-                throw new SsaAdapterException($"{what} deeper than {max}", kind: SsaFailureKind.Bounds) { IsPathDependent = true };
+                throw new SsaAdapterException($"{what} deeper than {max}" + (detail is null ? "" : $" ({detail})"), kind: SsaFailureKind.Bounds) { IsPathDependent = true };
             Depth++;
             return new Scope(this);
         }

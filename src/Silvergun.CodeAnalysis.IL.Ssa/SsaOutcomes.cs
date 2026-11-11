@@ -138,10 +138,11 @@ public sealed record SsaFailure(SsaFailureKind Kind, string Reason);
 
 /// <summary>
 /// One method's outcome: verified SSA (<see cref="Body"/>), or Unknown (<see cref="Failure"/>). <see cref="Method"/> is the
-/// <see cref="CciNames"/> identity, the join to <c>MethodGraph</c> (with IL offsets). <see cref="SsaFailure.Reason"/> may
-/// carry metadata names: escape it before display.
+/// <see cref="CciNames"/> identity, the join to <c>MethodGraph</c> (with IL offsets); <see cref="MethodToken"/> is its
+/// MethodDef token in <see cref="AssemblyPath"/>, an exact join to anything else that reads the file.
+/// <see cref="SsaFailure.Reason"/> may carry metadata names: escape it before display.
 /// </summary>
-public sealed record SsaMethodOutcome(string AssemblyPath, MethodIdentity Method, SsaFailure? Failure, Cilica.IR.MethodBody? Body)
+public sealed record SsaMethodOutcome(string AssemblyPath, uint MethodToken, MethodIdentity Method, SsaFailure? Failure, Cilica.IR.MethodBody? Body)
 {
     #region Properties
     public bool IsLifted => Failure is null;

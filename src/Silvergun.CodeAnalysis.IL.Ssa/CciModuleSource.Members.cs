@@ -79,7 +79,10 @@ internal sealed partial class CciModuleSource
 
     private MethodDef[] LoadMethodsCore(TypeDef type, Excused excused)
     {
-        var list = new List<MethodDef>();
+        // Built aside and published only once the whole list is read: a load cut short by a path-dependent bound is not
+        // memoised and runs again later, and must find nothing of the first attempt.
+        var added = new List<(IMethodDefinition Cci, MethodDef Def)>();
+        var omitted = new List<(IMethodDefinition Cci, Exception Why, string Name)>();
         foreach (var method in CciType(type).Methods)
         {
             // One unreadable method costs itself, not its type: it is left out, and anything that names it fails. Its
@@ -90,9 +93,7 @@ internal sealed partial class CciModuleSource
                 var def = BuildMethod(type, method);
                 if (reads.Count > 0)
                     throw new SsaAdapterException($"CCI failed {reads.Count} assertion(s) reading its signature", kind: SsaFailureKind.ReaderAssertion);
-                list.Add(def);
-                methods.Add(method, def);
-                cciMethods.Add(def, method);
+                added.Add((method, def));
             }
             catch (Exception ex) when (ex is not OutOfMemoryException and not InsufficientExecutionStackException
                 and not SsaAdapterException { IsPathDependent: true })
@@ -101,15 +102,24 @@ internal sealed partial class CciModuleSource
                 // Without its type initializer the type would read as having none, which is a fact: the list fails instead.
                 if (name == ".cctor")
                     throw new SsaAdapterException($"The type initializer of '{type.Name}' could not be read: {ex.Message}", ex);
-                omittedMethods.TryAdd(method, ex);
-                Omit(type, name);
+                omitted.Add((method, ex, name));
             }
             finally
             {
                 excused.Count += reads.Count;
             }
         }
-        return [.. list];
+        foreach (var (cci, def) in added)
+        {
+            methods[cci] = def;
+            cciMethods[def] = cci;
+        }
+        foreach (var (cci, why, name) in omitted)
+        {
+            omittedMethods[cci] = why;
+            Omit(type, name, why);
+        }
+        return added.Select(a => a.Def).ToArray();
     }
 
     private MethodDef BuildMethod(TypeDef type, IMethodDefinition method)
@@ -152,7 +162,9 @@ internal sealed partial class CciModuleSource
 
     private FieldDef[] LoadFieldsCore(TypeDef type, Excused excused)
     {
-        var list = new List<FieldDef>();
+        // Built aside and published at the end, as LoadMethodsCore.
+        var added = new List<(IFieldDefinition Cci, FieldDef Def)>();
+        var omitted = new List<(IFieldDefinition Cci, Exception Why)>();
         var ctx = new GenericContext(type);
         var cciType = CciType(type);
         var isEnum = IsEnum(type);
@@ -175,21 +187,26 @@ internal sealed partial class CciModuleSource
                     def.MappedData = MappedData(field, def);
                 if (reads.Count > 0)
                     throw new SsaAdapterException($"CCI failed {reads.Count} assertion(s) reading the field", kind: SsaFailureKind.ReaderAssertion);
-                list.Add(def);
-                fields.Add(field, def);
+                added.Add((field, def));
             }
             catch (Exception ex) when (ex is not OutOfMemoryException and not InsufficientExecutionStackException
                 and not SsaAdapterException { IsPathDependent: true })
             {
-                omittedFields.TryAdd(field, ex);
-                Omit(type, Guard(() => field.Name.Value) ?? "<unreadable>");
+                omitted.Add((field, ex));
             }
             finally
             {
                 excused.Count += reads.Count;
             }
         }
-        return [.. list];
+        foreach (var (cci, def) in added)
+            fields[cci] = def;
+        foreach (var (cci, why) in omitted)
+        {
+            omittedFields[cci] = why;
+            Omit(type, Guard(() => cci.Name.Value) ?? "<unreadable>", why);
+        }
+        return added.Select(a => a.Def).ToArray();
     }
 
     // Cilica's own predicate (base type is System.Enum), not CCI's narrower one (sealed, non-generic): Cilica derives the
@@ -269,8 +286,8 @@ internal sealed partial class CciModuleSource
                 break;
             var method = current.FindMethod(name, sig, throwIfNotFound: false);
             // Checked once the type's methods are loaded: one left out under this name might be the target.
-            if (method is null && current is TypeDefOrSpec owner && IsOmitted(owner, name))
-                throw new SsaAdapterException($"A method named '{name}' of '{owner.Name}' could not be read");
+            if (method is null && current is TypeDefOrSpec owner && Omitted(owner, name) is { } why)
+                throw Rethrow(why);
             if (method is not null)
             {
                 if (current != parent && parent is not PrimType)
@@ -313,8 +330,8 @@ internal sealed partial class CciModuleSource
                 break;
             if (current.FindField(name, throwIfNotFound: false) is { } field)
                 return field;
-            if (current is TypeDefOrSpec owner && IsOmitted(owner, name))
-                throw new SsaAdapterException($"A field named '{name}' of '{owner.Name}' could not be read");
+            if (current is TypeDefOrSpec owner && Omitted(owner, name) is { } why)
+                throw Rethrow(why);
             try
             {
                 current = current.BaseType;
@@ -327,19 +344,21 @@ internal sealed partial class CciModuleSource
         throw new UnresolvedFactException(UnresolvedFact.Member, parent.Name, $"no field '{name}'");
     }
 
-    // Whether a member of this name was left out of its type's list because it could not be read (in any CCI module).
-    private bool IsOmitted(TypeDefOrSpec type, string name) =>
-        type is not UnknownSupertype && universe.IsOmitted(type.Definition, name);
+    // Why a member of this name was left out of its type's list (in any CCI module), or null: one of them might have been
+    // the target, so the reference fails with that reason (an unresolved fact stays one).
+    private Exception? Omitted(TypeDefOrSpec type, string name) =>
+        type is UnknownSupertype ? null : universe.Omitted(type.Definition, name);
 
-    private void Omit(TypeDef type, string name)
+    private void Omit(TypeDef type, string name, Exception why)
     {
         if (!omittedNames.TryGetValue(type, out var names))
-            omittedNames[type] = names = new HashSet<string>(StringComparer.Ordinal);
-        names.Add(name);
+            omittedNames[type] = names = new Dictionary<string, Exception>(StringComparer.Ordinal);
+        names.TryAdd(name, why);
     }
 
-    /// <summary>Whether this module left a member of <paramref name="name"/> out of <paramref name="type"/>.</summary>
-    internal bool HasOmitted(TypeDef type, string name) => omittedNames.TryGetValue(type, out var names) && names.Contains(name);
+    /// <summary>Why this module left a member of <paramref name="name"/> out of <paramref name="type"/>, or null.</summary>
+    internal Exception? OmittedReason(TypeDef type, string name) =>
+        omittedNames.TryGetValue(type, out var names) ? names.GetValueOrDefault(name) : null;
 
     private static ParameterAttributes ParameterAttributesOf(IParameterDefinition parameter) =>
         (parameter.IsIn ? ParameterAttributes.In : 0)

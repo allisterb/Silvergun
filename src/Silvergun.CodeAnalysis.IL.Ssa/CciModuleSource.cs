@@ -131,7 +131,13 @@ internal sealed partial class CciModuleSource : IModuleSource, IDisposable
     {
         if (Facts.ExportedTarget(ns, name) is not { } target)
             return null;
-        using var hop = universe.Forwarders.Enter();
+        var display = (ns is null ? "" : ns + ".") + name;
+        // A forwarder chain that returns to a module it left is a cycle in the input (e.g. a folder's desktop facade
+        // forwarding back to a host facade that forwarded to it): the type exists nowhere, whatever path reached it.
+        if (!universe.TryForwarding(Module, ns, name, out var forwarding))
+            throw new UnresolvedFactException(UnresolvedFact.Type, display, "its type forwarders form a cycle");
+        using var cycle = forwarding;
+        using var hop = universe.Forwarders.Enter($"'{display}' from '{Module.AsmName.Name}' to '{target}'");
         return universe.ModuleFor(target) == Module ? null : universe.TopLevel(target, ns, name);
     }
 
@@ -159,9 +165,11 @@ internal sealed partial class CciModuleSource : IModuleSource, IDisposable
     {
         try
         {
+            // No core at all (a module with no System.* references, e.g. interfaces only) is safe: no TypeRef can then be
+            // typed as a primitive, and its element types (ELEMENT_TYPE_I4, ..._OBJECT) are unambiguous.
             var core = Cci.Module.CoreAssemblySymbolicIdentity;
-            if (core is null || core == Dummy.AssemblyIdentity)
-                return "CCI found no core library for it";
+            if (core is null || core == Dummy.AssemblyIdentity || core.Name.Value.Length == 0)
+                return null;
             if (Cci.Module.ContainingAssembly?.AssemblyIdentity is { } own && own.Equals(core))
                 return "it defines its own core library types";
             return universe.IsFramework(core.Name.Value) ? null : $"CCI takes '{core.Name.Value}', not a framework assembly, as its core library";
@@ -356,7 +364,7 @@ internal sealed partial class CciModuleSource : IModuleSource, IDisposable
     private readonly Dictionary<IMethodDefinition, Exception> omittedMethods = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<IFieldDefinition, FieldDef> fields = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<IFieldDefinition, Exception> omittedFields = new(ReferenceEqualityComparer.Instance);
-    private readonly Dictionary<TypeDef, HashSet<string>> omittedNames = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<TypeDef, Dictionary<string, Exception>> omittedNames = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<object, object?> memo = new();
     private readonly HashSet<TypeDef> validating = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<(int, uint, int), byte[]?> mappedData = new();

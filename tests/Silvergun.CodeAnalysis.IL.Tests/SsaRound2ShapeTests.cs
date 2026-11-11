@@ -46,6 +46,46 @@ public sealed class SsaRound2ShapeTests
         run.AssertFailed("Users.User::Plain", SsaFailureKind.Adapter, "primitive types cannot be trusted");
     }
 
+    /// <summary>
+    /// A weakly named folder <c>System.Private.CoreLib</c> (<see cref="WriteWeakCoreLib"/>) that CCI takes as its own core
+    /// costs nothing beside it: the child finishes, both assemblies read, and a normal sibling lifts. Which string its
+    /// method lifts with is <see cref="SsaReviewFixTests.AFolderModulesOwnSystemString_IsNeverTheHostsString"/>,
+    /// in-process (the child reports only outcomes; this run showed that shape safe to load in the host).
+    /// </summary>
+    [Fact]
+    public void AWeaklyNamedFolderCoreLib_DefiningSystemString_CostsNothingBesideIt()
+    {
+        using var temp = new SsaTempDirectory();
+        var normal = new RawAssembly("Normal");
+        normal.Type("Ok", "Ok", normal.Object);
+        normal.Static("Plain", StaticInt, Returns(42));
+
+        var run = SsaHostileShapeTests.Lift([WriteWeakCoreLib(temp.Path), normal.Save(temp.Path)]);
+
+        _ = run.Of("Evil.User::Echo");
+        run.AssertLifted("Ok.Ok::Plain");
+    }
+
+    /// <summary>
+    /// A weakly named <c>System.Private.CoreLib</c>, version 10.0.0.0, with no references at all (no System.* TypeRef, no
+    /// <c>System.Object</c>, no mscorlib or System.Runtime): it defines a class <c>System.String</c> with an instance field,
+    /// and <c>Evil.User.Echo</c>, which takes and returns that <c>System.String</c>. CCI matches it to the running
+    /// CoreLib's identity, takes it as the core, and gives its <c>System.String</c> a primitive type code.
+    /// </summary>
+    internal static string WriteWeakCoreLib(string directory)
+    {
+        var impostor = new RawAssembly("System.Private.CoreLib", withRuntime: false, version: new Version(10, 0, 0, 0));
+        var fakeString = impostor.Type("System", "String", default);
+        impostor.Field("length", FieldAttributes.Private, t => t.Int32());
+        impostor.Type("Evil", "User", default);
+        impostor.Static("Echo", RawAssembly.MethodSig(false, r => r.Type().Type(fakeString, isValueType: false), p => p.Type(fakeString, isValueType: false)), il =>
+        {
+            il.LoadArgument(0);
+            il.OpCode(ILOpCode.Ret);
+        });
+        return impostor.Save(directory);
+    }
+
     /// <summary>R2-W1: a module that is its own core answers nothing, to anyone: a field read or a call into it fails.</summary>
     [Fact]
     public void AReferenceIntoAnAssemblyThatIsItsOwnCore_FailsAsAdapter()

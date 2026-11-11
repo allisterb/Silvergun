@@ -115,7 +115,8 @@ public sealed class SsaSession : IDisposable
     private SsaMethodOutcome? Lift(CciModuleSource source, IMethodDefinition method)
     {
         var identity = CciNames.Of(method);
-        SsaMethodOutcome Unknown(SsaFailureKind kind, string reason) => new(source.Path, identity, new SsaFailure(kind, reason), null);
+        var token = method is IMetadataObjectWithToken { TokenValue: var t and not uint.MaxValue } ? t : 0u;
+        SsaMethodOutcome Unknown(SsaFailureKind kind, string reason) => new(source.Path, token, identity, new SsaFailure(kind, reason), null);
 
         var read = AssemblyAnalyzer.TryReadBody(method);
         if (read.IsMissing)
@@ -144,7 +145,7 @@ public sealed class SsaSession : IDisposable
             IRVerifier.Verify(body);
             return reads.Count > 0
                 ? Unknown(SsaFailureKind.ReaderAssertion, $"CCI failed {reads.Count} assertion(s) reading what the method needs")
-                : new SsaMethodOutcome(source.Path, identity, null, body);
+                : new SsaMethodOutcome(source.Path, token, identity, null, body);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {

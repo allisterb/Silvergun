@@ -540,6 +540,231 @@ public sealed class SsaReviewFixTests
         il.OpCode(ILOpCode.Ret);
     };
 
+    // ---- S3 (corpus findings) ----------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// S3: <c>Retry.T</c>'s method list is first read from inside <c>Retry.U.M1</c>'s body (a call to <c>T.A</c>), nested
+    /// deep enough that <c>T.A</c>'s signature (<c>C0&lt;int&gt;</c>, whose constraints run 8 types deep) meets
+    /// <see cref="SsaBounds.MaxNesting"/>: a path-dependent failure, not memoised. When <c>T</c>'s own methods are lifted
+    /// later, from shallower, the list is read again, and must not trip over a half-published first attempt ("An item
+    /// with the same key has already been added"): <c>T.Before</c>, read fine the first time, is published only once.
+    /// <para>
+    /// The bound that separates the two reads depends on how deep the adapter nests its reads (9, when written), so the
+    /// test searches for it rather than pinning it: some bound must fail <c>U.M1</c> as Bounds and still lift <c>T.A</c>,
+    /// and at that bound <c>T.Before</c> lifts too. A half-published first attempt would fail <c>T.A</c> at every such
+    /// bound, so no bound would qualify.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void AMemberListCutShortByTheNestingBound_IsReadAgainLater_AndItsMethodsLift()
+    {
+        using var temp = new SsaTempDirectory();
+        var path = WriteRetryFixture(temp.Path, RetryChain);
+        var seen = new List<string>();
+
+        for (var nesting = 2; nesting <= 20; nesting++)
+        {
+            using var lifted = new SsaLifted([path], SsaBounds.Default with { MaxNesting = nesting });
+            var (m1, a) = (lifted.Of("U", "M1"), lifted.Of("T", "A"));
+            seen.Add($"MaxNesting {nesting}: " + string.Join("; ", lifted.Outcomes.Select(SsaText.Of)));
+            if (m1.Failure?.Kind != SsaFailureKind.Bounds || !a.IsLifted)
+                continue;
+
+            SsaLifted.AssertLifted(lifted.Of("T", "Before"));
+            Assert.DoesNotContain(lifted.Outcomes, o => o.Failure?.Reason.Contains("same key", StringComparison.Ordinal) == true);
+            return;
+        }
+        Assert.Fail("No nesting bound failed U.M1 as Bounds while T.A lifted on its later read:" + Environment.NewLine + string.Join(Environment.NewLine, seen));
+    }
+
+    /// <summary>Writes <c>Retry.dll</c>: a constraint chain <c>C0`1</c>..., then <c>U.M1</c> (calls <c>T.A</c>), then <c>T.Before</c> and <c>T.A(C0&lt;int&gt;)</c>.</summary>
+    internal static string WriteRetryFixture(string directory, int chainLength)
+    {
+        var raw = new RawAssembly("Retry");
+        var c0 = raw.NextType();
+        for (var i = 0; i < chainLength; i++)
+        {
+            var type = raw.Type("Chain", $"C{i}`1", raw.Object);
+            var parameter = raw.GenericParameter(type, "T", 0);
+            if (i < chainLength - 1)
+            {
+                var next = raw.NextType();
+                raw.Constraint(parameter, raw.TypeSpec(t => t.GenericInstantiation(next, 1, isValueType: false).AddArgument().GenericTypeParameter(0)));
+            }
+        }
+        // U.M1, T.Before and T.A take the next three MethodDef rows.
+        var a = MetadataTokens.MethodDefinitionHandle(raw.Metadata.GetRowCount(TableIndex.MethodDef) + 3);
+        raw.Type("Retry", "U", raw.Object);
+        raw.Static("M1", StaticVoid, il =>
+        {
+            il.OpCode(ILOpCode.Ldnull);
+            il.Call(a);
+            il.OpCode(ILOpCode.Ret);
+        });
+        raw.Type("Retry", "T", raw.Object);
+        raw.Static("Before", StaticInt, Returns42);
+        var defined = raw.Static("A", RawAssembly.MethodSig(false, r => r.Void(), p => p.GenericInstantiation(c0, 1, isValueType: false).AddArgument().Int32()),
+            il => il.OpCode(ILOpCode.Ret));
+        Assert.Equal(a, defined);
+        return raw.Save(directory);
+    }
+
+    /// <summary>
+    /// S3: <c>A</c> forwards <c>N.T</c> to <c>B</c>, and <c>B</c> forwards it back; neither defines it. A reference through
+    /// either is an unresolved type, its forwarders a cycle (not a hop bound met); a plain method beside them lifts.
+    /// </summary>
+    [Fact]
+    public void ForwardersThatFormACycle_AreAnUnresolvedType_NotABound()
+    {
+        using var temp = new SsaTempDirectory();
+        var a = new RawAssembly("A");
+        var b = new RawAssembly("B");
+        var user = new RawAssembly("CycleUser");
+        var viaA = user.TypeRef(user.AssemblyRef("A"), "N", "T");
+        var viaB = user.TypeRef(user.AssemblyRef("B"), "N", "T");
+        user.Type("Users", "User", user.Object);
+        user.Static("TokenViaA", StaticVoid, TokenOf(viaA));
+        user.Static("TokenViaB", StaticVoid, TokenOf(viaB));
+        user.Static("Plain", StaticInt, Returns42);
+
+        using var lifted = new SsaLifted(
+        [
+            a.Save(temp.Path, EmittedAssembly.Forwarding(("N", "T", "B"))),
+            b.Save(temp.Path, EmittedAssembly.Forwarding(("N", "T", "A"))),
+            user.Save(temp.Path),
+        ]);
+
+        SsaLifted.AssertFailed(lifted.Of("User", "TokenViaA"), SsaFailureKind.UnresolvedFact, "its type forwarders form a cycle");
+        SsaLifted.AssertFailed(lifted.Of("User", "TokenViaB"), SsaFailureKind.UnresolvedFact, "its type forwarders form a cycle");
+        SsaLifted.AssertLifted(lifted.Of("User", "Plain"));
+    }
+
+    /// <summary>
+    /// S3: an assembly with no TypeRefs at all (an interface-only one) has no core library in CCI's sense, which is safe:
+    /// its <c>object</c>, <c>int32</c> and <c>typedref</c> are element types. It is not its own core (it defines no
+    /// System.Object), so a sibling calling through its interface lifts.
+    /// </summary>
+    [Fact]
+    public void AnAssemblyWithNoCoreLibrary_IsTrusted_AndItsInterfaceCanBeCalled()
+    {
+        using var temp = new SsaTempDirectory();
+        var interfaces = new RawAssembly("Interfaces", withRuntime: false);
+        interfaces.Type("Api", "IThing", default, TypeAttributes.Public | TypeAttributes.Interface | TypeAttributes.Abstract);
+        interfaces.Abstract("Get", RawAssembly.MethodSig(true, r => r.Type().Object(), p => p.Int32()));
+        interfaces.Abstract("Takes", RawAssembly.MethodSig(true, r => r.Void(), p => p.TypedReference()));
+        var caller = new RawAssembly("Caller");
+        var thing = caller.TypeRef(caller.AssemblyRef("Interfaces"), "Api", "IThing");
+        var get = caller.MemberRef(thing, "Get", RawAssembly.MethodSig(true, r => r.Type().Object(), p => p.Int32()));
+        caller.Type("Users", "User", caller.Object);
+        caller.Static("CallsGet", RawAssembly.MethodSig(false, r => r.Type().Object(), p => p.Type(thing, isValueType: false)), il =>
+        {
+            il.LoadArgument(0);
+            il.LoadConstantI4(1);
+            il.OpCode(ILOpCode.Callvirt);
+            il.Token(get);
+            il.OpCode(ILOpCode.Ret);
+        });
+
+        using var lifted = new SsaLifted([interfaces.Save(temp.Path), caller.Save(temp.Path)]);
+
+        var target = Assert.IsType<MethodDef>(Operand(lifted.Il("User", "CallsGet"), ILCode.Callvirt));
+        Assert.Equal(("Get", "IThing"), (target.Name, target.DeclaringType.Name));
+        Assert.Same(PrimType.Object, target.ReturnType);
+        Assert.Same(PrimType.Int32, target.StaticParams[0].Type);
+        var takes = target.DeclaringType.Methods.Single(m => m.Name == "Takes");
+        Assert.Same(PrimType.TypedRef, takes.StaticParams[0].Type);
+    }
+
+    /// <summary>
+    /// S3: a field left out of its type because its type cannot be resolved (<c>[Lib]Missing.Type</c>, where the folder's
+    /// <c>Lib</c> has no such type) fails a reader of it with that original reason, not a generic "could not be read".
+    /// </summary>
+    [Fact]
+    public void AFieldLeftOutOfItsType_FailsItsReaders_WithTheOriginalReason()
+    {
+        using var temp = new SsaTempDirectory();
+        var lib = new RawAssembly("Lib");
+        lib.Type("Lib", "Present", lib.Object);
+        var holder = new RawAssembly("Holder");
+        var missingInHolder = holder.TypeRef(holder.AssemblyRef("Lib"), "Missing", "Type");
+        holder.Type("Data", "Box", holder.Object);
+        holder.Field("F", FieldAttributes.Public, t => t.Type(missingInHolder, isValueType: false));
+        var caller = new RawAssembly("FieldCaller");
+        var box = caller.TypeRef(caller.AssemblyRef("Holder"), "Data", "Box");
+        var missingInCaller = caller.TypeRef(caller.AssemblyRef("Lib"), "Missing", "Type");
+        var f = caller.MemberRef(box, "F", RawAssembly.FieldSig(t => t.Type(missingInCaller, isValueType: false)));
+        caller.Type("Users", "User", caller.Object);
+        caller.Static("ReadsF", RawAssembly.MethodSig(false, r => r.Type().Object(), p => p.Type(box, isValueType: false)), il =>
+        {
+            il.LoadArgument(0);
+            il.OpCode(ILOpCode.Ldfld);
+            il.Token(f);
+            il.OpCode(ILOpCode.Ret);
+        });
+        caller.Static("Plain", StaticInt, Returns42);
+
+        using var lifted = new SsaLifted([lib.Save(temp.Path), holder.Save(temp.Path), caller.Save(temp.Path)]);
+
+        SsaLifted.AssertFailed(lifted.Of("User", "ReadsF"), SsaFailureKind.UnresolvedFact, "Unresolved Type of 'Missing.Type'");
+        SsaLifted.AssertLifted(lifted.Of("User", "Plain"));
+    }
+
+    /// <summary>
+    /// A folder module's own definitions are never the host's primitives: <c>Evil.User.Echo</c> of a weakly named folder
+    /// <c>System.Private.CoreLib</c> (<see cref="SsaRound2ShapeTests.WriteWeakCoreLib"/>), whose <c>System.String</c>
+    /// CCI types as a primitive, lifts with that folder <c>System.String</c> as its parameter and return type, never with
+    /// <see cref="PrimType.String"/>; and the session's CoreLib is still the host's.
+    /// </summary>
+    [Fact]
+    public void AFolderModulesOwnSystemString_IsNeverTheHostsString()
+    {
+        using var temp = new SsaTempDirectory();
+
+        using var lifted = new SsaLifted([SsaRound2ShapeTests.WriteWeakCoreLib(temp.Path)]);
+
+        var echo = lifted.Of("User", "Echo");
+        SsaLifted.AssertLifted(echo);
+        var definition = echo.Body!.Definition;
+        foreach (var type in new[] { definition.ReturnType, definition.StaticParams[0].Type })
+        {
+            Assert.NotSame(PrimType.String, type);
+            var folderString = Assert.IsType<TypeDef>(type);
+            Assert.Equal(("System", "String"), (folderString.Namespace, folderString.Name));
+            Assert.StartsWith("System.Private.CoreLib [", folderString.Module.AsmName.Name);
+            Assert.NotSame(definition.Module.Resolver.CoreLib, folderString.Module);
+        }
+    }
+
+    /// <summary>S3: an outcome's <see cref="SsaMethodOutcome.MethodToken"/> is its MethodDef token, as System.Reflection.Metadata reads it.</summary>
+    [Fact]
+    public void MethodToken_IsTheMethodDefToken()
+    {
+        using var temp = new SsaTempDirectory();
+        var raw = new RawAssembly("Tokens");
+        raw.Type("Users", "First", raw.Object);
+        raw.Static("One", StaticInt, Returns42);
+        raw.Type("Users", "Second", raw.Object);
+        raw.Static("Two", StaticInt, Returns42);
+        raw.Static("Three", StaticVoid, il => il.OpCode(ILOpCode.Ret));
+        var path = raw.Save(temp.Path);
+        Dictionary<string, uint> expected;
+        using (var pe = new System.Reflection.PortableExecutable.PEReader(System.IO.File.OpenRead(path)))
+        {
+            var reader = pe.GetMetadataReader();
+            expected = reader.MethodDefinitions.ToDictionary(h => reader.GetString(reader.GetMethodDefinition(h).Name), h => (uint)MetadataTokens.GetToken(h));
+        }
+
+        using var lifted = new SsaLifted([path]);
+
+        Assert.Equal(3, lifted.Outcomes.Count);
+        Assert.All(lifted.Outcomes, o =>
+        {
+            SsaLifted.AssertLifted(o);
+            Assert.Equal(expected[o.Method.MethodName], o.MethodToken);
+            Assert.Equal(0x06u, o.MethodToken >> 24);
+        });
+    }
+
     // ---- Bounds ------------------------------------------------------------------------------------------------------
 
     public static TheoryData<string> NonPositiveBounds() => new(nameof(SsaBounds.MaxDepth), nameof(SsaBounds.MaxInstructions),
@@ -605,6 +830,9 @@ public sealed class SsaReviewFixTests
     #endregion
 
     #region Fields
+    // The retry fixture's constraint chain length.
+    private const int RetryChain = 8;
+
     private static BlobBuilder StaticInt => RawAssembly.MethodSig(false, r => r.Type().Int32());
     private static BlobBuilder StaticVoid => RawAssembly.MethodSig(false, r => r.Void());
     private static BlobBuilder StaticObject => RawAssembly.MethodSig(false, r => r.Type().Object());
