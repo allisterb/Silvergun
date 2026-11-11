@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Cilica's importer, IR and SSA promotion over our CCI metadata (ADR 0038, option 2; docs/agent/tasks/ssa-adapter.md).
+       A project of its own (ruling D1), so Cilica stays out of Silvergun.CodeAnalysis.IL. Project references only. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Silvergun.CodeAnalysis.IL\Silvergun.CodeAnalysis.IL.csproj" />
+    <ProjectReference Include="..\..\ext\Cilica\src\Cilica\Cilica.csproj" />
+  </ItemGroup>
+
+</Project>

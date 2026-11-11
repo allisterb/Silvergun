@@ -26,6 +26,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Silvergun.CodeAnalysis.IL\Silvergun.CodeAnalysis.IL.csproj" />
+    <!-- The SSA adapter (docs/agent/tasks/ssa-adapter.md S2): its tests live here, so no new test project (and no new
+         packages) is needed. The Ssa* test files; hostile shapes run in the PathologicalSignatureProbe's ssa-lift verb. -->
+    <ProjectReference Include="..\..\src\Silvergun.CodeAnalysis.IL.Ssa\Silvergun.CodeAnalysis.IL.Ssa.csproj" />
     <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.Fixture\Silvergun.CodeAnalysis.IL.Tests.Fixture.csproj" />
     <!-- The matrix fixture is multi-targeted. This normal reference resolves to the best match for THIS
          project (net10.0) and is what typeof(ModernInteropOps) compiles against. -->

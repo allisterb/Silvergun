@@ -15,6 +15,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Silvergun.CodeAnalysis.IL\Silvergun.CodeAnalysis.IL.csproj" />
+    <!-- The ssa-lift verb (SsaLiftProbe): hostile inputs to the SSA adapter are lifted here, in a child, so a crash
+         costs one test rather than the test host. -->
+    <ProjectReference Include="..\..\src\Silvergun.CodeAnalysis.IL.Ssa\Silvergun.CodeAnalysis.IL.Ssa.csproj" />
   </ItemGroup>
 
 </Project>
