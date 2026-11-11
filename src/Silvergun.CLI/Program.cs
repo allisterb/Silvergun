@@ -112,6 +112,11 @@ internal static class Program
         {
             Description = "Skip YARA malware-signature scanning of the package's extracted files (perf/opt-out)."
         };
+        var reachabilityOption = new Option<bool>("--reachability")
+        {
+            Description = "Also run the call-graph reachability pass (out of process; up to 600 s and a 4 GiB worker per package). " +
+                          "Informational: never affects the exit code, --strict, the completeness footer or --snapshot."
+        };
         var noVulnsOption = new Option<bool>("--no-vulns")
         {
             Description = "Skip the OSV.dev known-vulnerability check (runs by default; network — this restores fully offline)."
@@ -158,7 +163,7 @@ internal static class Program
 
         var scanPackageCommand = new Command("scan-package", "Scan a .nupkg for sensitive-API capabilities.")
         {
-            nupkgPathArgument, jsonOption, richOption, outputOption, strictOption, debugOption, noResolveOption, healthOption, noYaraOption, noVulnsOption, depthOption, allowIncompleteOption, snapshotOption
+            nupkgPathArgument, jsonOption, richOption, outputOption, strictOption, debugOption, noResolveOption, healthOption, noYaraOption, noVulnsOption, depthOption, allowIncompleteOption, snapshotOption, reachabilityOption
         };
         scanPackageCommand.Validators.Add(RejectJsonWithRich);
         scanPackageCommand.SetAction(parse => RunScanPackage(
@@ -174,7 +179,8 @@ internal static class Program
             parse.GetValue(noVulnsOption),
             parse.GetValue(depthOption),
             parse.GetValue(allowIncompleteOption),
-            parse.GetValue(snapshotOption)));
+            parse.GetValue(snapshotOption),
+            parse.GetValue(reachabilityOption)));
 
         // check-squat hits nuget.org, so its handler is async; the sync action bridges via GetAwaiter().GetResult()
         // to keep System.CommandLine's synchronous Invoke path (stdout purity handled by ConfigureLogging).
@@ -384,11 +390,11 @@ internal static class Program
         return AnalyzeExitCode(report, strict, allowIncomplete);
     }
 
-    private static int RunScanPackage(string nupkgPath, bool json, bool rich, string? output, bool strict, bool debug, bool noResolve, bool health, bool noYara, bool noVulns, int depth, bool allowIncomplete, string? snapshot)
+    private static int RunScanPackage(string nupkgPath, bool json, bool rich, string? output, bool strict, bool debug, bool noResolve, bool health, bool noYara, bool noVulns, int depth, bool allowIncomplete, string? snapshot, bool reachability)
     {
         ConfigureLogging(json, output, debug);
 
-        var scanResult = PackageScanner.Scan(nupkgPath, resolveReferences: !noResolve, runYara: !noYara);
+        var scanResult = PackageScanner.Scan(nupkgPath, resolveReferences: !noResolve, runYara: !noYara, runReachability: reachability);
         if (!scanResult.IsSuccess)
         {
             Console.Error.WriteLine(scanResult.Message);
@@ -433,6 +439,12 @@ internal static class Program
                 : "scan-package: script content scanning did NOT complete (some or all script/manifest files were not scanned); " +
                   "script findings for this package are NOT verified against the script ruleset.")
                 + (report.ScriptScanUnavailableReason is { Length: > 0 } scriptReason ? $" Reason: {scriptReason}" : string.Empty));
+
+        // Reachability (R3 S2): one note when the pass ran and did not come out decided, as for YARA. A caveat, not exit 3
+        // (ADR 0037 decision 10): completeness, the footer, --strict, the exit code and --snapshot never read it. The counts
+        // come from the folders, not the stored Complete (S1 review N2).
+        if (report.Reachability is { } reachSummary && ReachabilitySectionRenderer.IncompleteNote(reachSummary) is { } reachNote)
+            Console.Error.WriteLine(reachNote);
 
         // --health is the ONLY thing that adds a network call to scan-package (the offline scan above stays offline).
         // Repo resolution is offline (local nuspec); only the GitHub lookup is network. Advisory — never touches the

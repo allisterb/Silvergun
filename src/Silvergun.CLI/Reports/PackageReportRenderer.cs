@@ -98,6 +98,14 @@ internal static class PackageReportRenderer
         console.MarkupLine(CapabilityGateNote(rich));
         console.WriteLine();
 
+        // Reachability (R3, scan-package --reachability): after the capability section it refines. Informational only,
+        // and absent without the flag, so its absence is not a claim.
+        if (report.Reachability is { } reachability)
+        {
+            ReachabilitySectionRenderer.Write(console, rich, reachability);
+            console.WriteLine();
+        }
+
         // Files only: a declared entry never written as a file of its own is not an assembly, so it is listed apart
         // (entry-aliasing review 2, W2) — with its verbatim SkipReason, under a heading that says what it is.
         console.Write(Section(rich, "Assemblies"));
