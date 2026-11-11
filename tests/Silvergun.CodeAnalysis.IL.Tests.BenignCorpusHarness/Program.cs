@@ -55,6 +55,8 @@ public static class Program
             return ReachabilityChild.Execute(args);
         if (args.Length > 0 && string.Equals(args[0], WorkerParityChild.Verb, StringComparison.Ordinal))
             return WorkerParityChild.Execute(args);
+        if (args.Length > 0 && string.Equals(args[0], R3Measure.Verb, StringComparison.Ordinal))
+            return R3Measure.Execute(args);
 
         try
         {
@@ -519,6 +521,16 @@ public static class Program
           harness. Writes worker-parity-<date>.tsv (per folder), -packages.tsv (per package, wall times) and .md into --out.
           Exit 4 after writing them when any folder differs; else exit 3 when no package was measured or any entry was
           not cached (not comparable).
+
+          <harness> r3-measure <nupkg> <out-dir> [--timeout <seconds>]
+
+          Reachability R3 S3, raw versus summary size (docs/agent/tasks/reachability-r3.md). OFFLINE, ONE package. In this
+          process: PackageReachability.Analyze through the CLI worker beside the harness, then ReachabilitySummary.From;
+          per folder the raw record's wire bytes (what MaxReportBytes counts) and the summary's --json bytes. Then
+          Silvergun.CLI scan-package <nupkg> --json --no-vulns --no-yara with --reachability, without it, and with it again,
+          each a child killed with its tree after --timeout (default 900 s). Writes <stem>.r3.md, .r3.tsv, .r3-facts.tsv
+          and the runs' stdout and stderr into <out-dir>. Exit 4 after writing them when the exit codes or completeness
+          differ with and without the flag, the repeat's Reachability JSON differs, or a CLI run did not finish.
         """;
     #endregion
 }

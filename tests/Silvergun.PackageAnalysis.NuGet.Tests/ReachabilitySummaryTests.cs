@@ -15,8 +15,10 @@ using Xunit;
 /// Reachability R3, S0 (<c>docs/agent/tasks/reachability-r3.md</c>, acceptance criteria 1-4): <see cref="ReachabilitySummary.From"/>
 /// over hand-built <see cref="PackageReachabilityReport"/>s. The table's cells (trigger or information, and their wording),
 /// the folds that keep an unseen or failed folder from reading clean, the unseen sink's naming, the LoadTime notes, the
-/// example paths, the bounds on hostile names and on the statement count, <c>SameAs</c>, order, role, determinism and
-/// that it never throws. Hostile characters are built from escapes; the source holds none raw.
+/// example paths, the bounds on hostile names and on the statement count, <c>SameAs</c> (a copy whose folder role makes
+/// other cells triggers than its primary's is listed in full, review C1), order, role (a folder is judged by its own role
+/// or a loaded member's, review W1), determinism and that it never throws. Hostile characters are built from escapes; the
+/// source holds none raw.
 /// </summary>
 public sealed class ReachabilitySummaryTests
 {
@@ -42,15 +44,43 @@ public sealed class ReachabilitySummaryTests
         Assert.Equal(signal.OrderBy(c => c), ReachabilityPresentation.SignalCapabilities.OrderBy(c => c));
     }
 
-    // Acceptance criterion 1, "and only for it": over every single root class, every sink and both labels, a trigger is
-    // exactly NativeEntry (either label) or Finalizer (Direct) on a signal capability.
+    // The role axis below is checked over every role by name: a new role must be placed on the table, not defaulted.
     [Fact]
-    public void Presentation_KindOf_IsATrigger_OnlyForNativeEntryAndFinalizerDirect_OnASignalCapability()
+    public void Premise_PackageItemRole_IsTheEightRoles()
     {
+        Assert.Equal(
+            [PackageItemRole.Lib, PackageItemRole.Runtimes, PackageItemRole.Tools, PackageItemRole.Build, PackageItemRole.BuildTransitive, PackageItemRole.Analyzers, PackageItemRole.Content, PackageItemRole.Other],
+            Enum.GetValues<PackageItemRole>());
+    }
+
+    // The folder data below names a folder of every role, so the summary-level role tests cover them all.
+    [Fact]
+    public void Premise_TheRoleFolders_CoverEveryRole()
+    {
+        var roles = FinalizerTriggerFolders().Concat(FinalizerInformationalFolders()).Select(row => (PackageItemRole)row[1]).Distinct();
+
+        Assert.Equal(Enum.GetValues<PackageItemRole>(), roles.OrderBy(r => r));
+    }
+
+    // Acceptance criterion 1, "and only for it": over every single root class, every sink, both labels and every folder
+    // role, a trigger is exactly NativeEntry (either label, any role) or Finalizer (Direct, in a lib or runtimes folder) on
+    // a signal capability (user's ruling, 2026-11-11).
+    [Fact]
+    public void Presentation_KindOf_IsATrigger_OnlyForNativeEntry_AndFinalizerDirectInLibOrRuntimes_OnASignalCapability()
+    {
+        var triggers = 0;
         foreach (var cls in Enum.GetValues<RootClass>().Where(c => c != RootClass.None))
             foreach (var sink in allSinks)
                 foreach (var direct in new[] { true, false })
-                    Assert.True(Expected(cls, sink, direct) == ReachabilityPresentation.KindOf(cls, sink, direct), $"{cls} {sink?.ToString() ?? "unseen"} direct={direct}");
+                    foreach (var role in Enum.GetValues<PackageItemRole>())
+                    {
+                        var kind = ReachabilityPresentation.KindOf(cls, sink, direct, role);
+                        Assert.True(Expected(cls, sink, direct, role) == kind, $"{cls} {sink?.ToString() ?? "unseen"} direct={direct} role={role}");
+                        triggers += kind == ReachStatementKind.Trigger ? 1 : 0;
+                    }
+
+        // NativeEntry: 5 signal capabilities x 2 labels x 8 roles; Finalizer: 5 x Direct x {Lib, Runtimes}.
+        Assert.Equal(5 * 2 * 8 + 5 * 2, triggers);
     }
     #endregion
 
@@ -138,7 +168,7 @@ public sealed class ReachabilitySummaryTests
         var statements = StatementsOf(rows);
 
         Assert.Equal(rows.Length * 2, statements.Count);
-        Assert.All(statements, s => Assert.Equal(Expected(s.Class, s.Capability, s.Direct), s.Kind));
+        Assert.All(statements, s => Assert.Equal(Expected(s.Class, s.Capability, s.Direct, PackageItemRole.Lib), s.Kind));
         Assert.Equal(5 * 2 + 5, statements.Count(s => s.Kind == ReachStatementKind.Trigger));
     }
 
@@ -149,6 +179,182 @@ public sealed class ReachabilitySummaryTests
         var statements = StatementsOf(Row(cls, Capability.Network, 2, 1));
 
         Assert.Equal([$"{subject} directly reaches Network", $"{subject} creates a delegate that reaches Network"], statements.Select(s => s.Text));
+    }
+    #endregion
+
+    #region Methods: the folder role (user's ruling, 2026-11-11)
+    // Finalizer at Direct triggers only where R2b measured it: lib and runtimes folders, by the folder's first segment.
+    [Theory]
+    [MemberData(nameof(FinalizerTriggerFolders))]
+    public void Summary_FinalizerDirect_IsATrigger_InALibOrRuntimesFolder(string folder, PackageItemRole role)
+    {
+        var summary = Assert.Single(Summarize(Analyzed(folder, Report(signal.Select(c => Row(RootClass.Finalizer, c, 1, 1, PathOf(true)))))).Folders);
+
+        Assert.Equal(role, summary.Role);
+        Assert.Equal(
+            signal.OrderBy(c => c).Select(c => (ReachStatementKind.Trigger, (Capability?)c, true, $"a finalizer directly reaches {c}")),
+            summary.Statements.Select(s => (s.Kind, s.Capability, s.Direct, s.Text)));
+    }
+
+    [Theory]
+    [MemberData(nameof(FinalizerInformationalFolders))]
+    public void Summary_FinalizerDirect_IsInformational_OutsideLibAndRuntimes(string folder, PackageItemRole role)
+    {
+        var summary = Assert.Single(Summarize(Analyzed(folder, Report(signal.Select(c => Row(RootClass.Finalizer, c, 1, 1, PathOf(true)))))).Folders);
+
+        Assert.Equal(role, summary.Role);
+        Assert.Equal(
+            signal.OrderBy(c => c).Select(c => (ReachStatementKind.Informational, (Capability?)c, true, $"a finalizer directly reaches {c}")),
+            summary.Statements.Select(s => (s.Kind, s.Capability, s.Direct, s.Text)));
+    }
+
+    // The role changes only the Kind: the same reach in a folder of every role gives the same statement otherwise.
+    [Fact]
+    public void Summary_FinalizerDirect_IsTheSameStatementInEveryRole_ButForItsKind()
+    {
+        var folders = AllRoleFolders();
+        var report = Report([Row(RootClass.Finalizer, Capability.ProcessExecution, 1, 1, PathOf(true, 3, evidence: ReachEvidence.ChaOnly))]);
+
+        var summary = Summarize([.. folders.Select(f => Analyzed(f.Folder, report))]);
+
+        var statements = summary.Folders.Select(f => Assert.Single(f.Statements)).ToArray();
+        Assert.Equal(
+            folders.Select(f => f.Role is PackageItemRole.Lib or PackageItemRole.Runtimes ? ReachStatementKind.Trigger : ReachStatementKind.Informational),
+            statements.Select(s => s.Kind));
+        Assert.Single(statements
+            .Select(s => (s.Class, s.Capability, s.Direct, s.Roots, s.Text, s.Example!.Evidence, string.Join("|", s.Example!.Hops), s.Example!.HiddenHops, s.Example!.Unseen))
+            .Distinct());
+        Assert.Equal("a finalizer directly reaches ProcessExecution", statements[0].Text);
+    }
+
+    [Theory]
+    [MemberData(nameof(AllRoleFolderData))]
+    public void Summary_FinalizerDeferred_IsInformational_InEveryRole(string folder, PackageItemRole role)
+    {
+        var summary = Assert.Single(Summarize(Analyzed(folder, Report(signal.Select(c => Row(RootClass.Finalizer, c, 1, 0, PathOf(false)))))).Folders);
+
+        Assert.Equal(role, summary.Role);
+        Assert.Equal(
+            signal.OrderBy(c => c).Select(c => (ReachStatementKind.Informational, (Capability?)c, false, $"a finalizer creates a delegate that reaches {c}")),
+            summary.Statements.Select(s => (s.Kind, s.Capability, s.Direct, s.Text)));
+    }
+
+    // NativeEntry, at both labels, still triggers in every role: tasks/ and tools/ included.
+    [Theory]
+    [MemberData(nameof(AllRoleFolderData))]
+    public void Summary_NativeEntry_IsATrigger_AtBothLabels_InEveryRole(string folder, PackageItemRole role)
+    {
+        var summary = Assert.Single(Summarize(Analyzed(folder, Report(signal.Select(c => Row(RootClass.NativeEntry, c, 2, 1, PathOf(true), PathOf(false)))))).Folders);
+
+        Assert.Equal(role, summary.Role);
+        Assert.Equal(
+            signal.SelectMany(c => new[]
+            {
+                (ReachStatementKind.Trigger, (Capability?)c, true, $"a native entry point directly reaches {c}"),
+                (ReachStatementKind.Trigger, (Capability?)c, false, $"a native entry point creates a delegate that reaches {c}"),
+            }).OrderBy(t => (int)t.Item2!.Value).ThenBy(t => !t.Item3),
+            summary.Statements.Select(s => (s.Kind, s.Capability, s.Direct, s.Text)));
+    }
+
+    // Every presented cell in a folder of each role carries the table's kind for that role: 10 NativeEntry triggers
+    // everywhere, plus Finalizer's 5 in lib and runtimes.
+    [Theory]
+    [MemberData(nameof(AllRoleFolderData))]
+    public void Summary_EveryPresentedCell_HasTheTablesKind_InEveryRole(string folder, PackageItemRole role)
+    {
+        var rows = presented.SelectMany(cls => allSinks.Select(sink => Row(cls, sink, 2, 1))).ToArray();
+
+        var summary = Assert.Single(Summarize(Analyzed(folder, Report(rows))).Folders);
+
+        Assert.Equal(role, summary.Role);
+        Assert.Equal(rows.Length * 2, summary.Statements.Count);
+        Assert.All(summary.Statements, s => Assert.Equal(Expected(s.Class, s.Capability, s.Direct, role), s.Kind));
+        Assert.Equal(5 * 2 + (role is PackageItemRole.Lib or PackageItemRole.Runtimes ? 5 : 0), summary.Statements.Count(s => s.Kind == ReachStatementKind.Trigger));
+    }
+
+    // Statements sort by Kind first, so outside lib and runtimes the Finalizer/Direct statement sorts with the
+    // informational ones, by class, ahead of its deferred twin; in lib it stays among the triggers (the order test above).
+    [Theory]
+    [MemberData(nameof(FinalizerInformationalFolders))]
+    public void Summary_FinalizerDirect_OutsideLibAndRuntimes_SortsWithTheInformationalStatements(string folder, PackageItemRole role)
+    {
+        var report = Report(
+        [
+            Row(RootClass.LoadTime, null, 2, 1),
+            Row(RootClass.TypeInitializer, Capability.Network, 2, 1),
+            Row(RootClass.NativeEntry, Capability.Network, 1, 0),
+            Row(RootClass.Finalizer, Capability.Network, 2, 1),
+            Row(RootClass.NativeEntry, null, 1, 1),
+            Row(RootClass.NativeEntry, Capability.Cryptography, 1, 1),
+            Row(RootClass.HostContract, Capability.FileSystem, 1, 0),
+            Row(RootClass.TypeInitializer, Capability.FileSystem, 1, 1),
+            Row(RootClass.NativeEntry, Capability.FileSystem, 2, 1),
+        ]);
+
+        var summary = Assert.Single(Summarize(Analyzed(folder, report)).Folders);
+
+        Assert.Equal(role, summary.Role);
+        Assert.Equal(
+            [
+                (ReachStatementKind.Trigger, RootClass.NativeEntry, (Capability?)Capability.FileSystem, true),
+                (ReachStatementKind.Trigger, RootClass.NativeEntry, Capability.FileSystem, false),
+                (ReachStatementKind.Trigger, RootClass.NativeEntry, Capability.Network, false),
+                (ReachStatementKind.Informational, RootClass.NativeEntry, Capability.Cryptography, true),
+                (ReachStatementKind.Informational, RootClass.NativeEntry, null, true),
+                (ReachStatementKind.Informational, RootClass.Finalizer, Capability.Network, true),
+                (ReachStatementKind.Informational, RootClass.Finalizer, Capability.Network, false),
+                (ReachStatementKind.Informational, RootClass.TypeInitializer, Capability.FileSystem, true),
+                (ReachStatementKind.Informational, RootClass.TypeInitializer, Capability.Network, true),
+                (ReachStatementKind.Informational, RootClass.TypeInitializer, Capability.Network, false),
+                (ReachStatementKind.Informational, RootClass.HostContract, Capability.FileSystem, false),
+                (ReachStatementKind.Informational, RootClass.LoadTime, null, true),
+                (ReachStatementKind.Informational, RootClass.LoadTime, null, false),
+            ],
+            summary.Statements.Select(s => (s.Kind, s.Class, s.Capability, s.Direct)));
+    }
+
+    // The package-wide cap keeps triggers first, and only what is a trigger in its folder's role counts as one: 56
+    // informational lib folders of 36 (2,016), then a folder of 15 reaches (10 NativeEntry, 5 Finalizer/Direct). In lib or
+    // runtimes all 15 are triggers and survive; elsewhere the 5 Finalizer/Direct are informational, come last in folder
+    // order, and are the ones dropped. 2,031 statements, 31 dropped either way.
+    [Theory]
+    [InlineData("lib/zz-triggers", 15)]
+    [InlineData("runtimes/win/lib/net8.0", 15)]
+    [InlineData("tools/net8.0", 10)]
+    [InlineData("tasks/net461", 10)]
+    [InlineData("tools/net8.0/runtimes/browser/lib/net8.0", 10)]
+    public void Summary_StatementCap_KeepsTriggersFirst_ByTheirFoldersRole(string last, int keptInLast)
+    {
+        var folders = Enumerable.Range(0, 56).Select(i => InformationalFolder($"lib/i{i:00}", 36)).Append(TriggerFolder(last)).ToArray();
+
+        var summary = Summarize(folders);
+
+        Assert.Equal(2000, summary.Folders.Sum(f => f.Statements.Count));
+        Assert.Equal(31, summary.StatementsDropped);
+        var lastStatements = summary.Folders[^1].Statements;
+        Assert.Equal(keptInLast, lastStatements.Count);
+        Assert.All(lastStatements, s => Assert.Equal(ReachStatementKind.Trigger, s.Kind));
+        Assert.Equal(10, lastStatements.Count(s => s.Class == RootClass.NativeEntry));
+        Assert.Equal(keptInLast - 10, lastStatements.Count(s => s.Class == RootClass.Finalizer));
+        Assert.All(summary.Folders.Take(55), f => Assert.Equal(36, f.Statements.Count));
+        Assert.Equal(20 - keptInLast, summary.Folders[55].Statements.Count);   // the information at the edge gets what the triggers leave
+    }
+
+    // A tool may ship a runtimes/.../lib tree of its own: the role is the first segment's, so it is still Tools.
+    [Fact]
+    public void Summary_NestedRuntimesLibUnderTools_IsTools_SoFinalizerDirectIsInformational()
+    {
+        const string folder = "tools/net8.0/runtimes/browser/lib/net8.0";
+
+        var summary = Assert.Single(Summarize(Analyzed(folder, Report([Row(RootClass.Finalizer, Capability.FileSystem, 1, 1, PathOf(true)), Row(RootClass.NativeEntry, Capability.FileSystem, 1, 1, PathOf(true))]))).Folders);
+
+        Assert.Equal(PackageItemRole.Tools, summary.Role);
+        Assert.Equal(
+            [
+                (ReachStatementKind.Trigger, RootClass.NativeEntry, "a native entry point directly reaches FileSystem"),
+                (ReachStatementKind.Informational, RootClass.Finalizer, "a finalizer directly reaches FileSystem"),
+            ],
+            summary.Statements.Select(s => (s.Kind, s.Class, s.Text)));
     }
     #endregion
 
@@ -702,10 +908,12 @@ public sealed class ReachabilitySummaryTests
             [Row(RootClass.NativeEntry, Capability.Network, 1, 1, new ReachPath(longNode, ReachEvidence.Bound, true, [Hop(longNode), Hop("Ext.Sink", null)], 2, false, null))],
             presented.Select(c => Status(c, RootClassVerdict.Unknown, 1, longReason)));
 
+        // The copy's primary is in the report (last; the lookup is by name), so the copy keeps its SameAs (review C1).
         var summary = Summarize(
             Analyzed(longFolder, report),
             NotAnalyzed("lib/net10.0", FolderOutcome.TimedOut, longReason),
-            Analyzed("lib/net11.0", report, sameAs: longSameAs));
+            Analyzed("lib/net11.0", report, sameAs: longSameAs),
+            Analyzed(longSameAs, report));
 
         var (folder, timedOut, copy) = (summary.Folders[0], summary.Folders[1], summary.Folders[2]);
         Assert.Equal(Cut(longFolder), folder.Folder);
@@ -933,6 +1141,403 @@ public sealed class ReachabilitySummaryTests
     }
     #endregion
 
+    #region Methods: SameAs across folder roles (review C1)
+    // Deduplication ignores paths and folders sort ordinally, so build/net8.0 is the primary and lib/net8.0 its copy. The
+    // copy is listed in full under its own role: the lib Finalizer/Direct trigger survives the build primary's information.
+    [Fact]
+    public void Summary_SameAsLibCopy_OfABuildPrimary_KeepsItsFinalizerDirectTriggers()
+    {
+        var report = CrossRoleReport();
+
+        var summary = Summarize(Analyzed("build/net8.0", report), Analyzed("lib/net8.0", report, sameAs: "build/net8.0"));
+
+        var (primary, copy) = (summary.Folders[0], summary.Folders[1]);
+        Assert.Equal((PackageItemRole.Build, (string?)null), (primary.Role, primary.SameAs));
+        Assert.Equal([(ReachStatementKind.Trigger, RootClass.NativeEntry), (ReachStatementKind.Informational, RootClass.Finalizer)], KindsOf(primary));
+        Assert.Empty(primary.Notes);
+        Assert.Equal(("lib/net8.0", PackageItemRole.Lib, FolderOutcome.Analyzed, (string?)null, (string?)null), (copy.Folder, copy.Role, copy.Outcome, copy.Reason, copy.SameAs));
+        Assert.Equal([(ReachStatementKind.Trigger, RootClass.NativeEntry), (ReachStatementKind.Trigger, RootClass.Finalizer)], KindsOf(copy));
+        Assert.Equal([ListedInFull("build/net8.0")], copy.Notes);
+        AssertIsTheFolderAlone(copy, Analyzed("lib/net8.0", report));
+        Assert.Equal(presented, copy.Classes.Select(c => c.Class));
+        Assert.Equal(0, summary.StatementsDropped);
+        Assert.True(summary.Complete);
+    }
+
+    // The copy's own notes come first, then the one that says why it is listed.
+    [Fact]
+    public void Summary_ADivergentCopy_KeepsItsLoadTimeNote_BeforeTheListedInFullNote()
+    {
+        var report = CrossRoleReport(loadTimeGap: true);
+
+        var summary = Summarize(Analyzed("build/net8.0", report), Analyzed("lib/net8.0", report, sameAs: "build/net8.0"));
+
+        Assert.Equal([LoadTimeNote], summary.Folders[0].Notes);
+        Assert.Equal([LoadTimeNote, ListedInFull("build/net8.0")], summary.Folders[1].Notes);
+        Assert.False(summary.Complete);   // LoadTime is Unknown in both
+    }
+
+    [Fact]
+    public void Summary_ADivergentCopy_StillCountsTowardComplete()
+    {
+        var good = CrossRoleReport();
+        var failure = new PackageGraphLoadFailure("lib/net8.0/a.dll", "x");
+
+        Assert.True(Summarize(Analyzed("build/net8.0", good), Analyzed("lib/net8.0", good, sameAs: "build/net8.0")).Complete);
+        var failed = Summarize(Analyzed("build/net8.0", good), Analyzed("lib/net8.0", good, [failure], sameAs: "build/net8.0"));
+        Assert.False(failed.Complete);
+        Assert.All(failed.Folders[1].Classes, c => Assert.Equal(RootClassVerdict.Unknown, c.Verdict));
+        Assert.All(failed.Folders[0].Classes, c => Assert.Equal(RootClassVerdict.Reaches, c.Verdict));
+        Assert.False(Summarize(Analyzed("build/net8.0", good), Analyzed("lib/net8.0", Report([], partial: true, partialReason: "p"), sameAs: "build/net8.0")).Complete);
+    }
+
+    // 55 informational lib folders of 36 (1,980), then build/zz (10 NativeEntry triggers, 5 Finalizer/Direct informational
+    // in build) and its lib/zz copy (all 15 triggers): 2,010 statements, 25 triggers. Every trigger survives; the build
+    // primary's 5 informational come last and are dropped, and the information at the edge gives up 5 more.
+    [Fact]
+    public void Summary_StatementCap_CountsADivergentCopysTriggers_AsTriggers()
+    {
+        var folders = Enumerable.Range(0, 55).Select(i => InformationalFolder($"lib/i{i:00}", 36))
+            .Append(TriggerFolder("build/zz"))
+            .Append(TriggerFolder("lib/zz") with { SameAs = "build/zz" })
+            .ToArray();
+
+        var summary = Summarize(folders);
+
+        Assert.Equal(2000, summary.Folders.Sum(f => f.Statements.Count));
+        Assert.Equal(10, summary.StatementsDropped);
+        var (primary, copy) = (summary.Folders[^2], summary.Folders[^1]);
+        Assert.Equal(10, primary.Statements.Count);
+        Assert.All(primary.Statements, s => Assert.Equal((ReachStatementKind.Trigger, RootClass.NativeEntry), (s.Kind, s.Class)));
+        Assert.Null(copy.SameAs);
+        Assert.Equal(15, copy.Statements.Count);
+        Assert.All(copy.Statements, s => Assert.Equal(ReachStatementKind.Trigger, s.Kind));
+        Assert.All(summary.Folders.Take(54), f => Assert.Equal(36, f.Statements.Count));
+        Assert.Equal(31, summary.Folders[54].Statements.Count);
+    }
+
+    // The reverse: a lib primary and its tools copy also differ, so the copy is listed in full, its Finalizer/Direct
+    // informational as tools makes it.
+    [Fact]
+    public void Summary_SameAsToolsCopy_OfALibPrimary_IsListedInFull_WithFinalizerDirectInformational()
+    {
+        var report = CrossRoleReport();
+
+        var summary = Summarize(Analyzed("lib/net8.0", report), Analyzed("tools/net8.0", report, sameAs: "lib/net8.0"));
+
+        var (primary, copy) = (summary.Folders[0], summary.Folders[1]);
+        Assert.Equal([(ReachStatementKind.Trigger, RootClass.NativeEntry), (ReachStatementKind.Trigger, RootClass.Finalizer)], KindsOf(primary));
+        Assert.Empty(primary.Notes);
+        Assert.Equal((PackageItemRole.Tools, (string?)null), (copy.Role, copy.SameAs));
+        Assert.Equal([(ReachStatementKind.Trigger, RootClass.NativeEntry), (ReachStatementKind.Informational, RootClass.Finalizer)], KindsOf(copy));
+        Assert.Equal([ListedInFull("lib/net8.0")], copy.Notes);
+        AssertIsTheFolderAlone(copy, Analyzed("tools/net8.0", report));
+    }
+
+    // Any pair whose roles make different cells triggers: the copy is its own folder summarized alone, plus the note.
+    [Theory]
+    [InlineData("build/net8.0", "lib/net8.0")]
+    [InlineData("buildTransitive/net8.0", "runtimes/win/lib/net8.0")]
+    [InlineData("tools/net8.0", "Lib/net8.0")]
+    [InlineData("analyzers/dotnet/cs", "runtimes/win-x64/native")]
+    [InlineData("lib/net8.0", "tasks/net461")]
+    [InlineData("runtimes/win/lib/net8.0", "build/net8.0")]
+    [InlineData("lib/net8.0", "tools/net8.0/runtimes/browser/lib/net8.0")]
+    public void Summary_SameAsCopy_WhoseRoleTriggersOtherwise_IsListedInFull(string primaryFolder, string copyFolder)
+    {
+        var report = CrossRoleReport();
+
+        var summary = Summarize(Analyzed(primaryFolder, report), Analyzed(copyFolder, report, sameAs: primaryFolder));
+
+        var copy = summary.Folders[1];
+        Assert.Null(copy.SameAs);
+        Assert.Equal([ListedInFull(primaryFolder)], copy.Notes);
+        AssertIsTheFolderAlone(copy, Analyzed(copyFolder, report));
+        AssertIsTheFolderAlone(summary.Folders[0], Analyzed(primaryFolder, report));
+        Assert.Empty(summary.Folders[0].Notes);
+    }
+
+    // Lib with runtimes, and any two roles where only NativeEntry triggers, make the same cells triggers: the copy stays a
+    // reference to its primary, with nothing of its own.
+    [Theory]
+    [InlineData("lib/net8.0", "runtimes/win/lib/net8.0")]
+    [InlineData("runtimes/win/lib/net8.0", "lib/net8.0")]
+    [InlineData("lib/net8.0", "Lib/net9.0")]
+    [InlineData("tools/a", "tasks/b")]
+    [InlineData("build/net8.0", "tools/net8.0")]
+    [InlineData("analyzers/dotnet/cs", "content/any")]
+    [InlineData("buildTransitive/net8.0", "contentFiles/any/net8.0")]
+    [InlineData("tools/net8.0", "tools/net8.0/runtimes/browser/lib/net8.0")]
+    public void Summary_SameAsCopy_WhoseRoleTriggersAlike_StaysSuppressed(string primaryFolder, string copyFolder)
+    {
+        var report = CrossRoleReport();
+
+        var summary = Summarize(Analyzed(primaryFolder, report), Analyzed(copyFolder, report, sameAs: primaryFolder));
+
+        var copy = summary.Folders[1];
+        Assert.Equal((copyFolder, FolderOutcome.Analyzed, (string?)null, (string?)primaryFolder), (copy.Folder, copy.Outcome, copy.Reason, copy.SameAs));
+        Assert.Empty(copy.Classes);
+        Assert.Empty(copy.Notes);
+        Assert.Empty(copy.Statements);
+        Assert.Equal(2, summary.Folders[0].Statements.Count);
+        Assert.True(summary.Complete);
+    }
+
+    // A crafted SameAs naming a folder the report does not hold: there is no primary to defer to, so the copy is listed in
+    // full, even in a role that would have matched.
+    [Theory]
+    [InlineData("lib/net9.0", "lib/gone")]
+    [InlineData("tools/net9.0", "tools/gone")]
+    [InlineData("lib/net9.0", "")]
+    public void Summary_SameAsCopy_WhosePrimaryIsNotInTheReport_IsListedInFull(string copyFolder, string missing)
+    {
+        var report = CrossRoleReport();
+
+        var summary = Summarize(Analyzed("lib/net8.0", report), Analyzed(copyFolder, report, sameAs: missing));
+
+        var copy = summary.Folders[1];
+        Assert.Null(copy.SameAs);
+        Assert.Equal([ListedInFull(missing)], copy.Notes);
+        AssertIsTheFolderAlone(copy, Analyzed(copyFolder, report));
+    }
+
+    // The missing primary's name is attacker-shaped: the note escapes it, and the cut bounds the whole note. The
+    // explanation comes first, so a long name loses only its own end to the cut.
+    [Fact]
+    public void Summary_TheListedInFullNote_EscapesThePrimarysName_AndTheCutTakesOnlyItsEnd()
+    {
+        var rlo = char.ConvertFromUtf32(0x202E);
+        var tail = new string('g', 300);
+        const string explanation = "listed in full because its folder role changes which statements are triggers; same files as ";
+
+        var summary = Summarize(Analyzed("lib/net8.0", CrossRoleReport(), sameAs: "lib/" + rlo + tail));
+
+        var note = Assert.Single(Assert.Single(summary.Folders).Notes);
+        Assert.Equal(Cut(ListedInFull("lib/" + @"\" + "u202e" + tail)), note);
+        Assert.StartsWith(explanation + "lib/" + @"\" + "u202e" + "ggg", note, StringComparison.Ordinal);
+        Assert.StartsWith((explanation + "lib/" + @"\" + "u202e" + tail)[..256] + (char)0x2026 + "[+", note, StringComparison.Ordinal);   // cut inside the name
+        Assert.True(explanation.Length + "lib/".Length < 256);
+        Assert.DoesNotContain(rlo, note, StringComparison.Ordinal);
+    }
+
+    // What PackageReachability.Copy gives the copy of a primary that was not analysed: the primary's outcome and reason,
+    // remapped to the copy's own paths, and SameAs the primary (GraphWorkerParentTests pins that end to end). Only an
+    // analysed copy has statements for its role to change, so a not-analysed one is never divergent: whatever the two
+    // roles, it keeps its outcome, its reason and its SameAs, and gets no note.
+    [Theory]
+    [MemberData(nameof(NotAnalyzedCopyCases))]
+    public void Summary_ACrashedTimedOutOrNotRunCopy_KeepsItsOutcomeReasonAndSameAs_WhateverTheRoles(FolderOutcome outcome, string primaryFolder, string copyFolder)
+    {
+        var primary = new FolderReachability(primaryFolder, [$"{primaryFolder}/a.dll"], [], outcome, null, $"exit 9 on {primaryFolder}/a.dll", null, 0, 0);
+        var copy = primary with { Folder = copyFolder, Assemblies = [$"{copyFolder}/a.dll"], Reason = $"exit 9 on {copyFolder}/a.dll", SameAs = primaryFolder };
+
+        var summary = Summarize(primary, copy);
+
+        var shown = summary.Folders[1];
+        var reason = outcome == FolderOutcome.Crashed
+            ? $"the graph worker failed on this folder, so it is unanalysable, and suspect: exit 9 on {copyFolder}/a.dll"
+            : $"exit 9 on {copyFolder}/a.dll";
+        Assert.Equal((copyFolder, outcome, (string?)reason, (string?)primaryFolder), (shown.Folder, shown.Outcome, shown.Reason, shown.SameAs));
+        Assert.Empty(shown.Classes);
+        Assert.Empty(shown.Notes);
+        Assert.Empty(shown.Statements);
+        Assert.False(summary.Complete);
+    }
+
+    // A NothingLoaded copy's reason names its own failures; it keeps its SameAs whatever the roles.
+    [Theory]
+    [InlineData("build/net8.0", "lib/net8.0")]
+    [InlineData("lib/net8.0", "tools/net8.0")]
+    [InlineData("lib/net8.0", "lib/net9.0")]
+    public void Summary_ANothingLoadedCopy_NamesItsOwnFailures_AndKeepsItsSameAs_WhateverTheRoles(string primaryFolder, string copyFolder)
+    {
+        var primary = new FolderReachability(primaryFolder, [], [new($"{primaryFolder}/a.dll", "not managed")], FolderOutcome.NothingLoaded, null, null, null, 0, 0);
+        var copy = primary with { Folder = copyFolder, LoadFailures = [new($"{copyFolder}/a.dll", "not managed")], SameAs = primaryFolder };
+
+        var summary = Summarize(primary, copy);
+
+        var shown = summary.Folders[1];
+        Assert.Equal((FolderOutcome.NothingLoaded, (string?)$"1 assembly(ies) did not load: {copyFolder}/a.dll", (string?)primaryFolder), (shown.Outcome, shown.Reason, shown.SameAs));
+        Assert.Empty(shown.Notes);
+        Assert.Empty(shown.Statements);
+        Assert.False(summary.Complete);
+    }
+
+    // Analyzed in name only (no report): nothing to list in full, so it keeps its SameAs, every class Unknown, no note.
+    [Theory]
+    [InlineData("build/net8.0", "lib/net8.0")]
+    [InlineData("lib/net8.0", "lib/net9.0")]
+    public void Summary_AnAnalyzedCopyWithoutAReport_KeepsItsSameAs_WhateverTheRoles(string primaryFolder, string copyFolder)
+    {
+        var copy = new FolderReachability(copyFolder, [$"{copyFolder}/a.dll"], [], FolderOutcome.Analyzed, null, null, primaryFolder, 0, 0);
+
+        var summary = Summarize(Analyzed(primaryFolder, CrossRoleReport()), copy);
+
+        var shown = summary.Folders[1];
+        Assert.Equal(((string?)"the folder has no reachability report", (string?)primaryFolder), (shown.Reason, shown.SameAs));
+        AssertEveryClassUnknownFor(shown, shown.Reason!);
+        Assert.Empty(shown.Notes);
+        Assert.Empty(shown.Statements);
+        Assert.False(summary.Complete);
+    }
+
+    // Even with its primary missing from the report, a not-analysed copy is no divergent one: its SameAs is kept, escaped.
+    [Fact]
+    public void Summary_ACrashedCopy_WhosePrimaryIsNotInTheReport_KeepsItsSameAs()
+    {
+        var copy = new FolderReachability("lib/net9.0", ["lib/net9.0/a.dll"], [], FolderOutcome.Crashed, null, "exit 9", "build/gone", 0, 0);
+
+        var shown = Assert.Single(Summarize(copy).Folders);
+
+        Assert.Equal((FolderOutcome.Crashed, (string?)"build/gone"), (shown.Outcome, shown.SameAs));
+        Assert.Empty(shown.Notes);
+    }
+
+    public static TheoryData<FolderOutcome, string, string> NotAnalyzedCopyCases()
+    {
+        var data = new TheoryData<FolderOutcome, string, string>();
+        foreach (var outcome in new[] { FolderOutcome.Crashed, FolderOutcome.TimedOut, FolderOutcome.NotRun })
+            foreach (var (primary, copy) in new[] { ("build/net8.0", "lib/net8.0"), ("lib/net8.0", "tools/net8.0"), ("lib/net8.0", "lib/net9.0"), ("build/net8.0", "tools/net8.0") })
+                data.Add(outcome, primary, copy);
+        return data;
+    }
+    #endregion
+
+    #region Methods: a folder judged by its members' roles (review W1)
+    // NuGet unescapes entry names, so an entry named lib%2Fnet8.0%2FA.dll is extracted at the package root (folder "",
+    // role Other) but installed into lib/. Its folder is judged as lib; the role shown is still the folder's own.
+    [Theory]
+    [InlineData("lib%2Fnet8.0%2FA.dll")]
+    [InlineData("runtimes%2Fwin%2Flib%2Fnet8.0%2FA.dll")]
+    [InlineData("%6Cib%2Fnet8.0%2FA.dll")]
+    [InlineData("LIB%2fnet8.0%2fA.dll")]
+    public void Summary_TheRootFolder_WithAnEscapedLibMember_JudgesFinalizerDirectAsATrigger_ButShowsRoleOther(string member)
+    {
+        var summary = Assert.Single(Summarize(Analyzed("", CrossRoleReport(), assemblies: [member])).Folders);
+
+        Assert.Equal((string.Empty, PackageItemRole.Other), (summary.Folder, summary.Role));
+        Assert.Equal([(ReachStatementKind.Trigger, RootClass.NativeEntry), (ReachStatementKind.Trigger, RootClass.Finalizer)], KindsOf(summary));
+    }
+
+    [Fact]
+    public void Summary_TheRootFolder_WithAPlainMember_KeepsFinalizerDirectInformational()
+    {
+        var summary = Assert.Single(Summarize(Analyzed("", CrossRoleReport(), assemblies: ["A.dll"])).Folders);
+
+        Assert.Equal(PackageItemRole.Other, summary.Role);
+        Assert.Equal([(ReachStatementKind.Trigger, RootClass.NativeEntry), (ReachStatementKind.Informational, RootClass.Finalizer)], KindsOf(summary));
+    }
+
+    [Fact]
+    public void Summary_AToolsFolder_WithItsOwnMember_KeepsFinalizerDirectInformational()
+    {
+        var summary = Assert.Single(Summarize(Analyzed("tools/x", CrossRoleReport(), assemblies: ["tools/x/A.dll"])).Folders);
+
+        Assert.Equal(PackageItemRole.Tools, summary.Role);
+        Assert.Equal([(ReachStatementKind.Trigger, RootClass.NativeEntry), (ReachStatementKind.Informational, RootClass.Finalizer)], KindsOf(summary));
+    }
+
+    // One lib member among others is enough: the folder is judged by the role that triggers most.
+    [Fact]
+    public void Summary_ATasksFolder_WithOneEscapedLibMember_JudgesFinalizerDirectAsATrigger()
+    {
+        var summary = Assert.Single(Summarize(Analyzed("tasks/net461", CrossRoleReport(), assemblies: ["tasks/net461/A.dll", "lib%2Fnet8.0%2FB.dll", "tasks/net461/C.dll"])).Folders);
+
+        Assert.Equal(PackageItemRole.Other, summary.Role);
+        Assert.Equal([(ReachStatementKind.Trigger, RootClass.NativeEntry), (ReachStatementKind.Trigger, RootClass.Finalizer)], KindsOf(summary));
+    }
+
+    // An escaped "lib" deeper in a member's path is not its first segment: tasks/net461/lib%2F... is still tasks.
+    [Fact]
+    public void Summary_ATasksFolder_WhoseMemberEscapesLibPastItsFirstSegment_KeepsFinalizerDirectInformational()
+    {
+        var summary = Assert.Single(Summarize(Analyzed("tasks/net461", CrossRoleReport(), assemblies: ["tasks/net461/lib%2Fnet8.0%2FA.dll"])).Folders);
+
+        Assert.Equal([(ReachStatementKind.Trigger, RootClass.NativeEntry), (ReachStatementKind.Informational, RootClass.Finalizer)], KindsOf(summary));
+    }
+
+    // The trigger role decides SameAs too: a root folder holding an escaped lib member triggers as its lib primary does, so
+    // it stays a reference; with a plain member it does not, and is listed in full.
+    [Theory]
+    [InlineData("lib%2Fnet8.0%2FA.dll", true)]
+    [InlineData("A.dll", false)]
+    public void Summary_ACopysTriggerRole_ComesFromItsMembers_Too(string member, bool suppressed)
+    {
+        var report = CrossRoleReport();
+
+        var summary = Summarize(Analyzed("lib/net8.0", report, assemblies: ["lib/net8.0/A.dll"]), Analyzed("", report, sameAs: "lib/net8.0", assemblies: [member]));
+
+        var copy = summary.Folders[1];
+        string[] notes = suppressed ? [] : [ListedInFull("lib/net8.0")];
+        Assert.Equal(suppressed ? "lib/net8.0" : null, copy.SameAs);
+        Assert.Equal(suppressed ? 0 : 2, copy.Statements.Count);
+        Assert.Equal(notes, copy.Notes);
+    }
+    #endregion
+
+    #region Methods: TriggerRole and SameKinds
+    [Theory]
+    [MemberData(nameof(Roles))]
+    public void Presentation_TriggerRole_WithNoMembers_IsTheFolderRole(PackageItemRole role)
+    {
+        Assert.Equal(role, ReachabilityPresentation.TriggerRole(role, []));
+    }
+
+    // Over all 64 (folder, member) pairs: the member's role only when more cells trigger in it (lib or runtimes over any
+    // other), checked against KindOf's own trigger count too.
+    [Fact]
+    public void Presentation_TriggerRole_OfAFolderAndOneMember_IsTheMembers_OnlyWhenMoreCellsTriggerInIt()
+    {
+        foreach (var folder in Enum.GetValues<PackageItemRole>())
+            foreach (var member in Enum.GetValues<PackageItemRole>())
+            {
+                var expected = LibOrRuntimes(member) && !LibOrRuntimes(folder) ? member : folder;
+                var byCount = TriggerCells(member) > TriggerCells(folder) ? member : folder;
+
+                var actual = ReachabilityPresentation.TriggerRole(folder, [member]);
+
+                Assert.True(expected == actual, $"folder {folder}, member {member}: {actual}");
+                Assert.Equal(byCount, actual);
+            }
+    }
+
+    [Fact]
+    public void Presentation_TriggerRole_OnATie_KeepsTheFolderRole_ThenTheFirstBestMember()
+    {
+        Assert.Equal(PackageItemRole.Lib, ReachabilityPresentation.TriggerRole(PackageItemRole.Lib, [PackageItemRole.Runtimes]));
+        Assert.Equal(PackageItemRole.Runtimes, ReachabilityPresentation.TriggerRole(PackageItemRole.Runtimes, [PackageItemRole.Lib]));
+        Assert.Equal(PackageItemRole.Tools, ReachabilityPresentation.TriggerRole(PackageItemRole.Tools, [PackageItemRole.Build, PackageItemRole.Other, PackageItemRole.Content]));
+        Assert.Equal(PackageItemRole.Runtimes, ReachabilityPresentation.TriggerRole(PackageItemRole.Other, [PackageItemRole.Tools, PackageItemRole.Runtimes, PackageItemRole.Lib]));
+        Assert.Equal(PackageItemRole.Lib, ReachabilityPresentation.TriggerRole(PackageItemRole.Other, [PackageItemRole.Build, PackageItemRole.Lib, PackageItemRole.Runtimes]));
+        Assert.Equal(PackageItemRole.Lib, ReachabilityPresentation.TriggerRole(PackageItemRole.Lib, [PackageItemRole.Tools, PackageItemRole.Other]));
+    }
+
+    [Fact]
+    public void Presentation_SameKinds_HoldsWithinLibAndRuntimes_AndWithinTheOtherRoles_Only()
+    {
+        Assert.True(ReachabilityPresentation.SameKinds(PackageItemRole.Lib, PackageItemRole.Runtimes));
+        Assert.True(ReachabilityPresentation.SameKinds(PackageItemRole.Tools, PackageItemRole.Other));
+        Assert.True(ReachabilityPresentation.SameKinds(PackageItemRole.Build, PackageItemRole.Analyzers));
+        Assert.False(ReachabilityPresentation.SameKinds(PackageItemRole.Lib, PackageItemRole.Tools));
+        Assert.False(ReachabilityPresentation.SameKinds(PackageItemRole.Build, PackageItemRole.Runtimes));
+        foreach (var a in Enum.GetValues<PackageItemRole>())
+            foreach (var b in Enum.GetValues<PackageItemRole>())
+                Assert.True((LibOrRuntimes(a) == LibOrRuntimes(b)) == ReachabilityPresentation.SameKinds(a, b), $"{a} {b}");
+    }
+
+    // SameKinds is what its name says: two roles give every cell the same kind under KindOf exactly when it holds.
+    [Fact]
+    public void Presentation_SameKinds_IsKindOfAgreeingOnEveryCell()
+    {
+        foreach (var a in Enum.GetValues<PackageItemRole>())
+            foreach (var b in Enum.GetValues<PackageItemRole>())
+            {
+                var agree = Cells().All(c => ReachabilityPresentation.KindOf(c.Class, c.Sink, c.Direct, a) == ReachabilityPresentation.KindOf(c.Class, c.Sink, c.Direct, b));
+                Assert.True(agree == ReachabilityPresentation.SameKinds(a, b), $"{a} {b}");
+            }
+    }
+    #endregion
+
     #region Methods: order and role
     [Fact]
     public void Summary_StatementsInAFolder_AreOrdered_TriggerFirst_ThenClass_ThenCapabilityUnseenLast_ThenDirectFirst()
@@ -984,7 +1589,13 @@ public sealed class ReachabilitySummaryTests
     [InlineData("buildTransitive/net8.0", PackageItemRole.BuildTransitive)]
     [InlineData("tools/net8.0/any", PackageItemRole.Tools)]
     [InlineData("runtimes/win-x64/lib/net8.0", PackageItemRole.Runtimes)]
+    [InlineData("content/net8.0", PackageItemRole.Content)]
+    [InlineData("contentFiles/any/net8.0", PackageItemRole.Content)]
+    [InlineData("tasks/net461", PackageItemRole.Other)]
+    [InlineData("tools/net8.0/runtimes/browser/lib/net8.0", PackageItemRole.Tools)]
     [InlineData("", PackageItemRole.Other)]
+    [InlineData("%6Cib/net8.0", PackageItemRole.Lib)]     // NuGet unescapes entry names (review W1)
+    [InlineData("lib%2Fnet8.0", PackageItemRole.Lib)]
     public void Summary_Role_ComesFromTheFolderPath(string folder, PackageItemRole role)
     {
         Assert.Equal(role, Assert.Single(Summarize(Analyzed(folder, Report([]))).Folders).Role);
@@ -1144,12 +1755,53 @@ public sealed class ReachabilitySummaryTests
         Assert.All(folder.Classes, c => Assert.Equal([reason], c.Reasons));
     }
 
-    private static ReachStatementKind Expected(RootClass cls, Capability? sink, bool direct) =>
-        sink is { } c && signal.Contains(c) && (cls == RootClass.NativeEntry || (cls == RootClass.Finalizer && direct))
+    // The table, spelled out independently of ReachabilityPresentation: NativeEntry at either label in any role, Finalizer
+    // at Direct only in a lib or runtimes folder, each on a signal capability.
+    private static ReachStatementKind Expected(RootClass cls, Capability? sink, bool direct, PackageItemRole role) =>
+        sink is { } c && signal.Contains(c)
+        && (cls == RootClass.NativeEntry || (cls == RootClass.Finalizer && direct && role is PackageItemRole.Lib or PackageItemRole.Runtimes))
             ? ReachStatementKind.Trigger
             : ReachStatementKind.Informational;
 
     private static string Cut(string name) => Reachability.BoundNameTo(name, 256);
+
+    // A Finalizer/Direct reach (a trigger only in lib and runtimes) and a NativeEntry one (a trigger anywhere); every class
+    // decided unless `loadTimeGap`, which leaves LoadTime Unknown for a module initializer (one note).
+    private static ReachabilityReport CrossRoleReport(bool loadTimeGap = false) =>
+        Report(
+            [Row(RootClass.Finalizer, Capability.ProcessExecution, 1, 1, PathOf(true)), Row(RootClass.NativeEntry, Capability.Network, 1, 1, PathOf(true))],
+            loadTimeGap
+                ? presented.Select(c => c == RootClass.LoadTime ? Status(c, RootClassVerdict.Unknown, 0, "a.dll: " + GraphFacts.ModuleInitializerGap) : Status(c, RootClassVerdict.Reaches))
+                : null);
+
+    private static (ReachStatementKind Kind, RootClass Class)[] KindsOf(FolderReachSummary folder) => [.. folder.Statements.Select(s => (s.Kind, s.Class))];
+
+    // The note a divergent SameAs copy carries, spelled out independently of ReachabilitySummary (review C1).
+    private static string ListedInFull(string primary) =>
+        $"listed in full because its folder role changes which statements are triggers; same files as {primary}";
+
+    // `shown` carries exactly what `folder`, without its SameAs, summarized alone does, but for its notes.
+    private static void AssertIsTheFolderAlone(FolderReachSummary shown, FolderReachability folder)
+    {
+        var alone = Assert.Single(Summarize(folder with { SameAs = null }).Folders);
+        Assert.Equal((alone.Folder, alone.Role, alone.Outcome, alone.Reason), (shown.Folder, shown.Role, shown.Outcome, shown.Reason));
+        Assert.Equal(JsonSerializer.Serialize(alone.Classes, json), JsonSerializer.Serialize(shown.Classes, json));
+        Assert.Equal(JsonSerializer.Serialize(alone.Statements, json), JsonSerializer.Serialize(shown.Statements, json));
+        Assert.NotEmpty(shown.Statements);
+    }
+
+    private static bool LibOrRuntimes(PackageItemRole role) => role is PackageItemRole.Lib or PackageItemRole.Runtimes;
+
+    // Every (class, sink, label) cell, the classes not presented included.
+    private static IEnumerable<(RootClass Class, Capability? Sink, bool Direct)> Cells() =>
+        from cls in Enum.GetValues<RootClass>().Where(c => c != RootClass.None)
+        from sink in allSinks
+        from direct in new[] { true, false }
+        select (cls, sink, direct);
+
+    // How many cells KindOf makes triggers in a folder of `role`.
+    private static int TriggerCells(PackageItemRole role) =>
+        Cells().Count(c => ReachabilityPresentation.KindOf(c.Class, c.Sink, c.Direct, role) == ReachStatementKind.Trigger);
 
     // The report builders below are internal so the scan-wiring tests (ReachabilityScanWiringTests) build their reports
     // the same way.
@@ -1168,8 +1820,9 @@ public sealed class ReachabilitySummaryTests
     internal static ReachabilityReport Report(IEnumerable<CapabilityReach> rows, IEnumerable<RootClassStatus>? classes = null, bool partial = false, string? partialReason = null) =>
         new([.. rows], [], false, [.. classes ?? presented.Select(c => Status(c, RootClassVerdict.Reaches))], 0, [], 0, coverage, partial, partialReason);
 
-    internal static FolderReachability Analyzed(string folder, ReachabilityReport report, IReadOnlyList<PackageGraphLoadFailure>? failures = null, string? sameAs = null) =>
-        new(folder, [$"{folder}/a.dll"], failures ?? [], FolderOutcome.Analyzed, report, null, sameAs, 10, 10);
+    // Its one loaded assembly is <folder>/a.dll unless `assemblies` names them.
+    internal static FolderReachability Analyzed(string folder, ReachabilityReport report, IReadOnlyList<PackageGraphLoadFailure>? failures = null, string? sameAs = null, IReadOnlyList<string>? assemblies = null) =>
+        new(folder, assemblies ?? [$"{folder}/a.dll"], failures ?? [], FolderOutcome.Analyzed, report, null, sameAs, 10, 10);
 
     internal static FolderReachability NotAnalyzed(string folder, FolderOutcome outcome, string? reason, IReadOnlyList<PackageGraphLoadFailure>? failures = null) =>
         new(folder, [$"{folder}/a.dll"], failures ?? [], outcome, null, reason, null, 0, 0);
@@ -1196,6 +1849,46 @@ public sealed class ReachabilitySummaryTests
 
     public static TheoryData<RootClass> PresentedClasses() => [.. presented];
 
+    public static TheoryData<PackageItemRole> Roles() => [.. Enum.GetValues<PackageItemRole>()];
+
+    // Folders whose role (NuGetPackage.RoleOf, by first segment of the unescaped name, case-insensitive) is Lib or Runtimes.
+    public static TheoryData<string, PackageItemRole> FinalizerTriggerFolders() => new()
+    {
+        { "lib/net8.0", PackageItemRole.Lib },
+        { "Lib/net8.0", PackageItemRole.Lib },
+        { "%6Cib/net8.0", PackageItemRole.Lib },
+        { "lib%2Fnet8.0", PackageItemRole.Lib },
+        { "runtimes/win/lib/net8.0", PackageItemRole.Runtimes },
+        { "runtimes/win-x64/native", PackageItemRole.Runtimes },
+    };
+
+    // A folder of every other role, the S3 packages' build-time folders among them, and lookalikes of lib and runtimes.
+    public static TheoryData<string, PackageItemRole> FinalizerInformationalFolders() => new()
+    {
+        { "tasks/net461", PackageItemRole.Other },
+        { "tools/net8.0", PackageItemRole.Tools },
+        { "tools", PackageItemRole.Tools },
+        { "build/net8.0", PackageItemRole.Build },
+        { "buildTransitive/net8.0", PackageItemRole.BuildTransitive },
+        { "analyzers/dotnet/cs", PackageItemRole.Analyzers },
+        { "content/net8.0", PackageItemRole.Content },
+        { "contentFiles/any/net8.0", PackageItemRole.Content },
+        { "tools/net8.0/runtimes/browser/lib/net8.0", PackageItemRole.Tools },
+        { "libs/net8.0", PackageItemRole.Other },
+        { "build/runtimes/win/lib/net8.0", PackageItemRole.Build },
+    };
+
+    public static TheoryData<string, PackageItemRole> AllRoleFolderData()
+    {
+        var data = new TheoryData<string, PackageItemRole>();
+        foreach (var (folder, role) in AllRoleFolders())
+            data.Add(folder, role);
+        return data;
+    }
+
+    private static (string Folder, PackageItemRole Role)[] AllRoleFolders() =>
+        [.. FinalizerTriggerFolders().Concat(FinalizerInformationalFolders()).Select(row => ((string)row[0], (PackageItemRole)row[1]))];
+
     public static TheoryData<RootClass, string> ClassSubjects() => new()
     {
         { RootClass.NativeEntry, "a native entry point" },
@@ -1217,6 +1910,8 @@ public sealed class ReachabilitySummaryTests
 
     #region Fields
     private const string Lib = "lib/net8.0";
+
+    private const string LoadTimeNote = "load-time code present, not visible to the model (1 assembly(ies) with a module initializer)";
 
     internal static readonly RootClass[] presented =
         [RootClass.NativeEntry, RootClass.Finalizer, RootClass.TypeInitializer, RootClass.HostContract, RootClass.LoadTime];

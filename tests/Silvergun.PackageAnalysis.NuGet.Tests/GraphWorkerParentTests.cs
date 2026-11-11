@@ -530,6 +530,37 @@ public sealed class GraphWorkerParentTests : IDisposable
         Assert.Single(script.Pids);
     }
 
+    /// <summary>
+    /// Review C1, end to end: build/a sorts before lib/a, so it is the primary and lib/a the copy. The copy is Crashed with
+    /// its own paths and SameAs build/a; summarized, it keeps that outcome, its reason and its SameAs: though lib makes
+    /// other cells triggers than build, a copy that was not analysed has no statements for its role to change.
+    /// </summary>
+    [Fact]
+    public void ACrashedBuildPrimarysLibCopy_IsCrashedToo_AndItsSummaryKeepsTheSameAs()
+    {
+        using var script = new FakeGraphScript("dedup-crash-roles").Otherwise("request", "ready", "exit 9");
+        var bytes = GraphStage.Shared;
+
+        var report = Analyze(script, Options(), stage.Small("lib/a", "same.dll", bytes), stage.Small("build/a", "same.dll", bytes));
+        var summary = ReachabilitySummary.From(report);
+
+        Assert.Equal(["build/a", "lib/a"], report.Folders.Select(f => f.Folder));
+        var copy = report.Folders[1];
+        Assert.Equal((FolderOutcome.Crashed, "build/a"), (copy.Outcome, copy.SameAs));
+        Assert.Equal(["lib/a/same.dll"], copy.Assemblies);
+        Assert.NotNull(copy.Reason);
+        var shown = summary.Folders[1];
+        Assert.Equal(("lib/a", PackageItemRole.Lib, FolderOutcome.Crashed, (string?)"build/a"), (shown.Folder, shown.Role, shown.Outcome, shown.SameAs));
+        Assert.Empty(shown.Notes);
+        Assert.Equal(
+            Silvergun.CodeAnalysis.IL.Reachability.BoundNameTo(Yara.YaraPathSafety.Escape($"the graph worker failed on this folder, so it is unanalysable, and suspect: {copy.Reason}"), ReachabilitySummary.MaxNameChars),
+            shown.Reason);
+        Assert.Empty(shown.Statements);
+        Assert.Equal((PackageItemRole.Build, FolderOutcome.Crashed, (string?)null), (summary.Folders[0].Role, summary.Folders[0].Outcome, summary.Folders[0].SameAs));
+        Assert.False(summary.Complete);
+        Assert.Single(script.Pids);
+    }
+
     [Theory]
     [InlineData("the same bytes under another file name")]
     [InlineData("a missing hash")]

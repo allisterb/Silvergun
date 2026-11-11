@@ -23,7 +23,7 @@ public enum ReachabilityScanStatus
 /// <summary>How a <see cref="ReachStatement"/> is presented (<see cref="ReachabilityPresentation"/>).</summary>
 public enum ReachStatementKind
 {
-    /// <summary>A cell R2b measured as discriminating: a signal worth a reviewer's look.</summary>
+    /// <summary>A cell R2b measured as discriminating, in the folder roles it triggers in: a signal worth a reviewer's look.</summary>
     Trigger,
 
     /// <summary>Anything else: true of the package, but common in benign ones.</summary>
@@ -80,7 +80,9 @@ public sealed record ReachabilitySummary(IReadOnlyList<FolderReachSummary> Folde
     {
         try
         {
-            var folders = report.Folders.Select(Summarize).ToArray();
+            var byName = report.Folders.Where(f => f?.Folder is not null).GroupBy(f => f.Folder, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+            var folders = report.Folders.Select(f => Summarize(f, byName)).ToArray();
             var all = folders.SelectMany((f, i) => f.Folder.Statements.Select((s, j) => (Folder: i, Index: j, s.Kind))).ToArray();
             var triggers = all.Where(t => t.Kind == ReachStatementKind.Trigger).Take(MaxStatements).ToArray();
             var kept = triggers
@@ -106,12 +108,19 @@ public sealed record ReachabilitySummary(IReadOnlyList<FolderReachSummary> Folde
         new([new(string.Empty, PackageItemRole.Other, FolderOutcome.NotRun, Name(reason), null, [], [], [])], 0, false);
 
     // One folder, and whether it is complete. A failure here costs only this folder, which then reads not analysed.
-    private static (FolderReachSummary Folder, bool Complete) Summarize(FolderReachability folder)
+    // `byName` finds a SameAs copy's primary: the copy is summarized in full when its trigger role differs (review C1).
+    private static (FolderReachSummary Folder, bool Complete) Summarize(FolderReachability folder, IReadOnlyDictionary<string, FolderReachability> byName)
     {
         try
         {
             var role = NuGetPackage.RoleOf(folder.Folder);
-            var sameAs = folder.SameAs is null ? null : Name(folder.SameAs);
+            var triggerRole = TriggerRole(folder);
+            // A copy whose role makes other cells triggers than its primary's is no copy for the summary: it is listed in
+            // full, so deduplication can never turn a lib trigger into its build-folder primary's information.
+            // Only an analysed copy has statements for its role to change, so a not-analysed copy keeps its SameAs.
+            var divergent = folder.SameAs is { } primaryName && folder.Outcome == FolderOutcome.Analyzed && folder.Report is not null
+                && !(byName.TryGetValue(primaryName, out var primary) && ReachabilityPresentation.SameKinds(triggerRole, TriggerRole(primary)));
+            var sameAs = folder.SameAs is null || divergent ? null : Name(folder.SameAs);
             var failed = LoadFailures(folder.LoadFailures);
             if (folder.Outcome != FolderOutcome.Analyzed)
             {
@@ -146,13 +155,16 @@ public sealed record ReachabilitySummary(IReadOnlyList<FolderReachSummary> Folde
                 .Where(r => classOrder.ContainsKey(r.Class))
                 .SelectMany(r => new[] { (Direct: true, Roots: r.Direct), (Direct: false, Roots: r.Roots - r.Direct) }
                     .Where(l => l.Roots > 0)
-                    .Select(l => Statement(r, l.Direct, l.Roots)))
+                    .Select(l => Statement(r, l.Direct, l.Roots, triggerRole)))
                 .OrderBy(s => s.Kind)
                 .ThenBy(s => classOrder[s.Class])
                 .ThenBy(s => s.Capability is { } c ? (int)c : int.MaxValue)
                 .ThenBy(s => !s.Direct)
                 .ToArray();
-            return (new(Name(folder.Folder), role, folder.Outcome, null, null, classes, LoadTimeNotes(report), statements), complete);
+            var notes = divergent
+                ? [.. LoadTimeNotes(report), Name($"listed in full because its folder role changes which statements are triggers; same files as {folder.SameAs}")]
+                : LoadTimeNotes(report);
+            return (new(Name(folder.Folder), role, folder.Outcome, null, null, classes, notes, statements), complete);
         }
         catch (Exception ex)
         {
@@ -161,11 +173,17 @@ public sealed record ReachabilitySummary(IReadOnlyList<FolderReachSummary> Folde
         }
     }
 
+    // The role a folder's statements are judged by: its own, or a member's (review W1: an entry named `lib%2Fnet8.0%2FA.dll`
+    // is extracted outside lib/ but installed into it, and RoleOf %-unescapes the member's path; the path is already
+    // display-escaped, which can only make a member look like lib, the fail-safe direction).
+    private static PackageItemRole TriggerRole(FolderReachability folder) =>
+        ReachabilityPresentation.TriggerRole(NuGetPackage.RoleOf(folder.Folder), folder.Assemblies.OfType<string>().Select(NuGetPackage.RoleOf));
+
     // Every presented class Unknown for one reason, already escaped and bounded.
     private static ReachClassVerdict[] Unknowns(string reason) =>
         [.. ReachabilityPresentation.Classes.Select(c => new ReachClassVerdict(c, 0, RootClassVerdict.Unknown, [reason]))];
 
-    private static ReachStatement Statement(CapabilityReach reach, bool direct, int roots)
+    private static ReachStatement Statement(CapabilityReach reach, bool direct, int roots, PackageItemRole role)
     {
         var labelled = reach.Examples.Where(e => e.Direct == direct).ToArray();
         // Only the label's own examples name what was unseen: another label's path is not evidence for this one.
@@ -173,7 +191,7 @@ public sealed record ReachabilitySummary(IReadOnlyList<FolderReachSummary> Folde
             ?? (labelled.Select(UnseenOf).Distinct().ToArray() is { Length: > 0 } kinds
                 ? $"code the graph cannot see ({string.Join(", ", kinds)})"
                 : "code the graph cannot see");
-        return new(ReachabilityPresentation.KindOf(reach.Class, reach.Capability, direct), reach.Class, reach.Capability, direct, roots,
+        return new(ReachabilityPresentation.KindOf(reach.Class, reach.Capability, direct, role), reach.Class, reach.Capability, direct, roots,
             ReachabilityPresentation.Text(reach.Class, sink, direct),
             labelled.Length > 0 ? Example(labelled[0], reach.Capability is null) : null);
     }
