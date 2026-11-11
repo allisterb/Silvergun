@@ -1080,6 +1080,31 @@ public sealed class ReachabilitySummaryTests
         Assert.False(summary.Complete);
     }
 
+    // The whole-pass failure: one NotRun folder named "" (the package), role Other, nothing else, Incomplete; its reason is
+    // escaped, then cut. The hostile character sits early, so the cut keeps its escape.
+    [Fact]
+    public void Failed_IsOneUnnamedNotRunFolder_WithItsReasonEscapedAndCut_AndIsIncomplete()
+    {
+        var rlo = char.ConvertFromUtf32(0x202E);
+        var tail = new string('m', 400);
+        var escaped = "evil" + @"\" + "u202e" + "txt" + tail;
+
+        var summary = ReachabilitySummary.Failed("evil" + rlo + "txt" + tail);
+
+        Assert.Equal(ReachabilityScanStatus.Incomplete, summary.Status());
+        Assert.False(summary.Complete);
+        Assert.Equal(0, summary.StatementsDropped);
+        var folder = Assert.Single(summary.Folders);
+        Assert.Equal((string.Empty, PackageItemRole.Other, FolderOutcome.NotRun, (string?)null), (folder.Folder, folder.Role, folder.Outcome, folder.SameAs));
+        Assert.Empty(folder.Classes);
+        Assert.Empty(folder.Notes);
+        Assert.Empty(folder.Statements);
+        Assert.Equal(Cut(escaped), folder.Reason);
+        Assert.StartsWith(escaped[..256] + (char)0x2026 + $"[+{escaped.Length - 256} chars, sha256:", folder.Reason, StringComparison.Ordinal);
+        Assert.Matches(@"\[\+\d+ chars, sha256:[0-9a-f]{8}\]$", folder.Reason);
+        Assert.DoesNotContain(rlo, folder.Reason!, StringComparison.Ordinal);
+    }
+
     // A null folder costs only itself: it reads NotRun, unnamed, with every class Unknown, and the good folder is intact.
     [Fact]
     public void Summary_ANullFolderInTheReport_DoesNotThrow_AndIsIncomplete()
@@ -1126,25 +1151,27 @@ public sealed class ReachabilitySummaryTests
 
     private static string Cut(string name) => Reachability.BoundNameTo(name, 256);
 
-    private static ReachHop Hop(string nodeId, string? assembly = "App") => new(nodeId, assembly, null, 0);
+    // The report builders below are internal so the scan-wiring tests (ReachabilityScanWiringTests) build their reports
+    // the same way.
+    internal static ReachHop Hop(string nodeId, string? assembly = "App") => new(nodeId, assembly, null, 0);
 
     // A path of `hops` hops, prefix0 .. prefix{hops-1}; the last one is the sink, an external API unless ownSink.
-    private static ReachPath PathOf(bool direct, int hops = 2, string prefix = "App.H", ReachEvidence evidence = ReachEvidence.Bound, OpacityKind? opacity = null, bool ownSink = false) =>
+    internal static ReachPath PathOf(bool direct, int hops = 2, string prefix = "App.H", ReachEvidence evidence = ReachEvidence.Bound, OpacityKind? opacity = null, bool ownSink = false) =>
         new(prefix + "0", evidence, direct, [.. Enumerable.Range(0, hops).Select(i => Hop(prefix + i, i < hops - 1 || ownSink ? "App" : null))], hops, false, opacity);
 
-    private static CapabilityReach Row(RootClass cls, Capability? capability, int roots, int direct, params ReachPath[] examples) =>
+    internal static CapabilityReach Row(RootClass cls, Capability? capability, int roots, int direct, params ReachPath[] examples) =>
         new(cls, capability, roots, roots, roots, direct, examples);
 
-    private static RootClassStatus Status(RootClass cls, RootClassVerdict verdict, int roots = 1, params string[] reasons) => new(cls, roots, verdict, reasons);
+    internal static RootClassStatus Status(RootClass cls, RootClassVerdict verdict, int roots = 1, params string[] reasons) => new(cls, roots, verdict, reasons);
 
     // A report with these rows; every presented class Reaches unless `classes` says otherwise.
-    private static ReachabilityReport Report(IEnumerable<CapabilityReach> rows, IEnumerable<RootClassStatus>? classes = null, bool partial = false, string? partialReason = null) =>
+    internal static ReachabilityReport Report(IEnumerable<CapabilityReach> rows, IEnumerable<RootClassStatus>? classes = null, bool partial = false, string? partialReason = null) =>
         new([.. rows], [], false, [.. classes ?? presented.Select(c => Status(c, RootClassVerdict.Reaches))], 0, [], 0, coverage, partial, partialReason);
 
-    private static FolderReachability Analyzed(string folder, ReachabilityReport report, IReadOnlyList<PackageGraphLoadFailure>? failures = null, string? sameAs = null) =>
+    internal static FolderReachability Analyzed(string folder, ReachabilityReport report, IReadOnlyList<PackageGraphLoadFailure>? failures = null, string? sameAs = null) =>
         new(folder, [$"{folder}/a.dll"], failures ?? [], FolderOutcome.Analyzed, report, null, sameAs, 10, 10);
 
-    private static FolderReachability NotAnalyzed(string folder, FolderOutcome outcome, string? reason, IReadOnlyList<PackageGraphLoadFailure>? failures = null) =>
+    internal static FolderReachability NotAnalyzed(string folder, FolderOutcome outcome, string? reason, IReadOnlyList<PackageGraphLoadFailure>? failures = null) =>
         new(folder, [$"{folder}/a.dll"], failures ?? [], outcome, null, reason, null, 0, 0);
 
     // `count` (at most 36) informational statements: one Direct row per (TypeInitializer, HostContract, LoadTime) x sink.
@@ -1191,7 +1218,7 @@ public sealed class ReachabilitySummaryTests
     #region Fields
     private const string Lib = "lib/net8.0";
 
-    private static readonly RootClass[] presented =
+    internal static readonly RootClass[] presented =
         [RootClass.NativeEntry, RootClass.Finalizer, RootClass.TypeInitializer, RootClass.HostContract, RootClass.LoadTime];
 
     private static readonly Capability[] signal =

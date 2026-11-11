@@ -8,6 +8,7 @@ using System.Text.Json.Serialization;
 
 using Silvergun.CodeAnalysis.IL;
 using Silvergun.Intel;
+using Silvergun.PackageAnalysis.NuGet.Graph;
 using Silvergun.PackageAnalysis.NuGet.Yara;
 
 /// <summary>One declared dependency of a package (surfaced even when not analyzed — ADR 0004 §6).</summary>
@@ -131,9 +132,21 @@ public sealed record PackageCapabilityReport(
     // Old JSON predates it and deserializes to Unavailable ("not verified"), exactly like YaraScanStatus above: every
     // report written before this field came from a scanner that turned an unscannable script into a silent zero
     // (ADR 0035), so Completed would be a false clean. PackageScanner.Scan sets Completed or Unavailable going forward.
-    ScriptScanStatus ScriptScanStatus = ScriptScanStatus.Unavailable)
+    ScriptScanStatus ScriptScanStatus = ScriptScanStatus.Unavailable,
+    // additive (R3, docs/agent/tasks/reachability-r3.md); the graph pass's bounded summary, set only under
+    // PackageScanner.Scan(runReachability: true). Informational: gates nothing. Written to JSON only when set.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ReachabilitySummary? Reachability = null)
 {
     #region Properties
+    /// <summary>
+    /// Whether the graph pass ran and came out decided: <see cref="ReachabilityScanStatus.NotRun"/> without a
+    /// <see cref="Reachability"/>, else its <see cref="ReachabilitySummary.Status"/>. Derived, so it cannot disagree with
+    /// the summary; written to JSON only when not NotRun, and ignored on reading. Old JSON reads NotRun, which is honest:
+    /// no report before R3 ran the pass.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public ReachabilityScanStatus ReachabilityStatus => Reachability?.Status() ?? ReachabilityScanStatus.NotRun;
+
     /// <summary>
     /// YARA malware-signature findings across the package's extracted files (ADR 0016). Normalized to an empty
     /// list when absent — old JSON that predates this field deserializes to empty, not <c>null</c>.

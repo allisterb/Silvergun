@@ -94,9 +94,16 @@ public sealed record ReachabilitySummary(IReadOnlyList<FolderReachSummary> Folde
         }
         catch (Exception ex)
         {
-            return new([new(string.Empty, PackageItemRole.Other, FolderOutcome.NotRun, Name($"the reachability summary could not be built: {ex.GetType().Name}: {ex.Message}"), null, [], [], [])], 0, false);
+            return Failed($"the reachability summary could not be built: {ex.GetType().Name}: {ex.Message}");
         }
     }
+
+    /// <summary>
+    /// The summary of a pass that failed as a whole: Incomplete, with one NotRun folder named "" (the package) carrying
+    /// <paramref name="reason"/>, escaped and cut.
+    /// </summary>
+    internal static ReachabilitySummary Failed(string reason) =>
+        new([new(string.Empty, PackageItemRole.Other, FolderOutcome.NotRun, Name(reason), null, [], [], [])], 0, false);
 
     // One folder, and whether it is complete. A failure here costs only this folder, which then reads not analysed.
     private static (FolderReachSummary Folder, bool Complete) Summarize(FolderReachability folder)

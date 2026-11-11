@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 
 using Silvergun.CodeAnalysis.IL;
+using Silvergun.PackageAnalysis.NuGet.Graph;
 using Silvergun.PackageAnalysis.NuGet.Yara;
 
 /// <summary>
@@ -21,8 +22,14 @@ public sealed class PackageScanner : Runtime
     /// Opens <paramref name="nupkgPath"/> and scans each assembly. The package is disposed internally (temp files
     /// cleaned up) before returning. Never throws: an open failure propagates as a failure <see cref="Result{T}"/>;
     /// a per-assembly failure is captured as an <see cref="AssemblyScanResult"/> with a <c>SkipReason</c>.
+    /// <paramref name="runReachability"/> adds the graph pass (<see cref="PackageReachability"/>, in worker processes
+    /// only) as <see cref="PackageCapabilityReport.Reachability"/>; it gates nothing.
     /// </summary>
-    public static Result<PackageCapabilityReport> Scan(string nupkgPath, bool resolveReferences = true, bool runYara = true, IYaraScanner? yaraScanner = null)
+    public static Result<PackageCapabilityReport> Scan(string nupkgPath, bool resolveReferences = true, bool runYara = true, IYaraScanner? yaraScanner = null, bool runReachability = false) =>
+        Scan(nupkgPath, resolveReferences, runYara, yaraScanner, runReachability ? p => PackageReachability.Analyze(p) : null);
+
+    /// <summary><see cref="Scan(string, bool, bool, IYaraScanner?, bool)"/> with the graph pass supplied; null for none.</summary>
+    internal static Result<PackageCapabilityReport> Scan(string nupkgPath, bool resolveReferences, bool runYara, IYaraScanner? yaraScanner, Func<NuGetPackage, PackageReachabilityReport>? reachability)
     {
         var opened = NuGetPackage.Open(nupkgPath);
         if (!opened.IsSuccess)
@@ -54,6 +61,10 @@ public sealed class PackageScanner : Runtime
             // gating (ADR 0031 decision 3); every name it returns is already escaped.
             var packagingAnomalies = PackageEntryNameAnalyzer.Analyze(package.DeclaredEntryNames);
 
+            // The graph pass (R3, opt-in) runs last, after YARA, so the minutes it can take never widen the window in
+            // which YARA's inventory goes stale (ADR 0034). It needs the extracted files, so the package is still open.
+            var reachabilitySummary = reachability is null ? null : SummarizeReachability(package, reachability);
+
             var report = new PackageCapabilityReport(
                 package.Identity,
                 DateTimeOffset.UtcNow,
@@ -63,7 +74,8 @@ public sealed class PackageScanner : Runtime
                 YaraFindings: yaraFindings,
                 YaraScanStatus: yaraStatus,
                 PackagingAnomalies: packagingAnomalies,
-                ScriptScanStatus: scriptStatus)
+                ScriptScanStatus: scriptStatus,
+                Reachability: reachabilitySummary)
             {
                 YaraUnavailableReason = yaraUnavailableReason,
                 ScriptScanUnavailableReason = scriptUnavailableReason,
@@ -130,6 +142,22 @@ public sealed class PackageScanner : Runtime
             "(coverage not delivered — not a clean result)",
             null,
             null);
+    }
+
+    // The graph pass's summary. Both steps never throw, but a failure here must not sink the scan or read clean: it is an
+    // Incomplete summary whose one folder carries the reason (ReachabilitySummary.Failed, which From's own failure uses).
+    // An Incomplete summary is not logged here: the CLI writes the one note for it (R3 S2).
+    private static ReachabilitySummary SummarizeReachability(NuGetPackage package, Func<NuGetPackage, PackageReachabilityReport> reachability)
+    {
+        try
+        {
+            return ReachabilitySummary.From(reachability(package));
+        }
+        catch (Exception ex)
+        {
+            Warn("Reachability failed for {0}: {1}", YaraPathSafety.Escape(package.Identity.Id), Yara.Worker.WorkerProtocol.Safe(ex.Message, 300));
+            return ReachabilitySummary.Failed($"the reachability pass failed: {ex.GetType().Name}: {ex.Message}");
+        }
     }
 
     // Best-effort script/content rule scan over the open package (ADR 0012); ScriptRuleScanner already never throws,
