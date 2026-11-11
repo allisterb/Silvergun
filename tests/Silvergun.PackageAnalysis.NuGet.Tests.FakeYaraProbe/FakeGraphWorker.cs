@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 
 using Silvergun.PackageAnalysis.NuGet.Graph;
+using Silvergun.PackageAnalysis.NuGet.Yara.Worker;
 
 /// <summary>
 /// <b>Role 5 - a scripted fake of <c>silvergun __worker graph</c> (<c>--fake-graph-worker &lt;script&gt;</c>).</b> The parent,
@@ -58,6 +59,9 @@ internal static class FakeGraphWorker
     #region Methods
     internal static int Run(string script)
     {
+        // First, mirroring the CLI's `Main`, which opts out for every `__worker` command line: a fake that dies
+        // (stackoverflow, failfast, debugfail) is gone at once, so the parent sees the pipe end and reads Crashed, never TimedOut while WER builds a report (13-43 s).
+        WorkerErrorReporting.OptOut();
         var run = FakeWorker.NextRun(script);
         var session = new Session();
         foreach (var command in FakeWorker.Section(File.ReadAllLines(script), run))

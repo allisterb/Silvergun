@@ -312,6 +312,10 @@ internal static class Program
         // graph protocol when the verb is `__worker graph`, otherwise in the yara protocol, as before.
         var parse = root.Parse(args);
         var inWorker = (args is [var verb, ..] && verb == workerCommand.Name) || IsWithin(parse.CommandResult, workerCommand);
+        // Every worker path, before any work: a worker's crash must end the process at once, not wait on WER
+        // (WorkerErrorReporting). Process-wide, so never for the CLI's own verbs.
+        if (inWorker)
+            WorkerErrorReporting.OptOut();
         return !inWorker || ReferenceEquals(parse.Action, workerYaraCommand.Action) || ReferenceEquals(parse.Action, workerGraphCommand.Action)
             ? parse.Invoke()
             : IsWithin(parse.CommandResult, workerGraphCommand) || (args is [_, var worker, ..] && worker == workerGraphCommand.Name)

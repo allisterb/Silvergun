@@ -3,6 +3,8 @@ namespace Silvergun.PackageAnalysis.NuGet.Tests.FakeYaraProbe;
 using System.Text;
 using System.Text.Json;
 
+using Silvergun.PackageAnalysis.NuGet.Yara.Worker;
+
 /// <summary>
 /// <b>Role 4 - a scripted fake of <c>silvergun __worker yara</c> (<c>--fake-worker &lt;script&gt;</c>).</b> The parent
 /// backend, <c>YaraXWorkerScanner</c>, takes its worker command as configuration (ADR 0033 decision 8), so the
@@ -39,6 +41,9 @@ internal static class FakeWorker
     #region Methods
     internal static int Run(string script)
     {
+        // First, mirroring the CLI's `Main`, which opts out for every `__worker` command line: a fake that dies is gone
+        // at once, not held by WER.
+        WorkerErrorReporting.OptOut();
         var run = NextRun(script);
         var commands = Section(File.ReadAllLines(script), run);
         var session = new Session();

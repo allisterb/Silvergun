@@ -3,6 +3,7 @@ namespace Silvergun.PackageAnalysis.NuGet.Tests.FakeYaraProbe;
 using System.Globalization;
 
 using Silvergun.PackageAnalysis.NuGet.Yara;
+using Silvergun.PackageAnalysis.NuGet.Yara.Worker;
 
 /// <summary>
 /// A multi-role child-process fixture for the ADR 0029 and ADR 0033 tests. Neither role can be played from inside the xunit
@@ -37,6 +38,13 @@ using Silvergun.PackageAnalysis.NuGet.Yara;
 /// <c>silvergun __worker graph</c> (<c>docs/agent/tasks/graph-worker.md</c>); see <see cref="FakeGraphWorker"/>. Its only
 /// analysis is the real graph worker loop it delegates a genuine answer to.</para>
 ///
+/// <para>Roles 4 and 5 call <see cref="WorkerErrorReporting.OptOut"/> first, mirroring the CLI's <c>Main</c>, which opts out
+/// for every <c>__worker</c> command line, so a fake that dies is gone as fast as a real worker would be (not held by
+/// Windows Error Reporting).</para>
+///
+/// <para><b>Role 6 — a <see cref="WorkerErrorReporting"/> host (<c>--error-reporting</c>).</b> OptOut changes the
+/// process-wide error mode, so it is observed in a fresh process; see <see cref="ErrorReporting"/>.</para>
+///
 /// <para>This fixture never scans anything for real and contains no rule logic; it is deliberately inert.</para>
 /// </summary>
 internal static class Program
@@ -49,6 +57,7 @@ internal static class Program
         ["--stderr-logging", var logName, var mode] => StderrLogging(logName, mode),
         ["--fake-worker", var script] => FakeWorker.Run(script),
         ["--fake-graph-worker", var script] => FakeGraphWorker.Run(script),
+        ["--error-reporting"] => ErrorReporting(),
         [var source, var compiled] when IsYaracCall(source, compiled) => FakeYarac(source, compiled),
         _ => FakeYara(args),
     };
@@ -577,5 +586,45 @@ internal static class Program
         Console.Out.Flush();
         return 0;
     }
+
+    // --- Role 6: WorkerErrorReporting in a process of its own (--error-reporting) --------------------------------------
+    //
+    // OptOut is process-wide and a child inherits the error mode, so calling it in the xunit host would change how the host
+    // itself crashes, and the mode this process starts with is whatever its parent passed down. So on Windows the starting
+    // point is set here first: SEM_FAILCRITICALERRORS and SEM_NOGPFAULTERRORBOX cleared, SEM_NOOPENFILEERRORBOX (a bit
+    // OptOut does not touch) set. Then IsOptedOut before, after one OptOut and after a second, and the raw mode at the end:
+    // OptOut must add its bits, not replace the mode. Off Windows nothing is touched. Prints key=value lines, exits 0.
+    private static int ErrorReporting()
+    {
+        var inheritedMode = OperatingSystem.IsWindows() ? Hex(GetErrorMode()) : "-";
+        var inherited = WorkerErrorReporting.IsOptedOut();
+        if (OperatingSystem.IsWindows())
+            SetErrorMode((GetErrorMode() & ~(SemFailCriticalErrors | SemNoGpFaultErrorBox)) | SemNoOpenFileErrorBox);
+        var before = WorkerErrorReporting.IsOptedOut();
+        WorkerErrorReporting.OptOut();
+        var after = WorkerErrorReporting.IsOptedOut();
+        WorkerErrorReporting.OptOut();
+        var again = WorkerErrorReporting.IsOptedOut();
+        var mode = OperatingSystem.IsWindows() ? Hex(GetErrorMode()) : "-";
+
+        Console.Out.Write($"inheritedmode={inheritedMode}\ninherited={inherited}\nbefore={before}\nafter={after}\nagain={again}\nmode={mode}\n");
+        Console.Out.Flush();
+        return 0;
+    }
+
+    private static string Hex(uint value) => "0x" + value.ToString("X8", CultureInfo.InvariantCulture);
+
+    // Blittable, so DllImport needs no unsafe code; called on Windows only.
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern uint SetErrorMode(uint mode);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern uint GetErrorMode();
+    #endregion
+
+    #region Fields
+    private const uint SemFailCriticalErrors = 0x0001;
+    private const uint SemNoGpFaultErrorBox = 0x0002;
+    private const uint SemNoOpenFileErrorBox = 0x8000;
     #endregion
 }

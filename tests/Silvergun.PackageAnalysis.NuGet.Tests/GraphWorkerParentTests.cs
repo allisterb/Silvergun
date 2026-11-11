@@ -115,6 +115,10 @@ public sealed class GraphWorkerParentTests : IDisposable
     /// Real uncatchable deaths (ADR 0021): a stack overflow, <see cref="Environment.FailFast(string)"/> and
     /// <see cref="Debug.Fail(string)"/> (CCI's path) each cost the folder, and the reason names what the exit code means
     /// (measured on Windows: 0xC00000FD and 0x80131623).
+    /// <para>On Windows the run is also bounded (<see cref="DeathBound"/>) well under the 60 s folder timeout: a dying worker
+    /// that Windows Error Reporting holds while it builds a report (13–43 s for a stack overflow, measured 2026-11-10) once
+    /// read TimedOut here under load. The worker opts out (WorkerErrorReporting, mirrored by the fake), so a run costs
+    /// under a second.</para>
     /// </summary>
     [Theory]
     [InlineData("stackoverflow", "a stack overflow")]
@@ -125,13 +129,17 @@ public sealed class GraphWorkerParentTests : IDisposable
         using var script = new FakeGraphScript("death-" + death)
             .Run(1, "request", "ready", death)
             .Otherwise("request", "ready", "empty", "done");
+        var clock = Stopwatch.StartNew();
 
         var report = Analyze(script, Options(), stage.Small("lib/a"), stage.Small("lib/b"));
 
+        var elapsed = clock.Elapsed;
         Assert.Equal([FolderOutcome.Crashed, FolderOutcome.NothingLoaded], report.Folders.Select(f => f.Outcome));
         if (OperatingSystem.IsWindows())
             Assert.Contains(named, report.Folders[0].Reason, StringComparison.Ordinal);
         Assert.Equal(2, script.Pids.Length);
+        if (OperatingSystem.IsWindows())
+            Assert.True(elapsed < DeathBound, $"{death}: the run took {elapsed.TotalSeconds:F1} s (bound {DeathBound.TotalSeconds} s): is the worker held by Windows Error Reporting again?");
     }
 
     /// <summary>A <c>fatal</c> record in place of a folder record blames that folder, with the worker's (escaped) reason.</summary>
@@ -329,13 +337,18 @@ public sealed class GraphWorkerParentTests : IDisposable
     public void AWorkerThatFailsBeforeReady_LeavesEveryFolderNotRun_WithOneStart(string what, string[] commands)
     {
         using var script = new FakeGraphScript("noready").Otherwise(commands);
+        var clock = Stopwatch.StartNew();
 
         var report = Analyze(script, Options(), stage.Small("lib/a"), stage.Small("lib/b"));
 
+        var elapsed = clock.Elapsed;
         Assert.True(report.Folders.All(f => f.Outcome == FolderOutcome.NotRun), $"{what}: {string.Join(", ", report.Folders.Select(f => $"{f.Outcome} ({f.Reason})"))}");
         Assert.All(report.Folders, f => Assert.StartsWith("the graph worker could not run: ", f.Reason, StringComparison.Ordinal));
         Assert.Single(script.Pids);
         script.AssertNoOrphans();
+        // A death before ready is NotRun however long WER holds it (up to the 30 s ready clock), so only time shows it.
+        if (OperatingSystem.IsWindows() && commands.Contains("stackoverflow"))
+            Assert.True(elapsed < DeathBound, $"{what}: the run took {elapsed.TotalSeconds:F1} s (bound {DeathBound.TotalSeconds} s): is the worker held by Windows Error Reporting again?");
     }
 
     [Fact]
@@ -1025,6 +1038,11 @@ public sealed class GraphWorkerParentTests : IDisposable
     #endregion
 
     #region Fields
+    // The death tests' runs, measured 2026-11-10 on an idle machine: 0.6–0.9 s with the worker opted out of WER; without it
+    // 15–21 s for a stack overflow and 2.6–3.5 s for FailFast. Over 10x the opted-out time, under every stack-overflow time
+    // seen, far under the 60 s folder timeout. A FailFast held by WER is too close to the normal time to bound reliably.
+    private static readonly TimeSpan DeathBound = TimeSpan.FromSeconds(10);
+
     private readonly GraphStage stage;
     #endregion
 }
