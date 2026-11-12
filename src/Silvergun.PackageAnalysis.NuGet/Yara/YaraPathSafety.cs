@@ -1,7 +1,5 @@
 namespace Silvergun.PackageAnalysis.NuGet.Yara;
 
-using Silvergun.CodeAnalysis.IL;
-
 /// <summary>
 /// Filename hostility helpers for the classic-CLI backend (ADR 0029). Two concerns, deliberately kept together
 /// because they are two halves of the same threat: deciding which extracted names <c>yara</c>'s line-oriented

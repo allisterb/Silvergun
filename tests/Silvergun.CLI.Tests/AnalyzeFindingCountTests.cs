@@ -203,10 +203,16 @@ public sealed class AnalyzeFindingCountTests
     /// <c>MemoryMarshal.AsBytes</c>, instead of its UTF-8. UnsafeMemory by the map's <c>System.Runtime.InteropServices.MemoryMarshal</c>
     /// entry; the only call of it in the library.
     /// </para>
+    /// <para>
+    /// Both of those left with the hash (12 findings, re-measured 2026-11-12): S4.2 moved name bounding's suffix into
+    /// <c>UntrustedText</c> (still in this library), and the S4.4 review moved <c>UntrustedText</c> to
+    /// <c>Silvergun.Runtime</c>, so that the YARA worker's escaper no longer loads this library (ADR 0033 decision 5).
+    /// <c>SHA256.HashData(MemoryMarshal.AsBytes(..))</c> is now <c>UntrustedText.Hash</c> there; this library calls neither
+    /// any more. The other 12 are unchanged.
+    /// </para>
     /// </summary>
     private static readonly string[] MeasuredIlLibraryFindings =
     [
-        "Cryptography Call System.Security.Cryptography.SHA256.HashData",
         "FileSystem Call System.IO.Directory.EnumerateFiles",
         "FileSystem Call System.IO.Directory.Exists",
         "FileSystem Call System.IO.File.Exists",
@@ -219,7 +225,6 @@ public sealed class AnalyzeFindingCountTests
         "FileSystem Call System.IO.FileSystemInfo.get_FullName",
         "FileSystem Construct System.IO.FileInfo..ctor",
         "FileSystem Construct System.IO.StreamReader..ctor",
-        "UnsafeMemory Call System.Runtime.InteropServices.MemoryMarshal.AsBytes",
     ];
 
     private const int TimeoutMs = 120_000;

@@ -22,18 +22,19 @@ using Silvergun.CodeAnalysis.IL;
 /// session (Cilica's model has no locks); dispose to release the readers.
 /// </summary>
 /// <remarks>
-/// On untrusted packages this runs only inside the graph worker (ADR 0021); until S4 wires it there, only the guarded
-/// harness runs it. Opening installs a process-wide trap that turns a Debug build of Cilica's failed asserts into
-/// exceptions (<see cref="CilicaAssertionException"/>).
+/// On untrusted packages this runs only inside the graph worker (ADR 0021). While a session is open, a process-wide trap
+/// turns a Debug build's failed asserts into exceptions (<see cref="CilicaAssertionException"/>); disposing the last open
+/// session removes it, so code running after SSA behaves as without it.
 /// </remarks>
 public sealed class SsaSession : IDisposable
 {
     #region Constructors
-    private SsaSession(SsaUniverse universe, IReadOnlyList<SsaAssembly> assemblies, IReadOnlyList<(CciModuleSource Source, IMethodDefinition[] Methods)> modules)
+    private SsaSession(SsaUniverse universe, IReadOnlyList<SsaAssembly> assemblies, IReadOnlyList<(CciModuleSource Source, IMethodDefinition[] Methods)> modules, IDisposable assertions)
     {
         this.universe = universe;
         Assemblies = assemblies;
         this.modules = modules;
+        this.assertions = assertions;
     }
     #endregion
 
@@ -50,10 +51,11 @@ public sealed class SsaSession : IDisposable
     /// </summary>
     public static SsaSession Open(IEnumerable<string> assemblyPaths, SsaBounds? bounds = null)
     {
-        CilicaAssertions.Install();
-        var universe = new SsaUniverse((bounds ?? SsaBounds.Default).Validated());
+        var assertions = CilicaAssertions.Acquire();
+        SsaUniverse? universe = null;
         try
         {
+            universe = new SsaUniverse((bounds ?? SsaBounds.Default).Validated());
             var assemblies = new List<SsaAssembly>();
             var modules = new List<(CciModuleSource, IMethodDefinition[])>();
             var paths = assemblyPaths.Select(Path.GetFullPath).Order(StringComparer.Ordinal)
@@ -78,11 +80,18 @@ public sealed class SsaSession : IDisposable
             }
             universe.ScanEncodings();
             _ = universe.SysTypes;
-            return new SsaSession(universe, assemblies, modules);
+            return new SsaSession(universe, assemblies, modules, assertions);
         }
         catch
         {
-            universe.Dispose();
+            try
+            {
+                universe?.Dispose();
+            }
+            finally
+            {
+                assertions.Dispose();
+            }
             throw;
         }
     }
@@ -125,7 +134,15 @@ public sealed class SsaSession : IDisposable
         if (disposed)
             return;
         disposed = true;
-        universe.Dispose();
+        // The lease goes whatever the readers do, so the trap never outlives the session.
+        try
+        {
+            universe.Dispose();
+        }
+        finally
+        {
+            assertions.Dispose();
+        }
     }
 
     private IEnumerable<SsaMethodOutcome> Lifted((CciModuleSource Source, IMethodDefinition Method, MethodIdentity Identity)[] selected)
@@ -231,6 +248,7 @@ public sealed class SsaSession : IDisposable
     private const int MaxReason = 400;
 
     private readonly SsaUniverse universe;
+    private readonly IDisposable assertions;
     private readonly IReadOnlyList<(CciModuleSource Source, IMethodDefinition[] Methods)> modules;
     private readonly Dictionary<ModuleDef, Compilation> compilations = new(ReferenceEqualityComparer.Instance);
     private bool disposed;

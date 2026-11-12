@@ -24,6 +24,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Silvergun.CodeAnalysis.IL\Silvergun.CodeAnalysis.IL.csproj" />
+    <!-- SSA facts in the graph worker (ADR 0038, S4.4): a project reference, run only inside the worker process. -->
+    <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Ssa\Silvergun.CodeAnalysis.IL.Ssa.csproj" />
     <ProjectReference Include="..\Silvergun.Intel\Silvergun.Intel.csproj" />
     <ProjectReference Include="..\Silvergun.Runtime\Silvergun.Runtime.csproj" />
   </ItemGroup>

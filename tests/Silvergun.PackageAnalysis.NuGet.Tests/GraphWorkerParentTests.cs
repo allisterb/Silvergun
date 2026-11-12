@@ -11,7 +11,7 @@ using Silvergun.Tests.Shared;
 using Xunit;
 
 /// <summary>
-/// The parent side of graph worker protocol v1 (<c>GraphWorkerProcess</c>, <see cref="PackageReachability"/>;
+/// The parent side of graph worker protocol v2 (<c>GraphWorkerProcess</c>, <see cref="PackageReachability"/>;
 /// <c>docs/agent/tasks/graph-worker.md</c> G2–G4) against the scripted fake worker (<c>FakeGraphWorker</c> in the
 /// FakeYaraProbe). A worker that crashes, hangs, floods, lies or exits wrong costs at most its folder, Crashed or TimedOut
 /// with the reason, and a restarted worker takes the folders after it; one that fails before <c>ready</c> blames no folder
@@ -271,7 +271,7 @@ public sealed class GraphWorkerParentTests : IDisposable
         { "a report although nothing loaded", "answer build reportnothing", "it has a report but loaded nothing" },
         { "no report although assemblies loaded", "answer build noreport", "it loaded assemblies but has no report" },
         { "a negative graph size", "answer empty negative", "its graph size is negative" },
-        { "a second ready", "out {\"type\":\"ready\",\"protocol\":1,\"folders\":2}", "got 'GraphWorkerReady'" },
+        { "a second ready", "out {\"type\":\"ready\",\"protocol\":2,\"folders\":2}", "got 'GraphWorkerReady'" },
         { "an early done", "out {\"type\":\"done\",\"count\":2}", "got 'GraphWorkerDone'" },
         { "a record cut short", "raw {\"type\":\"folder\",\"index\":0", "" },
         { "an unknown member", "out {\"type\":\"folder\",\"index\":0,\"folder\":\"lib/a\",\"assemblies\":[],\"loadFailures\":[],\"report\":null,\"nodes\":0,\"edges\":0,\"x\":1}", "not valid JSON" },
@@ -323,9 +323,9 @@ public sealed class GraphWorkerParentTests : IDisposable
         { "refuses the request with fatal", ["request", "out {\"type\":\"fatal\",\"reason\":\"nope\"}", "exit 3"] },
         { "sends garbage first", ["request", "out hello", "hang"] },
         { "announces another folder count", ["request", "ready 7", "empty", "done"] },
-        { "announces another protocol", ["request", "out {\"type\":\"ready\",\"protocol\":2,\"folders\":2}", "empty", "done"] },
+        { "announces another protocol (v1)", ["request", "out {\"type\":\"ready\",\"protocol\":1,\"folders\":2}", "empty", "done"] },
         { "sends a folder record first", ["request", "empty", "done"] },
-        { "sends a record without a discriminator first", ["request", "out {\"protocol\":1,\"folders\":2}", "hang"] },
+        { "sends a record without a discriminator first", ["request", "out {\"protocol\":2,\"folders\":2}", "hang"] },
     };
 
     /// <summary>

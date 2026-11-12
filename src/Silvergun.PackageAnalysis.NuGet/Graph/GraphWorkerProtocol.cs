@@ -10,22 +10,25 @@ using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 
 using Silvergun.CodeAnalysis.IL;
+using Silvergun.CodeAnalysis.IL.Ssa;
 using Silvergun.PackageAnalysis.NuGet.Yara.Worker;
 
 /// <summary>
-/// The constants of graph worker protocol v1 (<c>docs/agent/tasks/graph-worker.md</c>, G2): one request line from the
-/// parent, then <c>ready</c>, one <c>folder</c> record per requested folder in order, and <c>done</c> from the worker.
+/// The constants of graph worker protocol v2 (<c>docs/agent/tasks/graph-worker.md</c>, G2; <c>ssa-facts-s4.md</c> §4): one
+/// request line from the parent, then <c>ready</c>, one <c>folder</c> record per requested folder in order, and <c>done</c>
+/// from the worker. When the request carries <c>ssa</c> bounds, each <c>folder</c> record is followed by that folder's
+/// <c>ssa</c> record; without them the records are v1's.
 /// </summary>
 public static class GraphWorkerProtocol
 {
     #region Properties
     /// <summary>The worker's launch arguments after the executable.</summary>
-    public static IReadOnlyList<string> Arguments { get; } = ["__worker", "graph", "--protocol", "1"];
+    public static IReadOnlyList<string> Arguments { get; } = ["__worker", "graph", "--protocol", "2"];
     #endregion
 
     #region Fields
     /// <summary>The protocol version this build speaks.</summary>
-    public const int Version = 1;
+    public const int Version = 2;
 
     /// <summary>Exit code after <c>done</c>.</summary>
     public const int ExitDone = 0;
@@ -62,6 +65,7 @@ public static class GraphWorkerProtocol
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
 [JsonDerivedType(typeof(GraphWorkerReady), "ready")]
 [JsonDerivedType(typeof(GraphWorkerFolder), "folder")]
+[JsonDerivedType(typeof(GraphWorkerSsa), "ssa")]
 [JsonDerivedType(typeof(GraphWorkerDone), "done")]
 [JsonDerivedType(typeof(GraphWorkerFatal), "fatal")]
 public abstract record GraphWorkerMessage;
@@ -83,14 +87,65 @@ public sealed record GraphWorkerFolder(
     int Nodes,
     int Edges) : GraphWorkerMessage;
 
+/// <summary>
+/// <c>ssa</c>: request folder <see cref="Index"/>'s SSA facts (ADR 0038), sent after its <c>folder</c> record when the
+/// request asked for them. The worker sends <see cref="SsaFolderOutcome.Analyzed"/> with <see cref="Facts"/>, or
+/// <see cref="SsaFolderOutcome.NotRun"/> or <see cref="SsaFolderOutcome.Crashed"/> with a <see cref="Reason"/> (escaped and
+/// bounded by the worker) and no facts.
+/// </summary>
+public sealed record GraphWorkerSsa(int Index, SsaFolderOutcome Outcome, SsaFolderFacts? Facts, string? Reason) : GraphWorkerMessage;
+
 /// <summary><c>done</c>: every folder was answered; the worker exits 0.</summary>
 public sealed record GraphWorkerDone(int Count) : GraphWorkerMessage;
 
 /// <summary><c>fatal</c>: the worker cannot go on and exits 3. <see cref="Reason"/> is escaped and bounded by the worker.</summary>
 public sealed record GraphWorkerFatal(string Reason) : GraphWorkerMessage;
 
-/// <summary>The parent → worker request: the folders of one package to build, in order, and the per-folder graph budget.</summary>
-public sealed record GraphWorkerRequest(int Protocol, GraphWorkerBudget Budget, IReadOnlyList<GraphWorkerFolderRequest> Folders);
+/// <summary>
+/// The parent → worker request: the folders of one package to build, in order, the per-folder graph budget, and the SSA
+/// fact bounds when SSA facts are wanted (null: off, and the worker sends v1's records).
+/// </summary>
+public sealed record GraphWorkerRequest(int Protocol, GraphWorkerBudget Budget, IReadOnlyList<GraphWorkerFolderRequest> Folders, GraphWorkerSsaBounds? Ssa = null);
+
+/// <summary>A <see cref="SsaFactBounds"/> on the wire, its folder time in milliseconds.</summary>
+public sealed record GraphWorkerSsaBounds(
+    int MaxSites,
+    int MaxArguments,
+    int MaxAlternatives,
+    int MaxPhiDepth,
+    int MaxPhiInputs,
+    int MaxTextChars,
+    int MaxFactTextChars,
+    int MaxLiftedMethods,
+    long FolderTimeMilliseconds,
+    int MaxCandidates)
+{
+    #region Methods
+    /// <summary>The wire form of <paramref name="bounds"/>.</summary>
+    public static GraphWorkerSsaBounds Of(SsaFactBounds bounds) => new(bounds.MaxSites, bounds.MaxArguments, bounds.MaxAlternatives, bounds.MaxPhiDepth,
+        bounds.MaxPhiInputs, bounds.MaxTextChars, bounds.MaxFactTextChars, bounds.MaxLiftedMethods, (long)Math.Ceiling(bounds.FolderTime.TotalMilliseconds), bounds.MaxCandidates);
+
+    /// <summary>These bounds as a <see cref="SsaFactBounds"/>; throws when one is not positive.</summary>
+    public SsaFactBounds ToBounds() => new SsaFactBounds
+    {
+        MaxSites = MaxSites,
+        MaxArguments = MaxArguments,
+        MaxAlternatives = MaxAlternatives,
+        MaxPhiDepth = MaxPhiDepth,
+        MaxPhiInputs = MaxPhiInputs,
+        MaxTextChars = MaxTextChars,
+        MaxFactTextChars = MaxFactTextChars,
+        MaxLiftedMethods = MaxLiftedMethods,
+        FolderTime = TimeSpan.FromMilliseconds(Math.Min(FolderTimeMilliseconds, MaxFolderTimeMilliseconds)),
+        MaxCandidates = MaxCandidates,
+    }.Validated();
+    #endregion
+
+    #region Fields
+    // A year: longer is no bound at all, and TimeSpan cannot hold every long of milliseconds.
+    private const long MaxFolderTimeMilliseconds = 365L * 24 * 60 * 60 * 1000;
+    #endregion
+}
 
 /// <summary>A <see cref="GraphBudget"/> on the wire.</summary>
 public sealed record GraphWorkerBudget(int MaxNodes, int MaxEdges, long MaxDispatchWork)
@@ -125,18 +180,29 @@ internal sealed class GraphWorkerWriter(Stream stream, int maxLineBytes)
     private void WriteLine<T>(T value, JsonTypeInfo<T> typeInfo)
     {
         buffer.ResetWrittenCount();
-        using (var json = new Utf8JsonWriter(buffer))
-            JsonSerializer.Serialize(json, value, typeInfo);
-        if (buffer.WrittenCount > maxLineBytes)
-            throw new InvalidDataException($"the record is {buffer.WrittenCount} bytes, over the protocol's {maxLineBytes}");
-        buffer.Write("\n"u8);
-        stream.Write(buffer.WrittenSpan);
-        stream.Flush();
+        try
+        {
+            using (var json = new Utf8JsonWriter(buffer))
+                JsonSerializer.Serialize(json, value, typeInfo);
+            if (buffer.WrittenCount > maxLineBytes)
+                throw new InvalidDataException($"the record is {buffer.WrittenCount} bytes, over the protocol's {maxLineBytes}");
+            buffer.Write("\n"u8);
+            stream.Write(buffer.WrittenSpan);
+            stream.Flush();
+        }
+        finally
+        {
+            // One huge record must not pin its buffer for the rest of the session.
+            if (buffer.Capacity > KeptBufferBytes)
+                buffer = new();
+        }
     }
     #endregion
 
     #region Fields
-    private readonly ArrayBufferWriter<byte> buffer = new();
+    private const int KeptBufferBytes = 1024 * 1024;
+
+    private ArrayBufferWriter<byte> buffer = new();
     #endregion
 }
 
@@ -182,7 +248,9 @@ internal sealed class WellFormedStringConverter : JsonConverter<string>
 /// <summary>
 /// Source-generated serialization for the protocol, strict by configuration: unknown members, missing constructor
 /// parameters, nulls in non-nullable members and duplicate properties are errors; names match case-sensitively; the
-/// <c>"type"</c> discriminator must come first; nulls are written, never omitted; enums are exact names
+/// <c>"type"</c> discriminator must come first; nulls are written, never omitted (but a member with a default, such as
+/// <see cref="GraphWorkerRequest.Ssa"/>, <see cref="SsaConstant.Cut"/> or <see cref="SsaSinkFact.Target"/>, may be
+/// absent and reads as that default); enums are exact names
 /// (<see cref="ExactEnumConverter{T}"/>) and strings well-formed (<see cref="WellFormedStringConverter"/>). Computed
 /// (get-only) properties such as <see cref="IndexCoverage.IsComplete"/> are not written.
 /// </summary>
@@ -204,6 +272,14 @@ internal sealed class WellFormedStringConverter : JsonConverter<string>
         typeof(ExactEnumConverter<ReachEvidence>),
         typeof(ExactEnumConverter<MethodEdgeKind>),
         typeof(ExactEnumConverter<OpacityKind>),
+        typeof(ExactEnumConverter<SsaFolderOutcome>),
+        typeof(ExactEnumConverter<SsaSiteStatus>),
+        typeof(ExactEnumConverter<SsaValueKind>),
+        typeof(ExactEnumConverter<SsaConstantKind>),
+        typeof(ExactEnumConverter<SsaDynamicOrigin>),
+        typeof(ExactEnumConverter<SsaFailureKind>),
+        typeof(ExactEnumConverter<SsaTargetKind>),
+        typeof(ExactEnumConverter<SsaCandidateMatch>),
     ])]
 [JsonSerializable(typeof(GraphWorkerMessage))]
 [JsonSerializable(typeof(GraphWorkerRequest))]

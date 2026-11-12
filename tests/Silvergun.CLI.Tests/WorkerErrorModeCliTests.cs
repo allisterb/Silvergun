@@ -40,7 +40,7 @@ public sealed class WorkerErrorModeCliTests
     {
         AssertTheHostPassesNoWerBitDown();
 
-        var run = Observe(["__worker", "graph", "--protocol", "1"]);
+        var run = Observe(["__worker", "graph", "--protocol", "2"]);
 
         Assert.True(run.SeenWhileAlive, $"0x2 was not set while the graph worker waited (last live read 0x{run.LastLiveMode:X8}, final 0x{run.FinalMode:X8})\n{run.Stderr}");
         Assert.True((run.FinalMode & NoGpFaultErrorBox) != 0, $"the graph worker ended with mode 0x{run.FinalMode:X8}: not opted out\n{run.Stderr}");
@@ -62,7 +62,7 @@ public sealed class WorkerErrorModeCliTests
     public static TheoryData<string[]> WorkerArgumentErrors() => new()
     {
         { ["__worker", "graph", "--bogus"] },
-        { ["__worker", "graph", "--protocol", "2"] },
+        { ["__worker", "graph", "--protocol", "1"] },
         { ["__worker", "yara", "--protocol", "1", "--bogus"] },
         { ["__worker", "yara", "--protocol", "1", "--timeout", "0"] },
         { ["__worker"] },

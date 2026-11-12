@@ -174,6 +174,21 @@ public sealed class AssemblyDisassembler : Runtime, IDisposable
         }
     }
 
+    /// <summary>
+    /// Releases what Analysis.Net's process-wide statics still hold of the last load: the platform types' resolver (which
+    /// captures its host, and so the whole model) and CCIProvider's attribute cache. For a process done with every
+    /// instance it created, such as the graph worker between a folder's graph and its SSA phase; a later
+    /// <see cref="Create"/> resolves them again. Serialized with loads.
+    /// </summary>
+    public static void ReleaseStatics()
+    {
+        lock (loadLock)
+        {
+            PlatformTypes.Resolve(new Model.Host());
+            Loader.ReleaseStaticCaches();
+        }
+    }
+
     /// <summary>Disposes the underlying loader. Idempotent.</summary>
     public void Dispose()
     {

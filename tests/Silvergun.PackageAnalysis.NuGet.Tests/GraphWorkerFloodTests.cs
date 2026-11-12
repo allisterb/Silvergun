@@ -56,6 +56,30 @@ public sealed class GraphWorkerFloodTests : IDisposable
     }
 
     /// <summary>
+    /// With SSA on the protocol has twice the records per folder (<c>ssa-facts-s4.md</c> §4), and the pump reads exactly
+    /// those: a flood after <c>done</c> is still never read, and the folder and its SSA are kept.
+    /// </summary>
+    [Fact]
+    public void WithSsa_AFloodAfterDone_IsNeverRead_AndTheRecordsAreKept()
+    {
+        using var script = new FakeGraphScript("flood-after-done-ssa").Otherwise("request", "ready", "empty", "done", "floodlines 16777000");
+        var options = PackageReachabilityOptions.Default with { WorkerMemoryBytes = 0, Ssa = Silvergun.CodeAnalysis.IL.Ssa.SsaFactBounds.Default };
+        var launch = script.Launch();
+        var a = stage.Small("lib/a");
+        GC.Collect();
+        var before = GC.GetTotalAllocatedBytes(precise: true);
+
+        var report = PackageReachability.Analyze(a, options, launch);
+
+        var allocated = GC.GetTotalAllocatedBytes(precise: true) - before;
+        var folder = Assert.Single(report.Folders);
+        Assert.Equal((FolderOutcome.NothingLoaded, SsaFolderOutcome.NotRun), (folder.Outcome, folder.Ssa!.Outcome));
+        Assert.Equal("the folder's graph was not built, so it has no sink sites", folder.Ssa.Reason);
+        Assert.True(allocated < 64L * 1024 * 1024, $"the parent allocated {allocated / (1024 * 1024)} MiB during the run");
+        script.AssertNoOrphans();
+    }
+
+    /// <summary>
     /// The same flood in place of the folder record: the first oversized-or-junk line fails the folder, and the queue's bound
     /// keeps what the parent holds to a few records however fast the child writes.
     /// </summary>

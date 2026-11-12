@@ -119,6 +119,9 @@ internal sealed class GraphStage : IDisposable
     public static byte[] Dependency { get; } = File.ReadAllBytes(Beside(MechanismDependency));
 
     public static byte[] Shared { get; } = File.ReadAllBytes(Beside(SharedFixture));
+
+    /// <summary>The mechanism fixture's host stubs: a loadable assembly whose graph has no sink site.</summary>
+    public static byte[] HostStubs { get; } = File.ReadAllBytes(Beside(HostStubsFixture));
     #endregion
 
     #region Methods
@@ -155,6 +158,7 @@ internal sealed class GraphStage : IDisposable
     internal const string SharedFixture = "Silvergun.CodeAnalysis.IL.Tests.Fixture.dll";
     internal const string MechanismFixture = "Silvergun.CodeAnalysis.IL.Tests.MechanismFixture.dll";
     internal const string MechanismDependency = "Silvergun.CodeAnalysis.IL.Tests.MechanismFixture.Dependency.dll";
+    internal const string HostStubsFixture = "Silvergun.CodeAnalysis.IL.Tests.MechanismFixture.HostStubs.dll";
     #endregion
 }
 
@@ -168,6 +172,18 @@ internal static class GraphJson
 
     /// <summary>A message as the protocol writes it.</summary>
     public static string Of(GraphWorkerMessage message) => JsonSerializer.Serialize(message, GraphWorkerJsonContext.Default.GraphWorkerMessage);
+
+    /// <summary>A folder's SSA result as the protocol would write it in an <c>ssa</c> record at index 0, or "null".</summary>
+    public static string Of(FolderSsa? ssa) =>
+        ssa is null ? "null" : Of(new GraphWorkerSsa(0, ssa.Outcome, ssa.Facts, ssa.Reason));
+
+    /// <summary>
+    /// Every field of a folder but its SSA result, the report serialized by the protocol's context: two passes whose
+    /// folders give equal strings agree on the graph pass byte for byte (<c>ssa-facts-s4.md</c>, additivity).
+    /// </summary>
+    public static string GraphOf(FolderReachability f) =>
+        string.Join("|", f.Folder, f.Outcome, string.Join(",", f.Assemblies), string.Join(",", f.LoadFailures.Select(l => l.RelativePath + ":" + l.Reason)),
+            Of(f.Report), f.Reason, f.SameAs, f.Nodes, f.Edges);
 
     /// <summary>The in-process answer for request folder <paramref name="index"/>: PackageGraphs.BuildFolder, then Reachability.Analyze.</summary>
     public static GraphWorkerFolder InProcess(int index, string folder, IReadOnlyList<(string RelativePath, string FullPath)> members, GraphBudget? budget = null)

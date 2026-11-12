@@ -1,4 +1,4 @@
-namespace Silvergun.CodeAnalysis.IL;
+namespace Silvergun;
 
 using System;
 using System.Linq;
@@ -10,7 +10,8 @@ using System.Text;
 /// The one escaper for attacker-authored text (package entry names, yara output, string constants read from IL): every
 /// control, line/paragraph separator, bidi-control and invisible (zero-width, soft hyphen, Tag-block) code point is
 /// replaced by a printable escape, so the text cannot inject a line, reorder what a reader sees, or hide itself.
-/// Ordinary text (non-ASCII, emoji) passes through unchanged. Never throws.
+/// Ordinary text (non-ASCII, emoji) passes through unchanged. Never throws. In Silvergun.Runtime so the YARA worker can
+/// use it without loading any analysis assembly (ADR 0033 decision 5).
 /// </summary>
 public static class UntrustedText
 {
@@ -93,8 +94,11 @@ public static class UntrustedText
     /// </summary>
     public static string HashOnly(string text) => Suffix(text.Length, Hash(text));
 
-    // Amendment a5's suffix for text whose last cut chars were dropped, hashed whole: the one renderer of it.
-    internal static string CutSuffix(string text, int cut) => Suffix(cut, Hash(text));
+    /// <summary>
+    /// Amendment a5's suffix for <paramref name="text"/> whose last <paramref name="cut"/> chars were dropped, hashed
+    /// whole: the one renderer of it.
+    /// </summary>
+    public static string CutSuffix(string text, int cut) => Suffix(cut, Hash(text));
 
     private static string Hash(string text) => Convert.ToHexStringLower(SHA256.HashData(MemoryMarshal.AsBytes(text.AsSpan())))[..8];
 

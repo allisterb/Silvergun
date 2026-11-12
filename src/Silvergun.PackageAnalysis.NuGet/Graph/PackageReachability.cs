@@ -8,6 +8,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 
 using Silvergun.CodeAnalysis.IL;
+using Silvergun.CodeAnalysis.IL.Ssa;
 using Silvergun.PackageAnalysis.NuGet.Yara.Worker;
 
 /// <summary>What became of one package folder's graph pass (<see cref="PackageReachability"/>).</summary>
@@ -35,13 +36,39 @@ public enum FolderOutcome
     NotRun,
 }
 
+/// <summary>What became of one package folder's SSA facts (ADR 0038, S4). Never inferred from the graph's outcome.</summary>
+public enum SsaFolderOutcome
+{
+    /// <summary>The facts were extracted; they say which sites were analysed and why the rest were not.</summary>
+    Analyzed,
+
+    /// <summary>The worker died or broke protocol while extracting them, or failed doing so. The graph's result stands.</summary>
+    Crashed,
+
+    /// <summary>The folder timeout, or the package budget, ran out while the worker was extracting them.</summary>
+    TimedOut,
+
+    /// <summary>
+    /// Never extracted, or not kept: the folder's graph was not analysed (so it has no sink sites), the record could not
+    /// be written or would pass <see cref="PackageReachabilityOptions.MaxReportBytes"/>.
+    /// </summary>
+    NotRun,
+}
+
+/// <summary>
+/// One folder's SSA facts (labelled SSA-derived wherever shown): <see cref="Facts"/> exactly when the outcome is
+/// <see cref="SsaFolderOutcome.Analyzed"/>, otherwise <see cref="Reason"/>.
+/// </summary>
+public sealed record FolderSsa(SsaFolderOutcome Outcome, SsaFolderFacts? Facts, string? Reason);
+
 /// <summary>
 /// One package folder's graph pass. <see cref="Assemblies"/> are the assemblies loaded into its graph (for an outcome
 /// other than <see cref="FolderOutcome.Analyzed"/> or <see cref="FolderOutcome.NothingLoaded"/>, the folder's assemblies,
 /// none of them analysed), <see cref="LoadFailures"/> the ones that did not load. <see cref="Report"/> is present exactly
 /// when the outcome is <see cref="FolderOutcome.Analyzed"/>; <see cref="Reason"/> exactly when it is Crashed, TimedOut or
 /// NotRun. <see cref="SameAs"/> names the folder whose identical files were built for this one. <see cref="Nodes"/> and
-/// <see cref="Edges"/> are the graph's size, 0 without one.
+/// <see cref="Edges"/> are the graph's size, 0 without one. <see cref="Ssa"/> is present exactly when SSA facts were asked
+/// for (<see cref="PackageReachabilityOptions.Ssa"/>); it never changes anything else here.
 /// </summary>
 public sealed record FolderReachability(
     string Folder,
@@ -52,7 +79,8 @@ public sealed record FolderReachability(
     string? Reason,
     string? SameAs,
     int Nodes,
-    int Edges);
+    int Edges,
+    FolderSsa? Ssa = null);
 
 /// <summary>Every folder of one package that holds assemblies, in <see cref="PackageGraphs"/>' order.</summary>
 public sealed record PackageReachabilityReport(IReadOnlyList<FolderReachability> Folders);
@@ -85,9 +113,24 @@ public sealed record PackageReachabilityOptions(
     /// The most line bytes of folder records accepted from workers over the whole package (0 or less for no limit): each
     /// record is bounded by <see cref="GraphWorkerProtocol.MaxRecordLineBytes"/>, but names in a report are not, so without
     /// this a package of many distinct folders could fill this process (review round 2, W-A). Parsed, a record takes about
-    /// twice its line in memory. The folder whose record would pass it, and every folder after it, is NotRun.
+    /// twice its line in memory. The folder whose record would pass it, and every folder after it, is NotRun. With
+    /// <see cref="Ssa"/>, SSA records have a budget of this size of their own, so a pass may hold twice as many bytes.
     /// </summary>
     public long MaxReportBytes { get; init; } = 128L * 1024 * 1024;
+
+    /// <summary>
+    /// The SSA fact bounds when each folder's SSA facts are wanted (ADR 0038, S4), extracted in the same worker after its
+    /// graph; null (the default) for none. The facts are additive: graph outcomes and reports are the same either way.
+    /// Each folder's SSA gets <see cref="FolderTimeout"/> of its own. SSA runs only until the package budget's wall-clock
+    /// deadline, and the graphs' deadline is moved back by the time SSA took (its waits, and the restarts its failures
+    /// forced), so a run can take up to twice the package budget. SSA records have a byte budget of their own, the size of
+    /// <see cref="MaxReportBytes"/>. Once an SSA budget is spent, or the worker has died in the SSA phase of three
+    /// folders, the remaining folders run without SSA (their SSA reads NotRun). Bounds that are not valid turn SSA off,
+    /// never the graph pass. The worker's own time backstop (<see cref="SsaFactBounds.FolderTime"/>) is kept within half of
+    /// <see cref="FolderTimeout"/>. At the deadline's edge an ssa record already written but not yet read is missed, and
+    /// that folder's SSA reads TimedOut.
+    /// </summary>
+    public SsaFactBounds? Ssa { get; init; }
     #endregion
 }
 
@@ -102,6 +145,12 @@ public sealed record PackageReachabilityOptions(
 /// a report depends on the files' bytes, not where they lie, so one budget-maxing DLL copied into many folders costs one
 /// build. A folder that could not be analysed never reads as clean: it carries its outcome and reason, and no report.
 /// The worker is never replaced by in-process analysis. Never throws.
+/// </para>
+/// <para>
+/// With <see cref="PackageReachabilityOptions.Ssa"/>, the same worker also extracts each folder's SSA facts after sending
+/// its graph record (ADR 0038, S4). A worker that dies, hangs or breaks protocol then costs only that folder's SSA
+/// (<see cref="SsaFolderOutcome.Crashed"/> or <see cref="SsaFolderOutcome.TimedOut"/>): its graph result stands, and a new
+/// worker takes the folders after it. Copies share their primary's facts.
 /// </para>
 /// </summary>
 public static class PackageReachability
@@ -147,55 +196,133 @@ public static class PackageReachability
                 }
             }
 
-            Build(folders, primaries, results, options, launch);
+            var (ssa, ssaOff) = SsaBounds(options);
+            ssaOff = Build(folders, primaries, results, options, launch, ssa, ssaOff);
             foreach (var (copy, first) in copyOf)
                 results[copy] = Copy(results[first]!, folders[first].Members, folders[copy]);
-            return new([.. results.Select(r => r!)]);
+            return new([.. results.Select(r => WithSsa(r!, options, ssaOff))]);
         }
         catch (Exception ex)
         {
             // Never throws: a failure here is a bug in this class, and every folder not yet decided is reported unrun.
             Runtime.Warn("Graph pass over the package failed: {0}", WorkerProtocol.Safe(ex.Message, 300));
-            return new([.. folders.Select((f, i) => results[i] ?? NotRun(f.Folder, f.Members, $"the graph pass failed: {ex.GetType().Name}: {ex.Message}"))]);
+            return new([.. folders.Select((f, i) => WithSsa(results[i] ?? NotRun(f.Folder, f.Members, $"the graph pass failed: {ex.GetType().Name}: {ex.Message}"), options, null))]);
         }
     }
 
+    // The SSA bounds to send, or why SSA is off although asked for. Invalid bounds turn SSA off, never the graph pass. The
+    // worker's own backstop is kept within half the folder timeout, so it ends a slow folder's SSA before the parent must.
+    private static (SsaFactBounds? Bounds, string? Off) SsaBounds(PackageReachabilityOptions options)
+    {
+        if (options.Ssa is not { } ssa)
+            return (null, null);
+        try
+        {
+            ssa.Validated();
+        }
+        catch (ArgumentOutOfRangeException ex)
+        {
+            return (null, $"the SSA fact bounds are not valid ({ex.Message}), so SSA was not run");
+        }
+        return options.FolderTimeout > TimeSpan.Zero && ssa.FolderTime > options.FolderTimeout / 2
+            ? (ssa with { FolderTime = TimeSpan.FromTicks(Math.Max(TimeSpan.TicksPerMillisecond, (options.FolderTimeout / 2).Ticks)) }, null)
+            : (ssa, null);
+    }
+
+    // A result as reported: when SSA was asked for, a folder without SSA facts reads NotRun with why, never as having none.
+    // `ssaOff` is why SSA stopped for the folders after some point (its own budget spent, or bounds that are not valid).
+    private static FolderReachability WithSsa(FolderReachability result, PackageReachabilityOptions options, string? ssaOff) =>
+        options.Ssa is null || result.Ssa is not null ? result
+        : result with
+        {
+            Ssa = new FolderSsa(SsaFolderOutcome.NotRun, null, result.Outcome switch
+            {
+                FolderOutcome.Analyzed => ssaOff ?? "its SSA facts were not received",
+                FolderOutcome.NothingLoaded => "no assembly of the folder loaded, so it has no sink sites",
+                _ => $"the folder's graph was not analysed ({result.Outcome}), so it has no sink sites",
+            }),
+        };
+
     // Runs workers over the primary folders in order: a failed run blames the folder in flight and a new worker takes the
-    // ones after it, until all are answered, the budget is spent, or a worker cannot start.
-    private static void Build(IReadOnlyList<(string Folder, PackageAssembly[] Members)> folders, List<int> primaries, FolderReachability?[] results, PackageReachabilityOptions options, GraphWorkerLaunch launch)
+    // ones after it, until all are answered, the budget is spent, or a worker cannot start. SSA spends a time budget (the
+    // package budget again) and a record-byte budget (MaxReportBytes again) of its own, and the graph's deadline moves back
+    // by the time SSA takes, so SSA never costs a graph; once either SSA budget is spent, the remaining folders run without
+    // SSA. Returns why SSA stopped, if it did.
+    private static string? Build(IReadOnlyList<(string Folder, PackageAssembly[] Members)> folders, List<int> primaries, FolderReachability?[] results, PackageReachabilityOptions options,
+        GraphWorkerLaunch launch, SsaFactBounds? ssa, string? ssaOff)
     {
         // A budget too large to be a timestamp offset is no deadline at all.
         var deadline = options.PackageBudget >= MaxBudget ? long.MaxValue
             : Stopwatch.GetTimestamp() + (long)(Math.Max(0, options.PackageBudget.TotalSeconds) * Stopwatch.Frequency);
+        var ssaDeadline = deadline;
         var budget = GraphWorkerBudget.Of(options.Graph);
         var reportBytesLeft = options.MaxReportBytes > 0 ? options.MaxReportBytes : long.MaxValue;
+        var ssaBytesLeft = reportBytesLeft;
+        var ssaBudgetSpent = $"the package's SSA budget of {options.PackageBudget.TotalSeconds:0} s was spent before it was started";
+        var (ssaDeaths, ssaFailedAt) = (0, 0L);
         var pending = primaries;
         while (pending.Count > 0)
         {
-            if (Stopwatch.GetTimestamp() >= deadline)
+            // After an SSA failure, the time since it (the failed run's kill and drain) is SSA's too.
+            var now = Stopwatch.GetTimestamp();
+            if (now >= (ssaFailedAt != 0 ? GraphWorkerProcess.Later(deadline, now - ssaFailedAt) : deadline))
             {
                 Unrun(folders, pending, results, $"the package budget of {options.PackageBudget.TotalSeconds:0} s was spent before it was started");
-                return;
+                return ssaOff;
             }
+            if (ssa is not null && Stopwatch.GetTimestamp() >= ssaDeadline)
+                (ssa, ssaOff) = (null, ssaBudgetSpent);
 
             var request = new GraphWorkerRequest(GraphWorkerProtocol.Version, budget,
-                [.. pending.Select(i => new GraphWorkerFolderRequest(folders[i].Folder, [.. folders[i].Members.Select(m => new GraphWorkerAssembly(m.RelativePath, m.FullPath))]))]);
-            var run = GraphWorkerProcess.Run(launch, request, options.FolderTimeout > TimeSpan.Zero ? options.FolderTimeout : TimeSpan.Zero, deadline, reportBytesLeft);
+                [.. pending.Select(i => new GraphWorkerFolderRequest(folders[i].Folder, [.. folders[i].Members.Select(m => new GraphWorkerAssembly(m.RelativePath, m.FullPath))]))],
+                ssa is null ? null : GraphWorkerSsaBounds.Of(ssa));
+            // A restart an SSA failure forced counts its time to `ready` as SSA's, within SsaTicks.
+            var run = GraphWorkerProcess.Run(launch, request, options.FolderTimeout > TimeSpan.Zero ? options.FolderTimeout : TimeSpan.Zero, deadline, reportBytesLeft,
+                ssaDeadline, ssaBytesLeft, ssaFailedAt);
             reportBytesLeft -= run.AnsweredBytes;
+            ssaBytesLeft -= run.SsaBytes;
+            deadline = GraphWorkerProcess.Later(deadline, run.SsaTicks);
+            ssaFailedAt = 0;
             for (var k = 0; k < run.Answered.Count; k++)
-                results[pending[k]] = Answered(run.Answered[k]);
+                results[pending[k]] = Answered(run.Answered[k], k < run.Ssa.Count ? run.Ssa[k] : null);
+
+            if (run.InSsa)
+            {
+                // The folder's graph record was kept; only its SSA phase failed. A fresh worker takes the folders after it,
+                // without SSA once one of SSA's own budgets is spent.
+                var last = pending[run.Answered.Count - 1];
+                var (outcome, reason) = run.Failure switch
+                {
+                    GraphWorkerFailureKind.Crashed => (SsaFolderOutcome.Crashed, run.Reason!),
+                    GraphWorkerFailureKind.ReportsSpent => (SsaFolderOutcome.NotRun, $"its SSA record would take the package's SSA records over {options.MaxReportBytes} bytes, so it was not kept"),
+                    _ => (SsaFolderOutcome.TimedOut, run.Reason!),
+                };
+                results[last] = results[last]! with { Ssa = new FolderSsa(outcome, null, reason) };
+                Runtime.Warn("Graph worker: folder {0}'s SSA facts are {1}: {2}", WorkerProtocol.Safe(folders[last].Folder, 200), outcome, reason);
+                pending = [.. pending.Skip(run.Answered.Count)];
+                ssaFailedAt = run.FailedAt;
+                if (run.Failure == GraphWorkerFailureKind.BudgetSpent)
+                    (ssa, ssaOff) = (null, ssaBudgetSpent);
+                else if (run.Failure == GraphWorkerFailureKind.ReportsSpent)
+                    (ssa, ssaOff) = (null, $"the package's SSA records reached their limit of {options.MaxReportBytes} bytes before it was started");
+                // What the restart accounting cannot see (a fresh worker's cold start on its first graph) is bounded by
+                // turning SSA off after a few deaths in it.
+                else if (++ssaDeaths >= MaxSsaDeaths)
+                    (ssa, ssaOff) = (null, $"the graph worker died or hung in the SSA phase of {MaxSsaDeaths} folders, so SSA was not run for the rest");
+                continue;
+            }
 
             switch (run.Failure)
             {
                 case null:
-                    return;
+                    return ssaOff;
                 case GraphWorkerFailureKind.AfterAll:
                     // Every folder's record was received and checked; only the child's ending was wrong.
                     Runtime.Warn("Graph worker: {0}; its {1} folder record(s) are kept.", run.Reason!, run.Answered.Count);
-                    return;
+                    return ssaOff;
                 case GraphWorkerFailureKind.NotStarted:
                     Unrun(folders, pending.Skip(run.Answered.Count), results, $"the graph worker could not run: {run.Reason}");
-                    return;
+                    return ssaOff;
                 case GraphWorkerFailureKind.ReportsSpent:
                     // The record was built but not kept: the folder was not analysed here, and neither is any after it. The
                     // run only knew the bytes left, so the reason names the package's limit here.
@@ -204,7 +331,7 @@ public static class PackageReachability
                     results[full] = NotRun(folders[full].Folder, folders[full].Members, over);
                     Runtime.Warn("Graph worker: folder {0}: {1}", WorkerProtocol.Safe(folders[full].Folder, 200), over);
                     Unrun(folders, pending.Skip(run.Answered.Count + 1), results, $"the package's folder records reached their limit of {options.MaxReportBytes} bytes before it was started");
-                    return;
+                    return ssaOff;
                 default:
                     var blamed = pending[run.Answered.Count];
                     var outcome = run.Failure == GraphWorkerFailureKind.Crashed ? FolderOutcome.Crashed : FolderOutcome.TimedOut;
@@ -214,17 +341,19 @@ public static class PackageReachability
                     if (run.Failure == GraphWorkerFailureKind.BudgetSpent)
                     {
                         Unrun(folders, pending, results, $"the package budget of {options.PackageBudget.TotalSeconds:0} s was spent before it was started");
-                        return;
+                        return ssaOff;
                     }
                     break;
             }
         }
+        return ssaOff;
     }
 
-    // A folder record as a result: Analyzed with its report, or NothingLoaded.
-    private static FolderReachability Answered(GraphWorkerFolder record) =>
+    // A folder record as a result: Analyzed with its report, or NothingLoaded; with its SSA record when one came.
+    private static FolderReachability Answered(GraphWorkerFolder record, GraphWorkerSsa? ssa) =>
         new(record.Folder, record.Assemblies, record.LoadFailures,
-            record.Report is null ? FolderOutcome.NothingLoaded : FolderOutcome.Analyzed, record.Report, null, null, record.Nodes, record.Edges);
+            record.Report is null ? FolderOutcome.NothingLoaded : FolderOutcome.Analyzed, record.Report, null, null, record.Nodes, record.Edges,
+            ssa is null ? null : new FolderSsa(ssa.Outcome, ssa.Facts, ssa.Reason));
 
     // A copy of `first`'s result for `copy`, whose members have the same file names in the same order: every path is
     // mapped to the copy's own, in the reasons too (they name assemblies by package path, review W3). One pass, longest
@@ -241,6 +370,7 @@ public static class PackageReachability
             LoadFailures = [.. first.LoadFailures.Select(f => new PackageGraphLoadFailure(map.GetValueOrDefault(f.RelativePath, f.RelativePath), Remap(f.Reason)))],
             Reason = first.Reason is null ? null : Remap(first.Reason),
             SameAs = first.SameAs ?? first.Folder,
+            Ssa = first.Ssa is { Reason: { } why } ssa ? ssa with { Reason = Remap(why) } : first.Ssa,
         };
     }
 
@@ -271,5 +401,8 @@ public static class PackageReachability
 
     #region Fields
     private static readonly TimeSpan MaxBudget = TimeSpan.FromDays(365);
+
+    // SSA-phase deaths (Crashed or TimedOut) after which the remaining folders run without SSA.
+    private const int MaxSsaDeaths = 3;
     #endregion
 }

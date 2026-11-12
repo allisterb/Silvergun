@@ -8,12 +8,13 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 
 using Silvergun.CodeAnalysis.IL;
+using Silvergun.CodeAnalysis.IL.Ssa;
 using Silvergun.PackageAnalysis.NuGet.Graph;
 
 using Xunit;
 
 /// <summary>
-/// Graph worker protocol v1 on the wire (<c>docs/agent/tasks/graph-worker.md</c> G2): a real <see cref="ReachabilityReport"/>
+/// Graph worker protocol v2 on the wire (<c>docs/agent/tasks/graph-worker.md</c> G2, <c>ssa-facts-s4.md</c> §4): a real <see cref="ReachabilityReport"/>
 /// round-trips through the strict source-generated <c>GraphWorkerJsonContext</c> byte for byte, the context refuses every
 /// record that is not exactly the schema, and <c>GraphWorkerWriter</c> writes a record whole or not at all.
 /// </summary>
@@ -66,11 +67,161 @@ public sealed class GraphWorkerProtocolTests
             Assert.Equal(json, GraphJson.Of(JsonSerializer.Deserialize(json, GraphWorkerJsonContext.Default.GraphWorkerMessage)!));
         }
 
-        var request = new GraphWorkerRequest(1, new GraphWorkerBudget(10, 20, 30),
+        // v2: SSA off is "ssa":null on the wire (nulls are written, never omitted).
+        var request = new GraphWorkerRequest(GraphWorkerProtocol.Version, new GraphWorkerBudget(10, 20, 30),
             [new GraphWorkerFolderRequest("lib/net8.0", [new GraphWorkerAssembly("lib/net8.0/a.dll", @"C:\x\a.dll")])]);
         var line = JsonSerializer.Serialize(request, GraphWorkerJsonContext.Default.GraphWorkerRequest);
-        Assert.Equal("{\"protocol\":1,\"budget\":{\"maxNodes\":10,\"maxEdges\":20,\"maxDispatchWork\":30},\"folders\":[{\"folder\":\"lib/net8.0\",\"assemblies\":[{\"relativePath\":\"lib/net8.0/a.dll\",\"fullPath\":\"C:\\\\x\\\\a.dll\"}]}]}", line);
+        Assert.Equal("{\"protocol\":2,\"budget\":{\"maxNodes\":10,\"maxEdges\":20,\"maxDispatchWork\":30},\"folders\":[{\"folder\":\"lib/net8.0\",\"assemblies\":[{\"relativePath\":\"lib/net8.0/a.dll\",\"fullPath\":\"C:\\\\x\\\\a.dll\"}]}],\"ssa\":null}", line);
         Assert.Equal(line, JsonSerializer.Serialize(JsonSerializer.Deserialize(line, GraphWorkerJsonContext.Default.GraphWorkerRequest)!, GraphWorkerJsonContext.Default.GraphWorkerRequest));
+    }
+
+    /// <summary>
+    /// v2's request: with SSA on, <c>ssa</c> carries every fact bound by name, the folder time in milliseconds; it round-trips
+    /// byte for byte. A request without the member (v1's shape) reads as SSA off.
+    /// </summary>
+    [Fact]
+    public void ARequestWithSsaBounds_RoundTrips_AndOneWithoutTheMemberIsSsaOff()
+    {
+        var request = new GraphWorkerRequest(GraphWorkerProtocol.Version, new GraphWorkerBudget(10, 20, 30), [],
+            new GraphWorkerSsaBounds(1, 2, 3, 4, 5, 6, 7, 8, 9000, 10));
+
+        var line = JsonSerializer.Serialize(request, GraphWorkerJsonContext.Default.GraphWorkerRequest);
+
+        Assert.Equal("{\"protocol\":2,\"budget\":{\"maxNodes\":10,\"maxEdges\":20,\"maxDispatchWork\":30},\"folders\":[],\"ssa\":{\"maxSites\":1,\"maxArguments\":2,"
+            + "\"maxAlternatives\":3,\"maxPhiDepth\":4,\"maxPhiInputs\":5,\"maxTextChars\":6,\"maxFactTextChars\":7,\"maxLiftedMethods\":8,"
+            + "\"folderTimeMilliseconds\":9000,\"maxCandidates\":10}}", line);
+        Assert.Equal(line, JsonSerializer.Serialize(JsonSerializer.Deserialize(line, GraphWorkerJsonContext.Default.GraphWorkerRequest)!, GraphWorkerJsonContext.Default.GraphWorkerRequest));
+        var absent = JsonSerializer.Deserialize("{\"protocol\":2,\"budget\":{\"maxNodes\":1,\"maxEdges\":1,\"maxDispatchWork\":1},\"folders\":[]}", GraphWorkerJsonContext.Default.GraphWorkerRequest)!;
+        Assert.Null(absent.Ssa);
+    }
+
+    /// <summary><c>GraphWorkerSsaBounds.Of</c> and <c>ToBounds</c> round-trip every bound, the defaults and others.</summary>
+    [Fact]
+    public void SsaBounds_OfAndToBounds_RoundTrip()
+    {
+        var custom = new SsaFactBounds
+        {
+            MaxSites = 11, MaxArguments = 12, MaxAlternatives = 13, MaxPhiDepth = 14, MaxPhiInputs = 15, MaxTextChars = 16,
+            MaxFactTextChars = 17, MaxLiftedMethods = 18, FolderTime = TimeSpan.FromMilliseconds(1234), MaxCandidates = 19,
+        };
+
+        Assert.Equal(SsaFactBounds.Default, GraphWorkerSsaBounds.Of(SsaFactBounds.Default).ToBounds());
+        Assert.Equal(custom, GraphWorkerSsaBounds.Of(custom).ToBounds());
+        Assert.Equal(new GraphWorkerSsaBounds(11, 12, 13, 14, 15, 16, 17, 18, 1234, 19), GraphWorkerSsaBounds.Of(custom));
+        Assert.Equal(60_000, GraphWorkerSsaBounds.Of(SsaFactBounds.Default).FolderTimeMilliseconds);
+    }
+
+    /// <summary>
+    /// The folder time on the wire is whole milliseconds: a positive fraction rounds up (never to 0, which would be refused),
+    /// and a time past a year reads back as a year (no bound at all, and every long of milliseconds stays a TimeSpan).
+    /// </summary>
+    [Fact]
+    public void SsaBounds_FolderTime_RoundsUp_AndIsCappedAtAYear()
+    {
+        var tiny = GraphWorkerSsaBounds.Of(SsaFactBounds.Default with { FolderTime = TimeSpan.FromTicks(1) });
+        var huge = GraphWorkerSsaBounds.Of(SsaFactBounds.Default with { FolderTime = TimeSpan.MaxValue });
+
+        Assert.Equal(1, tiny.FolderTimeMilliseconds);
+        Assert.Equal(TimeSpan.FromMilliseconds(1), tiny.ToBounds().FolderTime);
+        Assert.Equal(TimeSpan.FromDays(365), huge.ToBounds().FolderTime);
+        Assert.Equal(TimeSpan.FromDays(365), (GraphWorkerSsaBounds.Of(SsaFactBounds.Default) with { FolderTimeMilliseconds = long.MaxValue }).ToBounds().FolderTime);
+    }
+
+    public static TheoryData<string> NonPositiveSsaBounds() =>
+    [
+        "MaxSites", "MaxArguments", "MaxAlternatives", "MaxPhiDepth", "MaxPhiInputs", "MaxTextChars", "MaxFactTextChars", "MaxLiftedMethods",
+        "FolderTimeMilliseconds", "MaxCandidates",
+    ];
+
+    /// <summary><c>ToBounds</c> refuses each bound at 0 and below, as <see cref="SsaFactBounds.Validated"/> does.</summary>
+    [Theory]
+    [MemberData(nameof(NonPositiveSsaBounds))]
+    public void SsaBounds_ToBounds_RefusesANonPositiveBound(string bound)
+    {
+        var valid = GraphWorkerSsaBounds.Of(SsaFactBounds.Default);
+        foreach (var value in new[] { 0L, -1L })
+        {
+            var bad = bound switch
+            {
+                "MaxSites" => valid with { MaxSites = (int)value },
+                "MaxArguments" => valid with { MaxArguments = (int)value },
+                "MaxAlternatives" => valid with { MaxAlternatives = (int)value },
+                "MaxPhiDepth" => valid with { MaxPhiDepth = (int)value },
+                "MaxPhiInputs" => valid with { MaxPhiInputs = (int)value },
+                "MaxTextChars" => valid with { MaxTextChars = (int)value },
+                "MaxFactTextChars" => valid with { MaxFactTextChars = (int)value },
+                "MaxLiftedMethods" => valid with { MaxLiftedMethods = (int)value },
+                "FolderTimeMilliseconds" => valid with { FolderTimeMilliseconds = value },
+                _ => valid with { MaxCandidates = (int)value },
+            };
+
+            Assert.Throws<ArgumentOutOfRangeException>(() => bad.ToBounds());
+        }
+    }
+
+    /// <summary>
+    /// The <c>ssa</c> record round-trips byte for byte: NotRun and Crashed with a reason, and Analyzed with facts holding
+    /// every value kind, a cut constant, a MethodUnknown site, a reflection target and failure counts.
+    /// </summary>
+    [Fact]
+    public void AnSsaRecord_RoundTrips_ByteIdentical()
+    {
+        var site = new SinkSite("App.C.M()", 12, MethodEdgeKind.Call, "System.IO.File.ReadAllText(System.String)", "System.IO.File.ReadAllText(System.String)", Capability.FileSystem);
+        var facts = new SsaFolderFacts(
+            [
+                new SsaSinkFact(site, SsaSiteStatus.Analyzed, null,
+                    [
+                        SsaValue.OfConstant(new SsaConstant(SsaConstantKind.String, "a\\u0000b…[+9 chars, sha256:0123abcd]", Cut: true)),
+                        new SsaValue(SsaValueKind.OneOf, [new SsaConstant(SsaConstantKind.Int, "1"), new SsaConstant(SsaConstantKind.Int, "2")], null, null),
+                        SsaValue.OfParameter(1),
+                        SsaValue.OfDynamic(SsaDynamicOrigin.TooManyAlternatives),
+                    ], 4, true, null, null,
+                    new SsaReflectionTarget(SsaTargetKind.Method, null, SsaValue.OfConstant(new SsaConstant(SsaConstantKind.Type, "App.C")),
+                        SsaValue.OfConstant(new SsaConstant(SsaConstantKind.String, "Run")), SsaCandidateMatch.ByName, ["App.C.Run()"], 1, null)),
+                new SsaSinkFact(site with { Offset = 40 }, SsaSiteStatus.MethodUnknown, null, [], 0, false, SsaFailureKind.UnresolvedFact, "a reason"),
+            ],
+            3, true, 7, [new SsaFailureCount(SsaFailureKind.UnresolvedFact, 1)], false, false, true, 0);
+        GraphWorkerMessage[] records =
+        [
+            new GraphWorkerSsa(0, SsaFolderOutcome.NotRun, null, "the folder's graph was not built, so it has no sink sites"),
+            new GraphWorkerSsa(1, SsaFolderOutcome.Crashed, null, "the SSA phase failed: X: y"),
+            new GraphWorkerSsa(2, SsaFolderOutcome.Analyzed, facts, null),
+        ];
+
+        foreach (var record in records)
+        {
+            var json = GraphJson.Of(record);
+            Assert.StartsWith("{\"type\":\"ssa\",\"index\":", json, StringComparison.Ordinal);
+            Assert.Equal(json, GraphJson.Of(JsonSerializer.Deserialize(json, GraphWorkerJsonContext.Default.GraphWorkerMessage)!));
+        }
+        var back = (GraphWorkerSsa)JsonSerializer.Deserialize(GraphJson.Of(records[2]), GraphWorkerJsonContext.Default.GraphWorkerMessage)!;
+        Assert.Equal((SsaFolderOutcome.Analyzed, 2, true), (back.Outcome, back.Facts!.Sites.Count, back.Facts.Sites[0].Arguments[0].Constants[0].Cut));
+        Assert.Contains("\"outcome\":\"Analyzed\"", GraphJson.Of(records[2]), StringComparison.Ordinal);
+    }
+
+    public static TheoryData<string, string> MalformedSsaRecords() => new()
+    {
+        { "an integer outcome", "{\"type\":\"ssa\",\"index\":0,\"outcome\":0,\"facts\":null,\"reason\":\"r\"}" },
+        { "a lower-case outcome", "{\"type\":\"ssa\",\"index\":0,\"outcome\":\"notRun\",\"facts\":null,\"reason\":\"r\"}" },
+        { "the retired Off outcome", "{\"type\":\"ssa\",\"index\":0,\"outcome\":\"Off\",\"facts\":null,\"reason\":\"r\"}" },
+        { "the retired NothingLoaded outcome", "{\"type\":\"ssa\",\"index\":0,\"outcome\":\"NothingLoaded\",\"facts\":null,\"reason\":\"r\"}" },
+        { "an unknown member", "{\"type\":\"ssa\",\"index\":0,\"outcome\":\"NotRun\",\"facts\":null,\"reason\":\"r\",\"x\":1}" },
+        { "a missing reason", "{\"type\":\"ssa\",\"index\":0,\"outcome\":\"NotRun\",\"facts\":null}" },
+        { "a missing index", "{\"type\":\"ssa\",\"outcome\":\"NotRun\",\"facts\":null,\"reason\":\"r\"}" },
+        { "an escaped lone surrogate in the reason", "{\"type\":\"ssa\",\"index\":0,\"outcome\":\"NotRun\",\"facts\":null,\"reason\":\"\\uD800\"}" },
+        { "facts missing a member", "{\"type\":\"ssa\",\"index\":0,\"outcome\":\"Analyzed\",\"facts\":{\"sites\":[],\"sitesTotal\":0,\"truncated\":false,\"methodsLifted\":0,\"unknown\":[],\"methodBudget\":false,\"timeBudget\":false,\"textBudget\":false},\"reason\":null}" },
+        { "facts with an unknown member", "{\"type\":\"ssa\",\"index\":0,\"outcome\":\"Analyzed\",\"facts\":{\"sites\":[],\"sitesTotal\":0,\"truncated\":false,\"methodsLifted\":0,\"unknown\":[],\"methodBudget\":false,\"timeBudget\":false,\"textBudget\":false,\"assembliesLost\":0,\"x\":0},\"reason\":null}" },
+        { "a null site list", "{\"type\":\"ssa\",\"index\":0,\"outcome\":\"Analyzed\",\"facts\":{\"sites\":null,\"sitesTotal\":0,\"truncated\":false,\"methodsLifted\":0,\"unknown\":[],\"methodBudget\":false,\"timeBudget\":false,\"textBudget\":false,\"assembliesLost\":0},\"reason\":null}" },
+    };
+
+    /// <summary>The <c>ssa</c> record is as strict as the others: off-schema is refused, enums by exact name only.</summary>
+    [Theory]
+    [MemberData(nameof(MalformedSsaRecords))]
+    public void TheContext_RejectsAnSsaRecordThatIsNotExactlyTheSchema(string what, string json)
+    {
+        var parsed = Record.Exception(() => JsonSerializer.Deserialize(json, GraphWorkerJsonContext.Default.GraphWorkerMessage));
+
+        Assert.True(parsed is JsonException or NotSupportedException, $"{what}: {(parsed is null ? "accepted" : "threw " + parsed.GetType().Name)}");
     }
 
     /// <summary>
@@ -390,6 +541,30 @@ public sealed class GraphWorkerProtocolTests
 
         Assert.True(thrown is not null, $"no exception; the writer wrote: {Encoding.UTF8.GetString(stream.ToArray()).TrimEnd('\n')}");
         Assert.Equal(0, stream.Length);
+    }
+
+    /// <summary>
+    /// Review round 1: the writer drops its buffer after a record over 1 MiB. What it writes is unchanged: a 3 MiB record
+    /// then a small one are written exactly; and on a writer whose limit refuses the 3 MiB record (nothing written), the small
+    /// one after it is written exactly.
+    /// </summary>
+    [Fact]
+    public void TheWriter_AfterARecordOver1MiB_WritesTheNextOnesExactly()
+    {
+        var big = new GraphWorkerFatal(new string('b', 3 * 1024 * 1024));
+        var small = new GraphWorkerDone(1);
+        using var stream = new MemoryStream();
+        var writer = new GraphWorkerWriter(stream, 4 * 1024 * 1024);
+        using var capped = new MemoryStream();
+        var cappedWriter = new GraphWorkerWriter(capped, 1024);
+
+        writer.Write(big);
+        writer.Write(small);
+        Assert.Throws<InvalidDataException>(() => cappedWriter.Write(big));
+        cappedWriter.Write(small);
+
+        Assert.Equal(GraphJson.Of(big) + "\n" + GraphJson.Of(small) + "\n", Encoding.UTF8.GetString(stream.ToArray()));
+        Assert.Equal(GraphJson.Of(small) + "\n", Encoding.UTF8.GetString(capped.ToArray()));
     }
 
     /// <summary>Lines are compact UTF-8 with no BOM, each ending in exactly one <c>\n</c>, and successive writes append.</summary>

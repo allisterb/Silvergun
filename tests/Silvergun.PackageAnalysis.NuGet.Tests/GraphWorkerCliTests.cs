@@ -10,13 +10,14 @@ using System.Text.Json;
 using System.Threading.Tasks;
 
 using Silvergun.CodeAnalysis.IL;
+using Silvergun.CodeAnalysis.IL.Ssa;
 using Silvergun.PackageAnalysis.NuGet.Graph;
 
 using Xunit;
 
 #if WINDOWS
 /// <summary>
-/// The graph pass through the REAL net10.0-windows CLI apphost (<c>Silvergun.CLI.exe __worker graph --protocol 1</c>, in
+/// The graph pass through the REAL net10.0-windows CLI apphost (<c>Silvergun.CLI.exe __worker graph --protocol 2</c>, in
 /// this test bin by the CLI ProjectReference; <c>docs/agent/tasks/graph-worker.md</c> S2): <see cref="PackageReachability"/>
 /// over a staged package equals the in-process <see cref="PackageGraphs"/> build plus <see cref="Reachability"/>, run after
 /// run; identical folders share one result; the cap holds; and the hidden verb's argument errors are one graph
@@ -123,6 +124,72 @@ public sealed class GraphWorkerCliTests : IDisposable
     }
     #endregion
 
+    #region Methods: SSA facts (ssa-facts-s4.md §4)
+    /// <summary>
+    /// S4.4 end to end through the real apphost, SSA on: the mechanism folder's SSA is Analyzed, and its
+    /// <c>File.ReadAllText(Names.FilePath)</c> and <c>Process.Start(Names.Program)</c> sites (in an instance method and in a
+    /// lambda) are Analyzed with their constant read; the shared fixture is Analyzed; the garbage folder is NotRun. Every site
+    /// carries a status. The graph pass is byte for byte the one with SSA off (acceptance 1).
+    /// </summary>
+    [Fact]
+    public void Analyze_ThroughTheRealCli_WithSsa_ReadsTheSinkSitesConstants_AndLeavesTheGraphPassAsItWas()
+    {
+        using var package = Open("Ssa",
+            ($"lib/net10.0/{GraphStage.MechanismFixture}", GraphStage.Mechanism),
+            ($"lib/net10.0/{GraphStage.MechanismDependency}", GraphStage.Dependency),
+            ($"lib/net8.0/{GraphStage.SharedFixture}", GraphStage.Shared),
+            ("lib/net9.0/garbage.dll", Encoding.UTF8.GetBytes("not a portable executable")));
+
+        var off = PackageReachability.Analyze(package);
+        var on = PackageReachability.Analyze(package, PackageReachabilityOptions.Default with { Ssa = SsaFactBounds.Default });
+
+        Assert.Equal(off.Folders.Select(GraphJson.GraphOf), on.Folders.Select(GraphJson.GraphOf));
+        Assert.All(off.Folders, f => Assert.Null(f.Ssa));
+        Assert.Equal(["lib/net10.0", "lib/net8.0", "lib/net9.0"], on.Folders.Select(f => f.Folder));
+        Assert.Equal([SsaFolderOutcome.Analyzed, SsaFolderOutcome.Analyzed, SsaFolderOutcome.NotRun], on.Folders.Select(f => f.Ssa!.Outcome));
+        var facts = on.Folders[0].Ssa!.Facts!;
+        Assert.Equal((false, false, 0), (facts.Truncated, facts.TimeBudget, facts.AssembliesLost));
+        Assert.Equal(facts.Sites.Count, Enum.GetValues<SsaSiteStatus>().Sum(facts.Count));
+        AssertConstantSite(facts, "System.IO.File.ReadAllText", "silvergun-mechanism-fixture.txt");
+        AssertConstantSite(facts, "System.Diagnostics.Process.Start", "silvergun-mechanism-fixture-does-not-exist");
+        Assert.NotEmpty(on.Folders[1].Ssa!.Facts!.Sites);
+        Assert.Null(on.Folders[2].Ssa!.Facts);
+    }
+
+    /// <summary>
+    /// The verb itself with <c>ssa</c> bounds: <c>ready</c>, the folder record (as with SSA off), its <c>ssa</c> record
+    /// (Analyzed, its site carrying the constant), <c>done</c>, exit 0, nothing else on stdout.
+    /// </summary>
+    [Fact]
+    public void Verb_WithSsaBounds_IsReadyRecordSsaDone_AndExitZero()
+    {
+        var dependency = GraphStage.Beside(GraphStage.MechanismDependency);
+        var request = GraphJson.Request(("lib/net10.0", [new PackageAssembly($"lib/net10.0/{GraphStage.MechanismDependency}", dependency, null, PackageItemRole.Lib, "")]))
+            with { Ssa = GraphWorkerSsaBounds.Of(SsaFactBounds.Default) };
+
+        var run = Run(WorkerArgs, GraphJson.Line(request), closeStdin: false);
+
+        Assert.Equal(0, run.Exit);
+        var lines = Lines(run);
+        Assert.Equal(4, lines.Length);
+        Assert.Equal("{\"type\":\"ready\",\"protocol\":2,\"folders\":1}", lines[0]);
+        Assert.Equal(GraphJson.Of(GraphJson.InProcess(0, "lib/net10.0", [($"lib/net10.0/{GraphStage.MechanismDependency}", dependency)])), lines[1]);
+        var ssa = Assert.IsType<GraphWorkerSsa>(JsonSerializer.Deserialize(lines[2], GraphWorkerJsonContext.Default.GraphWorkerMessage));
+        Assert.Equal((0, SsaFolderOutcome.Analyzed, (string?)null), (ssa.Index, ssa.Outcome, ssa.Reason));
+        AssertConstantSite(ssa.Facts!, "System.Environment.GetEnvironmentVariable", "SILVERGUN_MECHANISM_FIXTURE");
+        Assert.Equal("{\"type\":\"done\",\"count\":1}", lines[3]);
+    }
+
+    // Some site whose callee's classification key is `callee` is Analyzed with its first argument the String constant `text`.
+    private static void AssertConstantSite(SsaFolderFacts facts, string callee, string text)
+    {
+        var sites = facts.Sites.Where(s => s.Site.CalleeKey == callee).ToArray();
+        Assert.True(sites.Length > 0, $"no {callee} site among {string.Join(", ", facts.Sites.Select(s => s.Site.CalleeKey))}");
+        Assert.True(sites.Any(s => s.Status == SsaSiteStatus.Analyzed && s.Arguments is [{ Kind: SsaValueKind.Constant, Constants: [{ Kind: SsaConstantKind.String, Text: var t }] }, ..] && t == text),
+            $"{callee}: {string.Join("; ", sites.Select(s => $"{s.Site.NodeId}@{s.Site.Offset} {s.Status} {s.Reason} [{string.Join(", ", s.Arguments.Select(a => $"{a.Kind}:{string.Join("|", a.Constants.Select(c => c.Text))}"))}]"))}");
+    }
+    #endregion
+
     #region Methods: review round 1
     /// <summary>
     /// W3 end to end: one package with a corrupt DLL and an identical copy of its folder, opened twice (two extraction
@@ -173,7 +240,7 @@ public sealed class GraphWorkerCliTests : IDisposable
         Assert.Equal(3, run.Exit);
         var lines = Lines(run);
         Assert.Equal(2, lines.Length);
-        Assert.Equal("{\"type\":\"ready\",\"protocol\":1,\"folders\":1}", lines[0]);
+        Assert.Equal("{\"type\":\"ready\",\"protocol\":2,\"folders\":1}", lines[0]);
         var reason = FatalReason(lines[1]);
         Assert.StartsWith("the folder's graph could not be built: ", reason, StringComparison.Ordinal);
         Assert.Contains("OutOfMemoryException", reason, StringComparison.Ordinal);
@@ -212,7 +279,7 @@ public sealed class GraphWorkerCliTests : IDisposable
         Assert.Equal(0, run.Exit);
         var lines = Lines(run);
         Assert.Equal(3, lines.Length);
-        Assert.Equal("{\"type\":\"ready\",\"protocol\":1,\"folders\":1}", lines[0]);
+        Assert.Equal("{\"type\":\"ready\",\"protocol\":2,\"folders\":1}", lines[0]);
         Assert.Equal(GraphJson.Of(GraphJson.InProcess(0, "lib/net10.0", [($"lib/net10.0/{GraphStage.MechanismDependency}", GraphStage.Beside(GraphStage.MechanismDependency))])), lines[1]);
         Assert.Equal("{\"type\":\"done\",\"count\":1}", lines[2]);
     }
@@ -224,7 +291,7 @@ public sealed class GraphWorkerCliTests : IDisposable
         var mechanism = GraphStage.Beside(GraphStage.MechanismFixture);
         var folders = string.Join(",", Enumerable.Range(0, 20).Select(i =>
             $"{{\"folder\":\"lib/f{i}\",\"assemblies\":[{{\"relativePath\":\"lib/f{i}/m.dll\",\"fullPath\":{JsonSerializer.Serialize(mechanism)}}}]}}"));
-        var request = Encoding.UTF8.GetBytes($"{{\"protocol\":1,\"budget\":{{\"maxNodes\":100000,\"maxEdges\":1000000,\"maxDispatchWork\":10000000}},\"folders\":[{folders}]}}\n");
+        var request = Encoding.UTF8.GetBytes($"{{\"protocol\":2,\"budget\":{{\"maxNodes\":100000,\"maxEdges\":1000000,\"maxDispatchWork\":10000000}},\"folders\":[{folders}]}}\n");
         var clock = Stopwatch.StartNew();
 
         var run = Run(WorkerArgs, request, closeStdin: true);
@@ -251,13 +318,13 @@ public sealed class GraphWorkerCliTests : IDisposable
     public static TheoryData<string, string[], string> VerbArgumentErrors() => new()
     {
         { "--help", ["__worker", "graph", "--help"], ParseError },
-        { "-h after valid arguments", ["__worker", "graph", "--protocol", "1", "-h"], ParseError },
-        { "a repeated --protocol", ["__worker", "graph", "--protocol", "1", "--protocol", "1"], ParseError },
-        { "an unknown option", ["__worker", "graph", "--protocol", "1", "--timeout", "5"], ParseError },
-        { "an unknown token", ["__worker", "graph", "--protocol", "1", "extra"], ParseError },
+        { "-h after valid arguments", ["__worker", "graph", "--protocol", "2", "-h"], ParseError },
+        { "a repeated --protocol", ["__worker", "graph", "--protocol", "2", "--protocol", "2"], ParseError },
+        { "an unknown option", ["__worker", "graph", "--protocol", "2", "--timeout", "5"], ParseError },
+        { "an unknown token", ["__worker", "graph", "--protocol", "2", "extra"], ParseError },
         { "--protocol without its value", ["__worker", "graph", "--protocol"], ParseError },
-        { "a bad protocol", ["__worker", "graph", "--protocol", "2"], "^unsupported protocol '2'; this build speaks 1$" },
-        { "no protocol", ["__worker", "graph"], "^missing --protocol; this build speaks 1$" },
+        { "a bad protocol (v1, retired)", ["__worker", "graph", "--protocol", "1"], "^unsupported protocol '1'; this build speaks 2$" },
+        { "no protocol", ["__worker", "graph"], "^missing --protocol; this build speaks 2$" },
     };
 
     /// <summary>Every argument error under <c>__worker graph</c> is exactly one graph-protocol <c>fatal</c> on stdout (no help text) and exit 3.</summary>
@@ -290,14 +357,14 @@ public sealed class GraphWorkerCliTests : IDisposable
     private static string[] Reasons(PackageReachabilityReport report) =>
         [.. report.Folders.SelectMany(f => f.LoadFailures.Select(l => $"{f.Folder}|{l.RelativePath}|{l.Reason}").Append($"{f.Folder}|reason|{f.Reason}"))];
 
-    private const string ParseError = @"^the worker's arguments (did not parse \([0-9]+ error\(s\)\)|asked for something other than a worker session); expected __worker graph --protocol 1$";
+    private const string ParseError = @"^the worker's arguments (did not parse \([0-9]+ error\(s\)\)|asked for something other than a worker session); expected __worker graph --protocol 2$";
 
     // Every field of every folder, the report serialized: equal exactly when two passes agree.
     private static string[] Flatten(PackageReachabilityReport report) =>
         [.. report.Folders.Select(f => string.Join("|", f.Folder, f.Outcome, string.Join(",", f.Assemblies),
             string.Join(",", f.LoadFailures.Select(l => l.RelativePath + ":" + l.Reason)), GraphJson.Of(f.Report), f.Reason, f.SameAs, f.Nodes, f.Edges))];
 
-    private static byte[] Request(string relativePath, string fullPath) => GraphJson.Line(new GraphWorkerRequest(1, GraphWorkerBudget.Of(GraphBudget.Default),
+    private static byte[] Request(string relativePath, string fullPath) => GraphJson.Line(new GraphWorkerRequest(GraphWorkerProtocol.Version, GraphWorkerBudget.Of(GraphBudget.Default),
         [new GraphWorkerFolderRequest(relativePath.Contains('/') ? relativePath[..relativePath.LastIndexOf('/')] : "", [new GraphWorkerAssembly(relativePath, fullPath)])]));
 
     private NuGetPackage Open(string id, params (string Name, byte[] Bytes)[] payload)
@@ -386,7 +453,7 @@ public sealed class GraphWorkerCliTests : IDisposable
     #endregion
 
     #region Fields
-    private static readonly string[] WorkerArgs = ["__worker", "graph", "--protocol", "1"];
+    private static readonly string[] WorkerArgs = ["__worker", "graph", "--protocol", "2"];
 
     private static readonly string CliExe = Path.Combine(AppContext.BaseDirectory, "Silvergun.CLI.exe");
 

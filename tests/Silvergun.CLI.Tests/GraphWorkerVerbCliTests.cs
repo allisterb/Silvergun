@@ -12,7 +12,7 @@ using System.Threading.Tasks;
 using Xunit;
 
 /// <summary>
-/// The hidden <c>__worker graph --protocol 1</c> verb of the real CLI as THIS project builds it, <b>net10.0</b>
+/// The hidden <c>__worker graph --protocol 2</c> verb of the real CLI as THIS project builds it, <b>net10.0</b>
 /// (<c>docs/agent/tasks/graph-worker.md</c> G2, G5): the cross-platform build the corpus harness launches. An empty
 /// session is <c>ready</c> and <c>done</c> byte for byte, and every command line that does not parse is one graph-protocol
 /// <c>fatal</c> on stdout and exit 3 (never help text). The real analysis through this verb is pinned in
@@ -25,10 +25,28 @@ public sealed class GraphWorkerVerbCliTests
     [Fact]
     public void Worker_AnEmptyRequest_IsReadyAndDone_AndExitZero()
     {
-        var run = Run(WorkerArgs, Utf8("{\"protocol\":1,\"budget\":{\"maxNodes\":10,\"maxEdges\":10,\"maxDispatchWork\":10},\"folders\":[]}\n"), closeStdin: false);
+        var run = Run(WorkerArgs, Utf8("{\"protocol\":2,\"budget\":{\"maxNodes\":10,\"maxEdges\":10,\"maxDispatchWork\":10},\"folders\":[]}\n"), closeStdin: false);
 
         Assert.Equal(0, run.Exit);
-        Assert.Equal(Utf8("{\"type\":\"ready\",\"protocol\":1,\"folders\":0}\n{\"type\":\"done\",\"count\":0}\n"), run.StdoutBytes);
+        Assert.Equal(Utf8("{\"type\":\"ready\",\"protocol\":2,\"folders\":0}\n{\"type\":\"done\",\"count\":0}\n"), run.StdoutBytes);
+    }
+
+    /// <summary>
+    /// Protocol v2 (<c>ssa-facts-s4.md</c> §4): a request with valid <c>ssa</c> bounds and no folders is the same
+    /// <c>ready</c> and <c>done</c>; one with a bound that is not positive is refused with one <c>fatal</c> and exit 3.
+    /// </summary>
+    [Theory]
+    [InlineData(1, 0, "{\"type\":\"ready\",\"protocol\":2,\"folders\":0}\n{\"type\":\"done\",\"count\":0}\n")]
+    [InlineData(0, 3, "{\"type\":\"fatal\",\"reason\":\"the request is out of contract: an SSA fact bound is not positive\"}\n")]
+    public void Worker_ARequestWithSsaBounds_IsServedOrRefused_ByItsBounds(int maxSites, int exit, string stdout)
+    {
+        var ssa = $"{{\"maxSites\":{maxSites},\"maxArguments\":8,\"maxAlternatives\":4,\"maxPhiDepth\":16,\"maxPhiInputs\":1024,\"maxTextChars\":256,"
+            + "\"maxFactTextChars\":1000000,\"maxLiftedMethods\":50000,\"folderTimeMilliseconds\":60000,\"maxCandidates\":64}";
+
+        var run = Run(WorkerArgs, Utf8("{\"protocol\":2,\"budget\":{\"maxNodes\":10,\"maxEdges\":10,\"maxDispatchWork\":10},\"folders\":[],\"ssa\":" + ssa + "}\n"), closeStdin: false);
+
+        Assert.Equal(exit, run.Exit);
+        Assert.Equal(Utf8(stdout), run.StdoutBytes);
     }
 
     [Fact]
@@ -43,20 +61,20 @@ public sealed class GraphWorkerVerbCliTests
     public static TheoryData<string, string[], string> CommandLinesThatDoNotParse() => new()
     {
         { "--help", ["__worker", "graph", "--help"], ParseError },
-        { "-? after valid arguments", ["__worker", "graph", "--protocol", "1", "-?"], ParseError },
-        { "a repeated --protocol", ["__worker", "graph", "--protocol", "1", "--protocol", "1"], ParseError },
-        { "the yara worker's --timeout", ["__worker", "graph", "--protocol", "1", "--timeout", "5"], ParseError },
-        { "an unknown token", ["__worker", "graph", "--protocol", "1", "extra"], ParseError },
+        { "-? after valid arguments", ["__worker", "graph", "--protocol", "2", "-?"], ParseError },
+        { "a repeated --protocol", ["__worker", "graph", "--protocol", "2", "--protocol", "2"], ParseError },
+        { "the yara worker's --timeout", ["__worker", "graph", "--protocol", "2", "--timeout", "5"], ParseError },
+        { "an unknown token", ["__worker", "graph", "--protocol", "2", "extra"], ParseError },
         { "--protocol without its value", ["__worker", "graph", "--protocol"], ParseError },
-        { "protocol 2", ["__worker", "graph", "--protocol", "2"], "^unsupported protocol '2'; this build speaks 1$" },
-        { "no protocol", ["__worker", "graph"], "^missing --protocol; this build speaks 1$" },
+        { "protocol 1 (v1, retired)", ["__worker", "graph", "--protocol", "1"], "^unsupported protocol '1'; this build speaks 2$" },
+        { "no protocol", ["__worker", "graph"], "^missing --protocol; this build speaks 2$" },
     };
 
     [Theory]
     [MemberData(nameof(CommandLinesThatDoNotParse))]
     public void Worker_ACommandLineThatDoesNotParse_IsOneGraphFatal_AndExitThree(string what, string[] args, string reason)
     {
-        var run = Run(args, Utf8("{\"protocol\":1}\n"), closeStdin: true);
+        var run = Run(args, Utf8("{\"protocol\":2}\n"), closeStdin: true);
 
         Assert.True(run.Exit == 3, $"{what}: exit {run.Exit}");
         Assert.Equal(1, run.StdoutBytes.Count(b => b == (byte)'\n'));
@@ -125,11 +143,11 @@ public sealed class GraphWorkerVerbCliTests
     #endregion
 
     #region Fields
-    private const string ParseError = @"^the worker's arguments (did not parse \([0-9]+ error\(s\)\)|asked for something other than a worker session); expected __worker graph --protocol 1$";
+    private const string ParseError = @"^the worker's arguments (did not parse \([0-9]+ error\(s\)\)|asked for something other than a worker session); expected __worker graph --protocol 2$";
 
     private const int TimeoutMs = 60_000;
 
-    private static readonly string[] WorkerArgs = ["__worker", "graph", "--protocol", "1"];
+    private static readonly string[] WorkerArgs = ["__worker", "graph", "--protocol", "2"];
 
     private static readonly string CliExe = ApphostPath.Resolve(AppContext.BaseDirectory, "Silvergun.CLI");
     #endregion

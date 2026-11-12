@@ -290,11 +290,12 @@ internal static class Program
         workerYaraCommand.SetAction(parse => RunYaraWorker(
             parse.GetValue(protocolOption),
             parse.GetResult(timeoutOption) is { } timeout ? timeout.Tokens.FirstOrDefault()?.Value ?? string.Empty : null));
-        // `__worker graph --protocol 1` speaks graph worker protocol v1 (docs/agent/tasks/graph-worker.md): the graph
-        // pass over one package's folders, out of process (ADR 0021 Tier 2). The same string-typed --protocol posture.
+        // `__worker graph --protocol 2` speaks graph worker protocol v2 (docs/agent/tasks/graph-worker.md, ssa-facts-s4.md
+        // §4): the graph pass over one package's folders, and their SSA facts when asked, out of process (ADR 0021 Tier 2).
+        // The same string-typed --protocol posture.
         var graphProtocolOption = new Option<string?>("--protocol")
         {
-            Description = "Worker protocol version (only 1 is supported)."
+            Description = "Worker protocol version (only 2 is supported)."
         };
         var workerGraphCommand = new Command("graph", "Internal: the out-of-process call graph and reachability worker.")
         {
