@@ -1,6 +1,8 @@
 namespace Silvergun.CodeAnalysis.IL.Ssa;
 
 using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
 
 using Silvergun.CodeAnalysis.IL;
 
@@ -148,5 +150,21 @@ public sealed record SsaMethodOutcome(string AssemblyPath, uint MethodToken, Met
     public bool IsLifted => Failure is null;
 
     public string NodeId => CanonicalName.NodeId(Method);
+
+    /// <summary>
+    /// The IL offset each instruction of <see cref="Body"/> was imported from, the opcode's own (not its prefix's), as in
+    /// <c>MethodEdge.Offset</c>. Covers every <c>CallInst</c>, <c>NewObjInst</c> and <c>FuncAddrInst</c>, and the
+    /// <c>InitializeArray</c> and <c>CallIndirect</c> intrinsics; synthesized instructions (such as phis, guards, argument
+    /// copies, store coercions, block-split and leave branches, <c>initobj</c>) have none, and several instructions may
+    /// share an offset. Only instructions in the body; empty when not
+    /// lifted. Its keys hold the IR alive: drop it together with <see cref="Body"/>.
+    /// </summary>
+    public IReadOnlyDictionary<Cilica.IR.Instruction, int> ILOffsets { get; init; } = ReadOnlyDictionary<Cilica.IR.Instruction, int>.Empty;
+    #endregion
+
+    #region Methods
+    /// <summary>The IL offset <paramref name="instruction"/> was imported from, or null when it has none.</summary>
+    public uint? OffsetOf(Cilica.IR.Instruction instruction) =>
+        ILOffsets.TryGetValue(instruction, out var offset) ? (uint)offset : null;
     #endregion
 }

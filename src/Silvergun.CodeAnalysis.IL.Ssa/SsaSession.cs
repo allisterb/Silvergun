@@ -136,7 +136,8 @@ public sealed class SsaSession : IDisposable
             if (definition.ILBody is null)
                 return Unknown(SsaFailureKind.Adapter, "The body could not be adapted");
             stage = SsaFailureKind.Import;
-            var body = ILImporter.ParseCode(definition);
+            var offsets = new Dictionary<Cilica.IR.Instruction, int>(ReferenceEqualityComparer.Instance);
+            var body = ILImporter.ParseCode(definition, offsets);
             stage = SsaFailureKind.Verify;
             IRVerifier.Verify(body);
             stage = SsaFailureKind.Ssa;
@@ -145,12 +146,24 @@ public sealed class SsaSession : IDisposable
             IRVerifier.Verify(body);
             return reads.Count > 0
                 ? Unknown(SsaFailureKind.ReaderAssertion, $"CCI failed {reads.Count} assertion(s) reading what the method needs")
-                : new SsaMethodOutcome(source.Path, token, identity, null, body);
+                : new SsaMethodOutcome(source.Path, token, identity, null, body) { ILOffsets = Surviving(offsets, body) };
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             return Unknown(Classify(ex, stage), Describe(ex));
         }
+    }
+
+    // The offsets of the instructions still in the body: promotion removes slot loads and stores the importer recorded.
+    private static Dictionary<Cilica.IR.Instruction, int> Surviving(Dictionary<Cilica.IR.Instruction, int> offsets, Cilica.IR.MethodBody body)
+    {
+        var surviving = new Dictionary<Cilica.IR.Instruction, int>(offsets.Count, ReferenceEqualityComparer.Instance);
+        foreach (var instruction in body.Instructions())
+        {
+            if (offsets.TryGetValue(instruction, out var offset))
+                surviving[instruction] = offset;
+        }
+        return surviving;
     }
 
     private Compilation CompilationOf(ModuleDef module)
