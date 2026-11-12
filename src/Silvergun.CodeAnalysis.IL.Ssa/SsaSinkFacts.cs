@@ -13,26 +13,32 @@ using Silvergun.CodeAnalysis.IL;
 
 /// <summary>
 /// What SSA proves about the arguments of each sink site of a folder (ADR 0038, S4): constants, one of a few constants,
-/// the caller's own parameter, or dynamic with an origin, read intraprocedurally off the verified SSA body. Only the
-/// methods holding sites are lifted, node by node in ordinal order, and each body is dropped once read. Joined to the
-/// graph by node id and IL offset (<see cref="SsaMethodOutcome.ILOffsets"/>).
+/// the caller's own parameter, or dynamic with an origin, read intraprocedurally off the verified SSA body; and for a
+/// reflection sink, the target its lookup chain names (S4.3). Only the methods holding sites are lifted, node by node in
+/// ordinal order, and each body is dropped once read. Joined to the graph by node id and IL offset
+/// (<see cref="SsaMethodOutcome.ILOffsets"/>).
 /// </summary>
-public static class SsaSinkFacts
+public static partial class SsaSinkFacts
 {
     #region Methods
     /// <summary>
     /// The facts of <paramref name="sites"/> (as <see cref="SinkSites.Of"/> gives them) over <paramref name="session"/>'s
     /// folder, which must be opened on the files the graph read, bounded by <paramref name="bounds"/> (default
-    /// <see cref="SsaFactBounds.Default"/>), timed by <paramref name="clock"/> (default the system's). When the session
-    /// lost an assembly, any node may have an unread definition in it, so nothing is lifted and every site reads
-    /// MethodUnknown. Deterministic but for <see cref="SsaFactBounds.FolderTime"/>. Nothing about the input throws.
+    /// <see cref="SsaFactBounds.Default"/>), timed by <paramref name="clock"/> (default the system's). Reflection targets
+    /// follow <paramref name="reflection"/> (default <see cref="ReflectionMap.Default"/>) and take their candidates from
+    /// <paramref name="members"/> (<see cref="OwnMembers.Of"/> of the same graph; default none). When the session lost an
+    /// assembly, any node may have an unread definition in it, so nothing is lifted and every site reads MethodUnknown.
+    /// Deterministic but for <see cref="SsaFactBounds.FolderTime"/>. Nothing about the input throws.
     /// </summary>
-    public static SsaFolderFacts Extract(SsaSession session, IReadOnlyList<SinkSite> sites, SsaFactBounds? bounds = null, TimeProvider? clock = null)
+    public static SsaFolderFacts Extract(SsaSession session, IReadOnlyList<SinkSite> sites, SsaFactBounds? bounds = null, TimeProvider? clock = null,
+        OwnMembers? members = null, ReflectionMap? reflection = null)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(sites);
         bounds = (bounds ?? SsaFactBounds.Default).Validated();
         clock ??= TimeProvider.System;
+        members ??= OwnMembers.None;
+        reflection ??= ReflectionMap.Default;
         var started = clock.GetTimestamp();
 
         var ordered = sites.Distinct()
@@ -48,6 +54,7 @@ public static class SsaSinkFacts
         var byNode = kept.GroupBy(s => s.NodeId, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.ToArray(), StringComparer.Ordinal);
 
         var walker = new ValueWalker(bounds);
+        var chains = new ChainWalker(reflection, walker);
         var nodes = new Dictionary<string, NodeState>(StringComparer.Ordinal);
         var unknown = new SortedDictionary<SsaFailureKind, int>();
         var (tried, lifted, methodBudget, timeBudget) = (0, 0, false, false);
@@ -83,6 +90,8 @@ public static class SsaSinkFacts
             var definition = ++state.Definitions;
             var calls = CallsByOffset(outcome);
             walker.Reset();
+            chains.Reset();
+            walker.Prime(outcome);
             foreach (var site in byNode[nodeId])
             {
                 // The time budget also between sites, so one costly node ends the folder gracefully: its sites read NotRun.
@@ -100,7 +109,7 @@ public static class SsaSinkFacts
                     if (Callee(site.EdgeKind, call) is not { } callee)
                         continue;
                     if (ClassificationKey(callee) == site.CalleeKey)
-                        state.Add(siteIndex[site], definition, Read(call, walker, bounds));
+                        state.Add(siteIndex[site], definition, Read(call, walker, bounds) with { Target = chains.Target(call, reflection.Target(site.CalleeKey)) });
                     else
                         state.OtherCallee.Add(siteIndex[site]);
                 }
@@ -109,9 +118,11 @@ public static class SsaSinkFacts
                 break;
         }
         walker.Reset();
+        chains.Reset();
 
         var budget = new TextBudget(bounds.MaxFactTextChars, walker.HashOnly);
-        var facts = kept.Select((site, i) => Fact(site, i, nodes, cutAt, timeBudget, bounds, budget)).ToArray();
+        SsaReflectionTarget TargetOf(TargetParts parts) => Target(parts, members, bounds, budget);
+        var facts = kept.Select((site, i) => Fact(site, i, nodes, cutAt, timeBudget, bounds, budget, TargetOf)).ToArray();
         return new SsaFolderFacts(facts, ordered.Length, ordered.Length > kept.Length, lifted,
             [.. unknown.Select(u => new SsaFailureCount(u.Key, u.Value))], methodBudget, timeBudget, budget.Spent, 0);
     }
@@ -193,7 +204,8 @@ public static class SsaSinkFacts
             parts.Arguments.Length);
     }
 
-    private static SsaSinkFact Fact(SinkSite site, int index, Dictionary<string, NodeState> nodes, string? cutAt, bool byTime, SsaFactBounds bounds, TextBudget budget)
+    private static SsaSinkFact Fact(SinkSite site, int index, Dictionary<string, NodeState> nodes, string? cutAt, bool byTime, SsaFactBounds bounds, TextBudget budget,
+        Func<TargetParts, SsaReflectionTarget> targetOf)
     {
         var bounded = Bounded(site);
         SsaSinkFact Without(SsaSiteStatus status, string reason, SsaFailureKind? kind = null) => new(bounded, status, null, [], 0, false, kind, reason);
@@ -215,8 +227,11 @@ public static class SsaSinkFacts
             .Select(i => contributions.Where(c => i < c.Value.Arguments.Count).Select(c => c.Value.Arguments[i]).Aggregate((a, b) => Union(a, b, bounds.MaxAlternatives)))
             .ToArray();
         var receiver = receivers.Length == 0 ? null : receivers.Aggregate((a, b) => Union(a, b, bounds.MaxAlternatives));
+        var targets = contributions.Select(c => c.Value.Target).OfType<TargetParts>().ToArray();
+        // Charged in argument order: the receiver, the arguments, then the target.
         return new SsaSinkFact(bounded, SsaSiteStatus.Analyzed, receiver is null ? null : budget.Charge(receiver), [.. arguments.Select(budget.Charge)],
-            count, contributions.Select(c => c.Definition).Distinct().Count() > 1, null, null);
+            count, contributions.Select(c => c.Definition).Distinct().Count() > 1, null, null,
+            targets.Length == 0 ? null : targetOf(targets.Aggregate((a, b) => Union(a, b, bounds.MaxAlternatives))));
     }
 
     // Two values of one position, from two definitions or two phi inputs: constants union (sorted, up to the bound),
@@ -238,8 +253,8 @@ public static class SsaSinkFacts
     #endregion
 
     #region Child types
-    // One instruction's values at a site, from one definition.
-    private sealed record Contribution(SsaValue? Receiver, IReadOnlyList<SsaValue> Arguments, int Count);
+    // One instruction's values at a site, from one definition, and its reflection target's parts.
+    private sealed record Contribution(SsaValue? Receiver, IReadOnlyList<SsaValue> Arguments, int Count, TargetParts? Target = null);
 
     // What the definitions under one node id gave: the first failure, and per site (by index) each joined instruction's
     // values with the definition it came from.
@@ -266,7 +281,8 @@ public static class SsaSinkFacts
         #endregion
     }
 
-    // The folder's text budget, spent in site order: a String or Type constant past it keeps only its hash suffix.
+    // The folder's text budget, spent in site order: a String or Type constant past it keeps only its hash suffix, and a
+    // target's candidate names are dropped whole.
     private sealed class TextBudget(int maxChars, IReadOnlyDictionary<SsaConstant, string> hashOnly)
     {
         #region Properties
@@ -276,6 +292,18 @@ public static class SsaSinkFacts
         #region Methods
         public SsaValue Charge(SsaValue value) =>
             value.Constants.Count == 0 ? value : value with { Constants = [.. value.Constants.Select(Charge)] };
+
+        public IReadOnlyList<string> Charge(IReadOnlyList<string> names)
+        {
+            var chars = names.Sum(n => (long)n.Length);
+            if (!Spent && used + chars <= maxChars)
+            {
+                used += chars;
+                return names;
+            }
+            Spent |= names.Count > 0;
+            return [];
+        }
 
         private SsaConstant Charge(SsaConstant constant)
         {
@@ -315,12 +343,44 @@ public static class SsaSinkFacts
             return result;
         }
 
+        // The definitions of the named types this body renders as constant (several when distinct types render alike).
+        public IEnumerable<TypeName> DefinitionsOf(SsaConstant constant) => definitions.GetValueOrDefault(constant) ?? [];
+
+        // Reads every typeof of a lifted body before its sites, so each site's DefinitionsOf sees all of them, whatever
+        // the site order.
+        public void Prime(SsaMethodOutcome outcome)
+        {
+            foreach (var instruction in outcome.Body!.Instructions())
+                if (instruction is CallInst call && TypeToken(call) is { } type)
+                    OfType(type);
+        }
+
+        // A type as a value: a Type constant, made once per body for its type, whose definition (a named type's) is kept
+        // for reflection candidates; a bare generic parameter is Dynamic, since the caller's caller picks it.
+        public SsaValue OfType(TypeDesc type)
+        {
+            if (type is GenericParamType)
+                return SsaValue.OfDynamic(SsaDynamicOrigin.TypeParameter);
+            if (!types.TryGetValue(type, out var constant))
+            {
+                types[type] = constant = Make(SsaConstantKind.Type, TypeNames.Name(type, 0));
+                if (TypeNames.DefinitionName(type) is { } definition)
+                {
+                    if (!definitions.TryGetValue(constant, out var named))
+                        definitions[constant] = named = [];
+                    named.Add(definition);
+                }
+            }
+            return SsaValue.OfConstant(constant);
+        }
+
         // Forgets the body's values, so its IR can be collected.
         public void Reset()
         {
             values.Clear();
             strings.Clear();
             types.Clear();
+            definitions.Clear();
         }
 
         // Breadth first over the phis reachable from root, each once: depth and inputs read bounded, stopping at the first
@@ -366,7 +426,7 @@ public static class SsaSinkFacts
             ConstFloat number => SsaValue.OfConstant(new SsaConstant(SsaConstantKind.Float, number.Value.ToString("R", CultureInfo.InvariantCulture))),
             ConstNull => SsaValue.OfConstant(new SsaConstant(SsaConstantKind.Null, "null")),
             Argument argument => SsaValue.OfParameter(argument.Index),
-            CallInst call when TypeToken(call) is { } type => Constant(type),
+            CallInst call when TypeToken(call) is { } type => OfType(type),
             CallInst or NewObjInst or CilIntrinsic.CallIndirect => SsaValue.OfDynamic(SsaDynamicOrigin.CallResult),
             LoadInst load => SsaValue.OfDynamic(Strip(load.Address) switch
             {
@@ -384,14 +444,6 @@ public static class SsaSinkFacts
         {
             if (!strings.TryGetValue(text, out var constant))
                 strings[text] = constant = Make(SsaConstantKind.String, text);
-            return SsaValue.OfConstant(constant);
-        }
-
-        // A Type constant, made once per body for its type.
-        private SsaValue Constant(TypeDesc type)
-        {
-            if (!types.TryGetValue(type, out var constant))
-                types[type] = constant = Make(SsaConstantKind.Type, TypeNames.Name(type, 0));
             return SsaValue.OfConstant(constant);
         }
 
@@ -417,7 +469,7 @@ public static class SsaSinkFacts
         }
 
         // A retyping cast or a box stands for its operand.
-        private static Value Strip(Value value)
+        public static Value Strip(Value value)
         {
             for (var i = 0; i < MaxStrip && value is CilIntrinsic.RefCast or CilIntrinsic.Box; i++)
                 value = ((IntrinsicInst)value).Args[0];
@@ -432,6 +484,7 @@ public static class SsaSinkFacts
         private readonly Dictionary<Value, SsaValue> values = new(ReferenceEqualityComparer.Instance);
         private readonly Dictionary<string, SsaConstant> strings = new(StringComparer.Ordinal);
         private readonly Dictionary<TypeDesc, SsaConstant> types = new(ReferenceEqualityComparer.Instance);
+        private readonly Dictionary<SsaConstant, HashSet<TypeName>> definitions = [];
         #endregion
     }
 
@@ -475,6 +528,19 @@ public static class SsaSinkFacts
             PrimType primitive => new TypeIdentity(primitive.Namespace, [primitive.Name], 0),
             _ => null,
         };
+
+        // A named type's definition by name; null for any other type, or one that cannot be read.
+        public static TypeName? DefinitionName(TypeDesc type)
+        {
+            try
+            {
+                return Identity(type) is { } identity ? new TypeName(CanonicalName.NodeId(identity), CanonicalName.ClassificationKey(identity)) : null;
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                return null;
+            }
+        }
 
         // Its nesting chain with each link's own arity suffix removed, the outermost namespace, and the whole chain's
         // arity; a chain past the bound is CanonicalName.Truncated.

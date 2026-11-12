@@ -47,6 +47,8 @@ public enum SsaDynamicOrigin
     TooManyAlternatives,
     /// <summary>A phi web deeper or wider than the walk's bound.</summary>
     TooDeep,
+    /// <summary>A bare generic parameter as a type (<c>typeof(T)</c>, <c>new T()</c>): the calling method's caller picks it.</summary>
+    TypeParameter,
     /// <summary>Arithmetic, a conversion, an undefined value, or a mix of kinds.</summary>
     Other,
 }
@@ -99,7 +101,8 @@ public sealed record SsaValue(SsaValueKind Kind, IReadOnlyList<SsaConstant> Cons
 /// (null for a static call, <c>newobj</c> or <c>ldftn</c>), and <see cref="Arguments"/> the first
 /// <see cref="SsaFactBounds.MaxArguments"/> arguments in signature order, of <see cref="ArgumentCount"/>. Otherwise both
 /// are empty and <see cref="Reason"/> says why (with <see cref="FailureKind"/> for MethodUnknown). <see cref="Merged"/>:
-/// more than one definition under the node id contributed, and their values are unioned.
+/// more than one definition under the node id contributed, and their values are unioned. <see cref="Target"/>: what a
+/// reflection sink's call acts on, for an Analyzed call site whose callee the reflection map lists; otherwise null.
 /// </summary>
 public sealed record SsaSinkFact(
     SinkSite Site,
@@ -109,7 +112,58 @@ public sealed record SsaSinkFact(
     int ArgumentCount,
     bool Merged,
     SsaFailureKind? FailureKind,
-    string? Reason);
+    string? Reason,
+    SsaReflectionTarget? Target = null);
+
+/// <summary>What a <see cref="SsaReflectionTarget"/> names.</summary>
+public enum SsaTargetKind
+{
+    Type,
+    Method,
+    Constructor,
+    Property,
+    Field,
+    /// <summary>Any member, by name (<c>Type.InvokeMember</c>, or <c>MethodBase.Invoke</c> through no known lookup).</summary>
+    Member,
+}
+
+/// <summary>How a <see cref="SsaReflectionTarget.Candidates"/> entry was matched.</summary>
+public enum SsaCandidateMatch
+{
+    /// <summary>By type and member name only: every overload, never claimed unique, never claimed complete.</summary>
+    ByName,
+}
+
+/// <summary>
+/// What a reflection sink's call acts on (S4.3, D4), read intraprocedurally back through one lookup chain of the
+/// reflection map (<see cref="ReflectionMap"/>): <c>Type.GetType(c)</c>, <c>Assembly.GetType(c)</c> or <c>typeof(T)</c>,
+/// then optionally <c>GetMethod(c)</c> and the like.
+/// <list type="bullet">
+/// <item><description><see cref="Type"/>: a Type constant (<c>typeof</c>, canonical), a String constant (the name as
+/// reflection spells it), one of those, the caller's parameter, or Dynamic with where the chain left the method;
+/// Dynamic <see cref="SsaDynamicOrigin.Other"/> when the chain names no type. When the member itself came from outside
+/// the map's lookups (a field, a parameter, a call), Type and Member both hold that member value.</description></item>
+/// <item><description><see cref="Member"/>: the member's name, the same way; null for a Type or a Constructor.</description></item>
+/// <item><description><see cref="Assembly"/>: the assembly's name, when the chain names one; otherwise null.</description></item>
+/// <item><description><see cref="Candidates"/>: own node ids the target may be, matched <see cref="Match"/>, ignoring
+/// case, from constant names: the type itself for a Type, its constructors for a Constructor, its methods of that name
+/// for a Method, its accessors for a Property, both for a Member, and none for a Field (fields are not graph nodes). The
+/// first <see cref="SsaFactBounds.MaxCandidates"/>, ordinal, of <see cref="CandidatesTotal"/>, names bounded like a
+/// report's; none kept once the folder's text budget is spent. A String name that is cut, or holds an escape, is not
+/// matched. <see cref="CandidatesGap"/>: holes in the search, null when there are none: own members missing from the
+/// index (<see cref="OwnMembers.Gap"/>), or type names left unsearched past a bound. An empty list never means "not
+/// own": a name that is not constant, cut or escaped is not searched at all, and the values say so.</description></item>
+/// </list>
+/// </summary>
+public sealed record SsaReflectionTarget(
+    SsaTargetKind Kind,
+    SsaValue? Assembly,
+    SsaValue Type,
+    SsaValue? Member,
+    SsaCandidateMatch Match,
+    IReadOnlyList<string> Candidates,
+    int CandidatesTotal,
+    string? CandidatesGap);
 
 /// <summary>One kind of lift failure and how many methods failed with it.</summary>
 public sealed record SsaFailureCount(SsaFailureKind Kind, int Methods);
@@ -165,9 +219,11 @@ public sealed record SsaFactBounds
     public int MaxTextChars { get; init; } = 256;
 
     /// <summary>
-    /// Chars of String and Type constant text kept whole per folder; once spent, each further one keeps only its hash
-    /// suffix (about 40 chars). So a folder's constant text is at most this plus 40 per constant beyond it, and a fact's
-    /// names (three per site) at most <see cref="Reachability.MaxNameChars"/> plus 40 each.
+    /// Chars of String and Type constant text, and of candidate names, kept whole per folder, charged in site order (each
+    /// site's receiver, its arguments, then its reflection target's constants and candidates). Once spent, each further
+    /// constant keeps only its hash suffix (about 40 chars) and a target keeps no candidates (only their count). So a
+    /// folder's text is at most this plus 40 per constant beyond it, and a fact's site names (three per site) at most
+    /// <see cref="Reachability.MaxNameChars"/> plus 40 each.
     /// </summary>
     public int MaxFactTextChars { get; init; } = 1_000_000;
 
@@ -179,6 +235,9 @@ public sealed record SsaFactBounds
 
     /// <summary>Wall clock per folder, checked between node ids and between sites: the backstop.</summary>
     public TimeSpan FolderTime { get; init; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>Candidate node ids kept per reflection target (<see cref="SsaReflectionTarget.Candidates"/>).</summary>
+    public int MaxCandidates { get; init; } = 64;
     #endregion
 
     #region Methods
@@ -186,7 +245,8 @@ public sealed record SsaFactBounds
     public SsaFactBounds Validated()
     {
         if (MaxSites <= 0 || MaxArguments <= 0 || MaxAlternatives <= 0 || MaxPhiDepth <= 0 || MaxPhiInputs <= 0
-            || MaxTextChars <= 0 || MaxFactTextChars <= 0 || MaxLiftedMethods <= 0 || FolderTime <= TimeSpan.Zero)
+            || MaxTextChars <= 0 || MaxFactTextChars <= 0 || MaxLiftedMethods <= 0 || FolderTime <= TimeSpan.Zero
+            || MaxCandidates <= 0)
             throw new ArgumentOutOfRangeException(nameof(SsaFactBounds), "Every bound must be positive");
         return this;
     }

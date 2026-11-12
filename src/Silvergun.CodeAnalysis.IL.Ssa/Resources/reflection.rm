@@ -1,0 +1,93 @@
+# Silvergun reflection lookups (ADR 0038, S4.3): how a reflection sink's target is named in the same method.
+#
+# Line-oriented, '#' comments to end of line, blank lines ignored:
+#
+#   lookup <key> <Kind> <binding>...   a call whose result is an assembly, a type or a member, made from its bindings
+#   target <key> <Kind> <binding>...   what a sink site's call targets
+#
+# <key> is an exact classification key (Ns.Type.Method), covering every overload; there are no subtree patterns.
+#
+# <Kind> is Assembly (lookups only), Type, Method, Constructor, Property, Field, or Member (any member, by name). A
+# target's kind is replaced by the kind of the member lookup its chain resolves through.
+#
+# A <binding> is <role>=<position>, or several joined by commas, which apply together or not at all. The position is
+# 'this', an argument index from 0 in signature order, or '!!N', the callee's Nth generic argument (the type role only).
+# A role applies only when the declared type at its position fits:
+#
+#   assembly    a System.String naming the assembly, or a System.Reflection.Assembly, read through its lookup
+#   type        a System.Type or System.Reflection.TypeInfo, read through its lookup or typeof; or a generic argument
+#   type-name   a System.String naming the type, as reflection spells it (Ns.Outer+Inner`1, Assembly)
+#   name        a System.String naming the member
+#   member      a MemberInfo, MethodBase, MethodInfo, ConstructorInfo, PropertyInfo or FieldInfo, read through its
+#               lookup: it supplies the kind, the assembly, the type and the name
+#
+# Bindings are tried in order. One applies when each of its roles fits and none of its parts is supplied yet, so one
+# line can cover overloads that put the type at different positions. Keys are ordinal and case-sensitive; directives,
+# kinds and roles are not. A key's last line read wins.
+#
+# The list is deliberately small: a chain is followed only through these calls, inside one method. Anything else on
+# the chain (a field, a parameter, another call, a phi of lookups) reads Dynamic with its origin.
+
+# ---------------------------------------------------------------------------
+# Assemblies
+# ---------------------------------------------------------------------------
+lookup System.Reflection.Assembly.Load                    Assembly  assembly=0
+lookup System.Reflection.Assembly.LoadFrom                Assembly  assembly=0
+lookup System.Reflection.Assembly.LoadFile                Assembly  assembly=0
+lookup System.Reflection.Assembly.UnsafeLoadFrom          Assembly  assembly=0
+lookup System.Reflection.Assembly.LoadWithPartialName     Assembly  assembly=0
+lookup System.AppDomain.Load                              Assembly  assembly=0
+lookup System.Runtime.Loader.AssemblyLoadContext.LoadFromAssemblyPath  Assembly  assembly=0
+
+# ---------------------------------------------------------------------------
+# Types
+# ---------------------------------------------------------------------------
+lookup System.Type.GetType                                Type      type-name=0
+lookup System.Reflection.Assembly.GetType                 Type      assembly=this type-name=0
+lookup System.Reflection.Module.GetType                   Type      type-name=0
+lookup System.Reflection.IntrospectionExtensions.GetTypeInfo  Type  type=0
+lookup System.Reflection.TypeInfo.AsType                  Type      type=this
+
+# ---------------------------------------------------------------------------
+# Members of a type
+# ---------------------------------------------------------------------------
+lookup System.Type.GetMethod                              Method       type=this name=0
+lookup System.Type.GetConstructor                         Constructor  type=this
+lookup System.Type.GetProperty                            Property     type=this name=0
+lookup System.Type.GetField                               Field        type=this name=0
+lookup System.Reflection.TypeInfo.GetDeclaredMethod       Method       type=this name=0
+lookup System.Reflection.TypeInfo.GetDeclaredProperty     Property     type=this name=0
+lookup System.Reflection.TypeInfo.GetDeclaredField        Field        type=this name=0
+lookup System.Reflection.RuntimeReflectionExtensions.GetRuntimeMethod    Method    type=0 name=1
+lookup System.Reflection.RuntimeReflectionExtensions.GetRuntimeProperty  Property  type=0 name=1
+lookup System.Reflection.RuntimeReflectionExtensions.GetRuntimeField     Field     type=0 name=1
+
+# ---------------------------------------------------------------------------
+# ReflectionInvocation sinks
+# ---------------------------------------------------------------------------
+# MethodBase.Invoke also runs a ConstructorInfo; its chain's lookup says which.
+target System.Reflection.MethodBase.Invoke                Member       member=this
+target System.Reflection.MethodInfo.Invoke                Method       member=this
+target System.Reflection.ConstructorInfo.Invoke           Constructor  member=this
+target System.Reflection.PropertyInfo.GetValue            Property     member=this
+target System.Reflection.PropertyInfo.SetValue            Property     member=this
+target System.Reflection.FieldInfo.GetValue               Field        member=this
+target System.Reflection.FieldInfo.SetValue               Field        member=this
+target System.Reflection.MethodInfo.CreateDelegate        Method       member=this
+# (Type, MethodInfo, ...), (Type, object, MethodInfo, ...), (Type, Type, string, ...) and (Type, object, string, ...):
+# only the (Type, Type, string) overloads name the target's type.
+target System.Delegate.CreateDelegate                     Method       member=1 member=2 type=1 name=2
+target System.Type.InvokeMember                           Member       type=this name=0
+target System.Type.GetType                                Type         type-name=0
+
+# ---------------------------------------------------------------------------
+# DynamicCodeLoading sinks that construct a named type
+# ---------------------------------------------------------------------------
+# (Type, ...), CreateInstance<T>(), (string assemblyName, string typeName, ...), and .NET Framework's
+# (AppDomain domain, string assemblyName, string typeName, ...).
+target System.Activator.CreateInstance                    Constructor  type=0 type=!!0 assembly=0,type-name=1 assembly=1,type-name=2
+target System.Activator.CreateInstanceFrom                Constructor  assembly=0,type-name=1 assembly=1,type-name=2
+target System.AppDomain.CreateInstance                    Constructor  assembly=0,type-name=1
+target System.AppDomain.CreateInstanceAndUnwrap           Constructor  assembly=0,type-name=1
+target System.AppDomain.CreateInstanceFrom                Constructor  assembly=0,type-name=1
+target System.AppDomain.CreateInstanceFromAndUnwrap       Constructor  assembly=0,type-name=1

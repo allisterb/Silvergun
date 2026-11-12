@@ -9,6 +9,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Resources\reflection.rm" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Silvergun.CodeAnalysis.IL\Silvergun.CodeAnalysis.IL.csproj" />
     <ProjectReference Include="..\..\ext\Cilica\src\Cilica\Cilica.csproj" />
   </ItemGroup>
