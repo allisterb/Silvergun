@@ -98,10 +98,26 @@ public sealed class SsaSession : IDisposable
         {
             foreach (var method in methods)
             {
-                if (Lift(source, method) is { } outcome)
+                if (Lift(source, method, CciNames.Of(method)) is { } outcome)
                     yield return outcome;
             }
         }
+    }
+
+    /// <summary>
+    /// The methods <paramref name="select"/> accepts, lifted lazily as <see cref="Lift()"/> would, ordinal by node id and
+    /// then in <see cref="Lift()"/>'s order, so all definitions sharing a node id come together. Each body is the caller's
+    /// to drop once read.
+    /// </summary>
+    public IEnumerable<SsaMethodOutcome> Lift(Func<MethodIdentity, bool> select)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        var selected = modules
+            .SelectMany(m => m.Methods.Select(method => (m.Source, Method: method, Identity: CciNames.Of(method))))
+            .Where(c => select(c.Identity))
+            .OrderBy(c => CanonicalName.NodeId(c.Identity), StringComparer.Ordinal)
+            .ToArray();
+        return Lifted(selected);
     }
 
     public void Dispose()
@@ -112,9 +128,18 @@ public sealed class SsaSession : IDisposable
         universe.Dispose();
     }
 
-    private SsaMethodOutcome? Lift(CciModuleSource source, IMethodDefinition method)
+    private IEnumerable<SsaMethodOutcome> Lifted((CciModuleSource Source, IMethodDefinition Method, MethodIdentity Identity)[] selected)
     {
-        var identity = CciNames.Of(method);
+        foreach (var (source, method, identity) in selected)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            if (Lift(source, method, identity) is { } outcome)
+                yield return outcome;
+        }
+    }
+
+    private SsaMethodOutcome? Lift(CciModuleSource source, IMethodDefinition method, MethodIdentity identity)
+    {
         var token = method is IMetadataObjectWithToken { TokenValue: var t and not uint.MaxValue } ? t : 0u;
         SsaMethodOutcome Unknown(SsaFailureKind kind, string reason) => new(source.Path, token, identity, new SsaFailure(kind, reason), null);
 

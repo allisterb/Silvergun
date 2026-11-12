@@ -1,6 +1,6 @@
 namespace Silvergun.PackageAnalysis.NuGet.Yara;
 
-using System.Text;
+using Silvergun.CodeAnalysis.IL;
 
 /// <summary>
 /// Filename hostility helpers for the classic-CLI backend (ADR 0029). Two concerns, deliberately kept together
@@ -52,34 +52,10 @@ internal static class YaraPathSafety
     /// caught it (measured in <c>data/results/packaging-anomalies-top100-2026-08-22.md</c>). Escapes are
     /// <c>\n</c>/<c>\r</c>/<c>\t</c>, then <c>\xNN</c> below U+0100, <c>\uXXXX</c> through the BMP, and
     /// <c>\U000E0041</c> beyond it. A lone surrogate is not a code point at all; it decodes to U+FFFD and is
-    /// emitted as such, so no ill-formed UTF-16 reaches a log line or a JSON writer.
+    /// emitted as such, so no ill-formed UTF-16 reaches a log line or a JSON writer. The escaper itself is
+    /// <see cref="UntrustedText.Escape"/>, shared with the SSA facts.
     /// </summary>
-    internal static string Escape(string? text)
-    {
-        if (string.IsNullOrEmpty(text) || !text.Any(MayNeedEscape))
-            return text ?? string.Empty;
-
-        var sb = new StringBuilder(text.Length + 8);
-        foreach (var rune in text.EnumerateRunes())
-        {
-            var cp = rune.Value;
-            if (NeedsEscape(cp))
-                sb.Append(cp switch
-                {
-                    Lf => "\\n",
-                    Cr => "\\r",
-                    Tab => "\\t",
-                    < 0x100 => "\\x" + cp.ToString("x2"),
-                    <= 0xFFFF => "\\u" + cp.ToString("x4"),
-                    _ => "\\U" + cp.ToString("X8"),
-                });
-            else if (rune.IsBmp)
-                sb.Append((char)cp);
-            else
-                sb.Append(rune.ToString());   // a surrogate pair, re-emitted verbatim (emoji, CJK ext, …)
-        }
-        return sb.ToString();
-    }
+    internal static string Escape(string? text) => UntrustedText.Escape(text);
 
     /// <summary>
     /// <paramref name="path"/> relative to <paramref name="rootDir"/>, for display: a lexical prefix strip at a
@@ -118,32 +94,6 @@ internal static class YaraPathSafety
 
     // The C0 range — the definition of "unsafe name" (ADR 0029 decision 11).
     private static bool IsC0(char c) => c <= (char)0x1F;
-
-    // The cheap char-wise filter guarding the rune path: a string with no escapable BMP code unit AND no surrogate
-    // cannot change under Escape. Surrogates always route to the slow path — an astral code point may be Tag-block
-    // (invisible), and a lone surrogate must not be echoed back raw.
-    private static bool MayNeedEscape(char c) => NeedsEscape(c) || char.IsSurrogate(c);
-
-    // Everything the log must not carry raw, as a CODE POINT predicate. Three families, all of them things a
-    // package entry name has no legitimate use for (CLAUDE.md's hostile-text rules):
-    //   * parser attacks   — C0 (a deliberate superset of IsC0), DEL and the C1 controls;
-    //   * display attacks  — the line/paragraph separators and the bidi embeddings/overrides/isolates;
-    //   * invisibility     — zero-width characters, the marks, the word joiner and invisible operators, the BOM,
-    //                        the soft hyphen, and the astral Tag block (ADR 0031's InvisibleCharacter category,
-    //                        whose whole premise is that a reader cannot see it — reporting such a name with the
-    //                        character still in it reports nothing at all, ADR 0031 decision 4).
-    private static bool NeedsEscape(int cp) =>
-        cp <= 0x1F                                  // C0
-        || cp is 0x00AD                             // SOFT HYPHEN
-               or >= 0x7F and <= 0x9F               // DEL and the C1 controls
-               or >= 0x200B and <= 0x200D           // ZERO WIDTH SPACE / NON-JOINER / JOINER
-               or 0x200E or 0x200F                  // LEFT-TO-RIGHT and RIGHT-TO-LEFT MARK
-               or 0x2028 or 0x2029                  // LINE / PARAGRAPH SEPARATOR
-               or >= 0x202A and <= 0x202E           // bidi embeddings and overrides
-               or >= 0x2060 and <= 0x2064           // WORD JOINER and the invisible operators
-               or >= 0x2066 and <= 0x2069           // bidi isolates
-               or 0xFEFF                            // ZERO WIDTH NO-BREAK SPACE / BOM
-               or >= 0xE0000 and <= 0xE007F;        // Unicode Tag block (astral — see Escape)
     #endregion
 
     #region Fields
@@ -158,9 +108,5 @@ internal static class YaraPathSafety
     internal const string NoLongerExists = "it no longer exists (" + RemovedAfterListed + ")";
 
     private const string RemovedAfterListed = "removed after it was listed";
-
-    private const char Tab = (char)0x09;
-    private const char Lf = (char)0x0A;
-    private const char Cr = (char)0x0D;
     #endregion
 }

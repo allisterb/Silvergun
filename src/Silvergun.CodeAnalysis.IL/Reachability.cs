@@ -3,8 +3,6 @@ namespace Silvergun.CodeAnalysis.IL;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Runtime.InteropServices;
-using System.Security.Cryptography;
 
 /// <summary>
 /// Capability reachability over a <see cref="MethodGraph"/> (ADR 0037). Every own method is a root, tagged with its
@@ -67,9 +65,24 @@ public static class Reachability
         if (name.Length <= maxChars)
             return name;
         var keep = char.IsHighSurrogate(name[maxChars - 1]) ? maxChars - 1 : maxChars;
-        var hash = Convert.ToHexStringLower(SHA256.HashData(MemoryMarshal.AsBytes(name.AsSpan())))[..8];
-        return $"{name[..keep]}…[+{name.Length - keep} chars, sha256:{hash}]";
+        return name[..keep] + UntrustedText.CutSuffix(name, name.Length - keep);
     }
+
+    /// <summary>
+    /// What <paramref name="node"/> is a sink for (decision 2): an external node the map classifies as a capability, or
+    /// as unanalyzed (unseen code); an own P/Invoke or COM import (<c>NativeInterop</c>), or an own body-less extern that
+    /// is no P/Invoke (unseen). <paramref name="own"/> is the node's facts, when it is own. Opacity sites are not covered.
+    /// </summary>
+    internal static (Capability? Capability, bool Unseen) SinkOf(MethodNode node, OwnMethodFacts? own, CapabilityMap map) =>
+        node.Kind == MethodNodeKind.External
+            ? map.Classify(node.ClassificationKey) switch
+            {
+                { Class: CapabilityClass.Capability, Capability: { } c } => (c, false),
+                { Class: CapabilityClass.Unanalyzed } => (null, true),
+                _ => (null, false),
+            }
+            : own is null ? (null, false)
+            : (own.NativeImport || own.ComImport ? Capability.NativeInterop : null, own.InternalCall);
     #endregion
 
     #region Fields
@@ -147,16 +160,10 @@ public static class Reachability
             // The sinks each node is, and the first unseen opacity kind at each opacity site, in the graph's order.
             sinkMask = new int[nodes.Length];
             for (var i = 0; i < nodes.Length; i++)
-                sinkMask[i] = nodes[i].Kind == MethodNodeKind.External
-                    ? map.Classify(nodes[i].ClassificationKey) switch
-                    {
-                        { Class: CapabilityClass.Capability, Capability: { } c } => 1 << (int)c,
-                        { Class: CapabilityClass.Unanalyzed } => 1 << unseenSink,
-                        _ => 0,
-                    }
-                    : facts.TryGetValue(nodes[i].NodeId, out var own)
-                        ? (own.NativeImport || own.ComImport ? 1 << (int)Capability.NativeInterop : 0) | (own.InternalCall ? 1 << unseenSink : 0)
-                        : 0;
+            {
+                var (capability, unseen) = SinkOf(nodes[i], facts.GetValueOrDefault(nodes[i].NodeId), map);
+                sinkMask[i] = (capability is { } c ? 1 << (int)c : 0) | (unseen ? 1 << unseenSink : 0);
+            }
             foreach (var opacity in graph.Opacities.Where(o => unseenKinds.Contains(o.Kind)))
                 if (indexOf.TryGetValue(opacity.Site, out var site))
                 {

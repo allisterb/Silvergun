@@ -172,7 +172,9 @@ internal sealed partial class CciModuleSource : IModuleSource, IDisposable
                 return null;
             if (Cci.Module.ContainingAssembly?.AssemblyIdentity is { } own && own.Equals(core))
                 return "it defines its own core library types";
-            return universe.IsFramework(core.Name.Value) ? null : $"CCI takes '{core.Name.Value}', not a framework assembly, as its core library";
+            // The name is the attacker's: bounded once here, not per method that quotes it.
+            return universe.IsFramework(core.Name.Value) ? null
+                : $"CCI takes '{Reachability.BoundName(UntrustedText.Escape(core.Name.Value))}', not a framework assembly, as its core library";
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
