@@ -354,7 +354,190 @@ public sealed class SsaOffsetTests : IClassFixture<SsaOffsetFixture>
         Assert.Equal(first, second);
     }
 
+    // ---- SsaSinkFacts.CallSites (S4.5's join, as the API gives it) ---------------------------------------------------
+
+    /// <summary>
+    /// The join S4.5's harness makes through <see cref="SsaSinkFacts.CallSites"/>: for every joined node, the set of
+    /// (offset, kind, callee key) it lists equals the set of (offset, kind, <see cref="MethodNode.ClassificationKey"/> of
+    /// the target) over the graph's Call, CallVirt, NewObj, Ldftn and Ldvirtftn edges from that node. Left out, each for its
+    /// stated class: MD-array accessors (listed, no edge) and <c>CilIntrinsic.InitializeArray</c> (an edge, not listed),
+    /// each pinned by its own test below.
+    /// </summary>
+    [Fact]
+    public void CallSites_CallCallvirtNewobjLdftnLdvirtftn_KindsOffsetsAndKeysMatchMethodEdges()
+    {
+        var joined = fixture.JoinedNodeIds;
+        var outcomes = fixture.Lifted.Outcomes.Where(o => joined.Contains(o.NodeId)).ToArray();
+        var mdArray = outcomes.SelectMany(o => MdArrayOffsets(o).Select(offset => (o.NodeId, offset))).ToHashSet();
+        var initializeArray = outcomes.SelectMany(o => o.Body!.Instructions().OfType<CilIntrinsic.InitializeArray>().Select(i => (o.NodeId, o.OffsetOf(i)!.Value))).ToHashSet();
+
+        var listed = outcomes.SelectMany(o => SsaSinkFacts.CallSites(o).Select(s => (o.NodeId, Site: s))).ToArray();
+        var ssa = listed.Where(p => !mdArray.Contains((p.NodeId, p.Site.Offset)))
+            .Select(p => KeyedSite(p.NodeId, p.Site.Offset, p.Site.Kind, p.Site.CalleeKey)).Distinct(StringComparer.Ordinal).ToList();
+        var graph = fixture.Graph.Edges.Where(e => joined.Contains(e.From) && callSiteKinds.Contains(e.Kind) && !initializeArray.Contains((e.From, e.Offset)))
+            .Select(e => KeyedSite(e.From, e.Offset, e.Kind, fixture.Graph.Node(e.To)!.ClassificationKey)).Distinct(StringComparer.Ordinal).ToList();
+
+        // Vacuity: a real folder, every kind listed, both left-out classes present, and every other listed key readable.
+        Assert.True(ssa.Count > 500, $"Only {ssa.Count} SSA sites.");
+        Assert.All(callSiteKinds, kind => Assert.Contains(listed, p => p.Site.Kind == kind));
+        Assert.NotEmpty(mdArray);
+        Assert.NotEmpty(initializeArray);
+        Assert.All(listed.Where(p => !mdArray.Contains((p.NodeId, p.Site.Offset))), p => Assert.True(p.Site.CalleeKey is not null, $"{SsaText.Printable(p.NodeId)} IL_{p.Site.Offset:X4}: no callee key."));
+
+        AssertSameMultiset(graph, ssa, "graph edge", "SSA site");
+    }
+
+    /// <summary>
+    /// Body order, and only instructions with an IL offset: the listed sites are, one for one and in order, the body's
+    /// <c>CallInst</c>, <c>NewObjInst</c> and <c>FuncAddrInst</c> instructions, with the offsets the outcome records.
+    /// </summary>
+    [Fact]
+    public void CallSites_EveryLiftedMethod_TheBodysCallInstructionsInBodyOrder()
+    {
+        var lifted = fixture.Lifted.Outcomes.Where(o => o.IsLifted).ToArray();
+
+        Assert.NotEmpty(lifted);
+        foreach (var outcome in lifted)
+        {
+            var expected = outcome.Body!.Instructions()
+                .Where(i => i is CallInst or NewObjInst or FuncAddrInst && outcome.ILOffsets.ContainsKey(i))
+                .Select(i => (outcome.OffsetOf(i)!.Value, i switch
+                {
+                    CallInst call => call.IsVirtual ? MethodEdgeKind.CallVirt : MethodEdgeKind.Call,
+                    FuncAddrInst address => address.IsVirtual ? MethodEdgeKind.Ldvirtftn : MethodEdgeKind.Ldftn,
+                    _ => MethodEdgeKind.NewObj,
+                }))
+                .ToArray();
+            Assert.Equal(expected, SsaSinkFacts.CallSites(outcome).Select(s => (s.Offset, s.Kind)));
+        }
+    }
+
+    /// <summary>
+    /// <c>ldvirtftn</c>, <c>newobj</c> and <c>callvirt</c> in body order, each at its opcode's offset with its callee's
+    /// classification key (no generic decoration: <c>System.Func</c>, not <c>System.Func`1</c>).
+    /// </summary>
+    [Fact]
+    public void CallSites_VirtualFunction_LdvirtftnNewobjCallvirt()
+    {
+        var outcome = fixture.Lifted.Of(SsaOffsetFixture.SitesType, "VirtualFunction");
+        SsaLifted.AssertLifted(outcome);
+        var il = Decode(fixture.EmittedPath, SsaOffsetFixture.SitesType, "VirtualFunction");
+        uint At(short code) => (uint)il.Single(op => op.Code == code).Offset;
+
+        var sites = SsaSinkFacts.CallSites(outcome);
+
+        Assert.Equal(
+            new[]
+            {
+                new SsaCallSite(At(unchecked((short)0xFE07)), MethodEdgeKind.Ldvirtftn, "System.Object.ToString"),
+                new SsaCallSite(At(0x73), MethodEdgeKind.NewObj, "System.Func..ctor"),
+                new SsaCallSite(At(0x6F), MethodEdgeKind.CallVirt, "System.Func.Invoke"),
+            },
+            sites);
+    }
+
+    /// <summary><c>ldftn</c> of an own static method, then the delegate's <c>newobj</c>.</summary>
+    [Fact]
+    public void CallSites_StaticFunction_LdftnNewobj()
+    {
+        var outcome = fixture.Lifted.Of(SsaOffsetFixture.SitesType, "StaticFunction");
+        SsaLifted.AssertLifted(outcome);
+        var il = Decode(fixture.EmittedPath, SsaOffsetFixture.SitesType, "StaticFunction");
+        uint At(short code) => (uint)il.Single(op => op.Code == code).Offset;
+
+        Assert.Equal(
+            new[]
+            {
+                new SsaCallSite(At(unchecked((short)0xFE06)), MethodEdgeKind.Ldftn, "Offsets.OffsetSites.Target"),
+                new SsaCallSite(At(0x73), MethodEdgeKind.NewObj, "System.Func..ctor"),
+            },
+            SsaSinkFacts.CallSites(outcome));
+    }
+
+    /// <summary>
+    /// A prefixed call (<c>constrained.</c>, <c>tail.</c>) is listed once, at the prefixed opcode's offset (the graph's
+    /// convention), never the prefix's.
+    /// </summary>
+    [Theory]
+    [InlineData("ConstrainedToString", 0xFE16, 0x6F, MethodEdgeKind.CallVirt, "System.Object.ToString")]
+    [InlineData("TailCall", 0xFE14, 0x28, MethodEdgeKind.Call, "Offsets.OffsetSites.Target")]
+    [InlineData("ReadonlyElementToString", 0xFE16, 0x6F, MethodEdgeKind.CallVirt, "System.Object.ToString")]
+    public void CallSites_PrefixedCall_UsesOpcodeOffset(string method, int prefix, int opcode, MethodEdgeKind kind, string calleeKey)
+    {
+        var outcome = fixture.Lifted.Of(SsaOffsetFixture.SitesType, method);
+        SsaLifted.AssertLifted(outcome);
+        var (prefixAt, opcodeAt) = Prefixed(fixture.EmittedPath, method, (short)prefix, (short)opcode);
+
+        var site = Assert.Single(SsaSinkFacts.CallSites(outcome));
+
+        Assert.Equal(new SsaCallSite((uint)opcodeAt, kind, calleeKey), site);
+        Assert.NotEqual((uint)prefixAt, site.Offset);
+    }
+
+    /// <summary>
+    /// <c>RuntimeHelpers.InitializeArray</c> becomes Cilica's <c>CilIntrinsic.InitializeArray</c>, not a <c>CallInst</c>,
+    /// so it is not listed; the graph still has its Call edge at that offset (the S3 join class).
+    /// </summary>
+    [Fact]
+    public void CallSites_InitializeArray_NotListed()
+    {
+        var outcome = fixture.Lifted.Of(SsaOffsetFixture.SitesType, "InitializedArray");
+        SsaLifted.AssertLifted(outcome);
+        var intrinsic = Assert.Single(outcome.Body!.Instructions().OfType<CilIntrinsic.InitializeArray>());
+        var offset = outcome.OffsetOf(intrinsic)!.Value;
+
+        var edge = Assert.Single(fixture.Graph.Successors(outcome.NodeId), e => callSiteKinds.Contains(e.Kind));
+
+        Assert.Equal((MethodEdgeKind.Call, offset), (edge.Kind, edge.Offset));
+        Assert.Equal("System.Runtime.CompilerServices.RuntimeHelpers.InitializeArray", fixture.Graph.Node(edge.To)!.ClassificationKey);
+        Assert.DoesNotContain(SsaSinkFacts.CallSites(outcome), s => s.Offset == offset);
+    }
+
+    /// <summary>
+    /// MD-array <c>Get</c>, <c>Set</c>, <c>Address</c> and both <c>.ctor</c>s are listed (Call, or NewObj) at their
+    /// opcodes' offsets, with no callee key: an array type has no classification key, and the graph has no edge there.
+    /// </summary>
+    [Fact]
+    public void CallSites_MdArrayAccessors_ListedWithoutKey()
+    {
+        var outcome = fixture.Lifted.Of(SsaOffsetFixture.SitesType, "MdArrays");
+        SsaLifted.AssertLifted(outcome);
+        var expected = MdArraySites(outcome.AssemblyPath, SsaOffsetFixture.SitesType, "MdArrays")
+            .Select(s => (Offset: Convert.ToUInt32(s[(s.IndexOf("IL_", StringComparison.Ordinal) + 3)..], 16), Kind: s.StartsWith(".ctor ", StringComparison.Ordinal) ? MethodEdgeKind.NewObj : MethodEdgeKind.Call))
+            .ToArray();
+
+        var sites = SsaSinkFacts.CallSites(outcome);
+
+        Assert.Equal(5, expected.Length);
+        Assert.Equal(expected.Select(e => new SsaCallSite(e.Offset, e.Kind, null)), sites);
+        Assert.DoesNotContain(fixture.Graph.Successors(outcome.NodeId), e => callSiteKinds.Contains(e.Kind));
+    }
+
+    /// <summary>A method that did not lift has no body, so no sites; nor does a failure built by hand.</summary>
+    [Fact]
+    public void CallSites_NotLifted_Empty()
+    {
+        var unknown = fixture.Lifted.Of(SsaOffsetFixture.SitesType, "Jumper");
+        var promoted = fixture.Lifted.Of(SsaOffsetFixture.SitesType, "Promoted");
+
+        Assert.False(unknown.IsLifted, $"{SsaText.Of(unknown)} lifted: the fixture no longer gives an Unknown.");
+        Assert.Empty(SsaSinkFacts.CallSites(unknown));
+        Assert.Empty(SsaSinkFacts.CallSites(new SsaMethodOutcome("x.dll", 0, promoted.Method, new SsaFailure(SsaFailureKind.Import, "x"), null)));
+        Assert.All(fixture.Lifted.Outcomes.Where(o => !o.IsLifted), o => Assert.Empty(SsaSinkFacts.CallSites(o)));
+    }
+
+    [Fact]
+    public void CallSites_Null_Throws() =>
+        Assert.Equal("outcome", Assert.Throws<ArgumentNullException>(() => SsaSinkFacts.CallSites(null!)).ParamName);
+
     // ---- Helpers -------------------------------------------------------------------------------------------------------
+
+    private static string KeyedSite(string nodeId, uint offset, MethodEdgeKind kind, string? key) => $"{nodeId} | IL_{offset:X4} | {kind} | {key ?? "<null>"}";
+
+    // The offsets of a body's MD-array accessor calls and newobjs.
+    private static IEnumerable<uint> MdArrayOffsets(SsaMethodOutcome outcome) =>
+        outcome.Body!.Instructions().Where(i => i is CallInst { Method: MDArrayMethod } or NewObjInst { Constructor: MDArrayMethod })
+            .Select(i => outcome.OffsetOf(i)).OfType<uint>();
 
     // The IR's call sites, with the edge kind the graph gives the same IL: an MD-array accessor is none (no edge).
     private static IEnumerable<(IrInstruction Instruction, MethodEdgeKind Kind)> CallSites(IrBody body)

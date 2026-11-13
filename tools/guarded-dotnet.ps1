@@ -38,6 +38,8 @@ param(
     [string]$Filter = '',
     # Arguments for the program under `run`, whitespace-separated (paths must not contain spaces).
     [string]$AppArgs = '',
+    # Build configuration (-c); empty for the project's default (Debug).
+    [ValidateSet('', 'Debug', 'Release')][string]$Configuration = '',
     [string]$LogDir = (Join-Path ([IO.Path]::GetTempPath()) 'silvergun-guarded-logs')
 )
 
@@ -59,6 +61,7 @@ $arguments = switch ($Verb) {
     'run' { @('run', '--project', $Project, '-p:UseSharedCompilation=false') }
     default { @($Verb, $Project, '-p:UseSharedCompilation=false', '-nodeReuse:false', '-m:1') }
 }
+if ($Configuration) { $arguments += @('-c', $Configuration) }
 if ($Filter) { $arguments += @('--filter', $Filter) }
 if ($AppArgs) { $arguments += @('--') + ($AppArgs -split '\s+' | Where-Object { $_ }) }
 # Windows command-line quoting (CommandLineToArgvW rules): backslashes are literal except before a quote.

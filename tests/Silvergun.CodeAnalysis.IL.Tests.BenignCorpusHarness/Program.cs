@@ -57,6 +57,8 @@ public static class Program
             return WorkerParityChild.Execute(args);
         if (args.Length > 0 && string.Equals(args[0], R3Measure.Verb, StringComparison.Ordinal))
             return R3Measure.Execute(args);
+        if (args.Length > 0 && string.Equals(args[0], SsaJoinChild.Verb, StringComparison.Ordinal))
+            return SsaJoinChild.Execute(args);
 
         try
         {
@@ -72,6 +74,8 @@ public static class Program
                 return RunReachability(args);
             if (args.Contains(WorkerParityFlag))
                 return RunWorkerParity(args);
+            if (args.Contains(SsaFlag))
+                return RunSsa(args);
 
             var options = Parse(args);
             var manifest = CorpusManifest.Load(options.Manifest, options.Take);
@@ -231,6 +235,63 @@ public static class Program
             return NotComparableExitCode;
         }
         Console.WriteLine("PARITY every folder agrees");
+        return 0;
+    }
+
+    // --ssa (SSA facts S4.5): offline like --worker-parity, results cached per package in --results so a corpus can be run in
+    // guarded batches (--max-packages); the report is written by the invocation that finds every entry measured.
+    private static int RunSsa(string[] args)
+    {
+        string? Value(string name)
+        {
+            var index = Array.IndexOf(args, name);
+            return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
+        }
+
+        if (Value("--results") is not { } results)
+        {
+            Console.Error.WriteLine("--ssa needs --results <dir>; see --help.");
+            return 2;
+        }
+        var common = Parse(args);
+        if (Value("--take") is null)
+            common = common with { Take = 0 };
+        if (Value("--timeout") is null)
+            common = common with { ChildTimeout = TimeSpan.FromSeconds(DefaultReachabilityTimeoutSeconds) };
+        var maxPackages = Value("--max-packages") is { } max ? int.Parse(max, CultureInfo.InvariantCulture) : int.MaxValue;
+        var maxTime = Value("--max-seconds") is { } seconds ? TimeSpan.FromSeconds(double.Parse(seconds, CultureInfo.InvariantCulture)) : TimeSpan.MaxValue;
+
+        var cli = Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "Silvergun.CLI.exe" : "Silvergun.CLI");
+        if (!File.Exists(cli))
+        {
+            Console.Error.WriteLine($"--ssa needs the graph worker beside the harness, and there is no {cli}.");
+            return 1;
+        }
+
+        var manifest = CorpusManifest.Load(common.Manifest, common.Take);
+        var identity = BuildIdentities.Current(RepositoryRoot(), AppContext.BaseDirectory).ToString();
+        Console.WriteLine($"manifest {manifest.Path}");
+        Console.WriteLine($"manifest-hash {manifest.Hash} ({manifest.Entries.Count} package(s))");
+        Console.WriteLine($"cache {common.CacheRoot} (read only)");
+        Console.WriteLine($"results {Path.GetFullPath(results)}");
+        Console.WriteLine($"configuration {SsaMeasure.Configuration}; identity {identity}");
+
+        Silvergun.Runtime.Initialize("Silvergun", "CORPUS");
+        var (paths, pending, notCached, problems) = SsaMeasure.Run(manifest, common.CacheRoot, HarnessExecutable(), common.ChildTimeout,
+            Path.GetFullPath(results), common.OutputDirectory, DateOf(args), identity, maxPackages, maxTime, Console.Out);
+        foreach (var path in paths)
+            Console.WriteLine($"wrote {path}");
+        if (notCached > 0 || pending > 0)
+        {
+            Console.WriteLine(notCached > 0 ? $"NOT-COMPARABLE {notCached} manifest entr(ies) not cached; nothing was downloaded" : $"PENDING {pending} package(s) left; run again");
+            return notCached > 0 ? NotComparableExitCode : 0;
+        }
+        if (problems > 0)
+        {
+            Console.Error.WriteLine($"PROBLEMS {problems}; see the report.");
+            return ParityMismatchExitCode;
+        }
+        Console.WriteLine("SSA every folder additive, repeatable and within bounds");
         return 0;
     }
 
@@ -462,6 +523,8 @@ public static class Program
 
     private const string WorkerParityFlag = "--worker-parity";
 
+    private const string SsaFlag = "--ssa";
+
     /// <summary><c>--worker-parity</c> wrote its report, and some folder differs between the in-process pass and the worker.</summary>
     public const int ParityMismatchExitCode = 4;
 
@@ -521,6 +584,21 @@ public static class Program
           harness. Writes worker-parity-<date>.tsv (per folder), -packages.tsv (per package, wall times) and .md into --out.
           Exit 4 after writing them when any folder differs; else exit 3 when no package was measured or any entry was
           not cached (not comparable).
+
+          <harness> --ssa --results <dir> [--max-packages <n>] [--max-seconds <s>] [--date <yyyy-MM-dd>] [common options]
+          <harness> ssa-join <nupkg> <out-json>  (child mode - every method of one package lifted and joined to its graph)
+
+          SSA facts S4.5 (docs/agent/tasks/ssa-facts-s4.md). OFFLINE, the same cache and manifest as --reachability (--take
+          defaults to 0, the child timeout to 600 s). Per cached package: the ssa-join child, then PackageReachability.Analyze
+          through the Silvergun.CLI worker beside the harness with SSA off, on, and on again over a second extraction. Each
+          result is cached as <results>/<Id>.<Version>.ssa.json and reused (results of another build are refused);
+          --max-packages bounds the new ones per invocation, --max-seconds the time after which none is started (so a
+          batch fits the guard's timeout). A failed or timed-out result is cached like any other, and reported as a
+          problem; delete it to measure again. Once every entry has a result, writes
+          ssa-facts-<manifest>-<configuration>-<date>.md and its -folders, -packages, -join-examples and -constant-sinks TSVs
+          into --out. Exit 4 after writing them when a problem is found (not additive, the worker's graphs not the
+          child's, not repeatable, a join miss of an unexplained class, a bound or a default budget passed, a pass not
+          finished, no SSA facts at all); 3 when an entry is not cached.
 
           <harness> r3-measure <nupkg> <out-dir> [--timeout <seconds>]
 

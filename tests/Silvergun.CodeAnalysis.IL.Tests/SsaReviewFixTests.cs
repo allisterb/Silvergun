@@ -769,7 +769,7 @@ public sealed class SsaReviewFixTests
 
     public static TheoryData<string> NonPositiveBounds() => new(nameof(SsaBounds.MaxDepth), nameof(SsaBounds.MaxInstructions),
         nameof(SsaBounds.MaxExceptionClauses), nameof(SsaBounds.MaxMappedDataBytes), nameof(SsaBounds.MaxNesting),
-        nameof(SsaBounds.MaxForwarderHops), nameof(SsaBounds.MaxMappedDataBytesPerAssembly));
+        nameof(SsaBounds.MaxForwarderHops), nameof(SsaBounds.MaxMappedDataBytesPerAssembly), nameof(SsaBounds.MaxTypeParts));
 
     [Theory]
     [MemberData(nameof(NonPositiveBounds))]

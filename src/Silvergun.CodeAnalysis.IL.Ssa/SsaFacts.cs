@@ -115,6 +115,12 @@ public sealed record SsaSinkFact(
     string? Reason,
     SsaReflectionTarget? Target = null);
 
+/// <summary>
+/// One call site of a lifted body (<see cref="SsaSinkFacts.CallSites"/>): its IL offset, the edge kind its opcode makes, and
+/// its callee's classification key (null when it cannot be read). Raw metadata text: escape it before display.
+/// </summary>
+public sealed record SsaCallSite(uint Offset, MethodEdgeKind Kind, string? CalleeKey);
+
 /// <summary>What a <see cref="SsaReflectionTarget"/> names.</summary>
 public enum SsaTargetKind
 {

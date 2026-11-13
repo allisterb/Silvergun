@@ -31,7 +31,7 @@ internal sealed partial class CciModuleSource
             case IGenericMethodInstanceReference instance:
             {
                 var generic = MapMethod(instance.GenericMethod, depth + 1);
-                var arguments = instance.GenericArguments.Select(a => MapType(a, default, depth + 1)).ToImmutableArray();
+                var arguments = BoundedArguments(instance.GenericArguments, default, depth + 1, generic.Name);
                 if (generic.GenericParams.Count != arguments.Length)
                     throw new SsaAdapterException($"'{generic.Name}' takes {generic.GenericParams.Count} method type argument(s), not {arguments.Length}");
                 return generic.GetSpec(arguments);

@@ -48,7 +48,7 @@ internal sealed partial class CciModuleSource
                 return mods.IsDefaultOrEmpty ? element.CreatePointer() : new PointerType(element, mods);
             }
             case IFunctionPointerTypeReference function:
-                return new FuncPtrType(MapSignature(function, function.ExtraArgumentTypes, 0, ctx, depth + 1));
+                return Bounded(new FuncPtrType(MapSignature(function, function.ExtraArgumentTypes, 0, ctx, depth + 1)));
             case IGenericTypeParameterReference parameter:
             {
                 var index = TypeParameterIndex(parameter, depth);
@@ -256,7 +256,56 @@ internal sealed partial class CciModuleSource
             throw universe.IsStub(definition.Module)
                 ? new UnresolvedFactException(UnresolvedFact.Arity, StubModuleSource.DisplayName(definition), $"used with {arguments.Length} type argument(s)")
                 : new SsaAdapterException($"'{definition.Name}' takes {definition.GenericParams.Length} type argument(s), not {arguments.Length}");
-        return arguments.IsEmpty ? definition : definition.GetSpec(arguments);
+        if (arguments.IsEmpty)
+            return definition;
+        // Interned here by argument identity before Cilica sees it: Cilica's own cache keys and comparisons walk the
+        // arguments as trees, so a large instance named in many signatures would pay that walk at every use.
+        var key = (definition, new TypeDescList(arguments));
+        if (instances.TryGetValue(key, out var known))
+            return known;
+        // Checked before Cilica interns it.
+        if (1 + arguments.Sum(Parts) > universe.Bounds.MaxTypeParts)
+            throw TooManyParts(definition.Name);
+        return instances[key] = definition.GetSpec(arguments);
+    }
+
+    private TypeDesc Bounded(TypeDesc type) => Parts(type) > universe.Bounds.MaxTypeParts ? throw TooManyParts(type.Name) : type;
+
+    private SsaAdapterException TooManyParts(string name) =>
+        new($"A type ('{name}') that expands to more than {universe.Bounds.MaxTypeParts} parts", kind: SsaFailureKind.Bounds);
+
+    // The parts a type expands to as a tree, saturating past the bound. Specs are memoised by reference (Cilica interns
+    // them), so the count costs the distinct types, not the tree; other compounds are new objects per mapping, not kept.
+    private long Parts(TypeDesc type)
+    {
+        if (type is TypeSpec cached && typeParts.TryGetValue(cached, out var known))
+            return known;
+        var parts = Math.Min(universe.Bounds.MaxTypeParts + 1L, 1 + type switch
+        {
+            TypeSpec spec => spec.GenericParams.Sum(Parts),
+            CompoundType compound => Parts(compound.ElemType),
+            FuncPtrType function => Parts(function.Signature.ReturnType.Type) + function.Signature.ParamTypes.Sum(p => Parts(p.Type)),
+            _ => 0,
+        });
+        if (type is TypeSpec instance)
+            typeParts[instance] = parts;
+        return parts;
+    }
+
+    // Type arguments mapped one by one, failing as soon as their parts pass the bound, so a wide instantiation of large
+    // arguments stops at the first that does not fit rather than after mapping them all.
+    private ImmutableArray<TypeDesc> BoundedArguments(IEnumerable<ITypeReference> references, GenericContext ctx, int depth, string owner, long parts = 1)
+    {
+        var arguments = ImmutableArray.CreateBuilder<TypeDesc>();
+        foreach (var reference in references)
+        {
+            var argument = MapType(reference, ctx, depth);
+            parts += Parts(argument);
+            if (parts > universe.Bounds.MaxTypeParts)
+                throw TooManyParts(owner);
+            arguments.Add(argument);
+        }
+        return arguments.ToImmutable();
     }
 
     // The definition behind any named reference, specialized or instantiated ones included.
@@ -266,11 +315,16 @@ internal sealed partial class CciModuleSource
             : throw new SsaAdapterException("A generic type that is not a named type");
 
     // A generic instance's arguments: its containers' (a specialized nested type's) first, then its own, as metadata has them.
-    private ImmutableArray<TypeDesc> Arguments(IGenericTypeInstanceReference instance, GenericContext ctx, int depth) =>
+    private ImmutableArray<TypeDesc> Arguments(IGenericTypeInstanceReference instance, GenericContext ctx, int depth)
+    {
+        var containers = ContainerArguments((instance.GenericType as ISpecializedNestedTypeReference)?.ContainingType, ctx, depth + 1);
+        return
         [
-            .. ContainerArguments((instance.GenericType as ISpecializedNestedTypeReference)?.ContainingType, ctx, depth + 1),
-            .. instance.GenericArguments.Select(a => MapType(a, ctx, depth + 1)),
+            .. containers,
+            .. BoundedArguments(instance.GenericArguments, ctx, depth + 1, (Unwrap(instance.GenericType) as INamedTypeReference)?.Name.Value ?? "a generic type",
+                1 + containers.Sum(Parts)),
         ];
+    }
 
     private ImmutableArray<TypeDesc> ContainerArguments(ITypeReference? container, GenericContext ctx, int depth)
     {

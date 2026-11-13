@@ -44,6 +44,21 @@ internal sealed partial class CciModuleSource
             throw new SsaAdapterException("Its body could not be read: " + read.Error, kind: SsaFailureKind.Unreadable);
         if (read.Body is not { } body)
             return null;
+        // Each body its own operand memo (Once): CCI resolves a token's generic parameters against the body's owner.
+        var outer = operands;
+        operands = new();
+        try
+        {
+            return ConvertBody(cci, body);
+        }
+        finally
+        {
+            operands = outer;
+        }
+    }
+
+    private ILMethodBody ConvertBody(IMethodDefinition cci, IMethodBody body)
+    {
         var bounds = universe.Bounds;
 
         var cciLocals = body.LocalVariables.ToArray();
@@ -86,7 +101,7 @@ internal sealed partial class CciModuleSource
         {
             if (ArrayOperation(operation.OperationCode) is var (arrayCode, kind))
             {
-                var array = MapType(operation.Value as IArrayTypeReference, default, 0) as MDArrayType
+                var array = OperandType(operation.Value as IArrayTypeReference) as MDArrayType
                     ?? throw new SsaAdapterException("An array accessor on a single-dimensional array");
                 return new ILInstruction(arrayCode, array.Methods[(int)kind]) { Offset = offset };
             }
@@ -114,22 +129,58 @@ internal sealed partial class CciModuleSource
             : value is ILocalDefinition local && locals.TryGetValue(local, out var index) ? index
             : throw new SsaAdapterException("A local variable index out of range"),
         ILOperandType.String => (string)value!,
-        ILOperandType.Method => MapMethod((IMethodReference)value!, 0),
-        ILOperandType.Field => MapField((IFieldReference)value!, code is ILCode.Ldsfld or ILCode.Stsfld or ILCode.Ldsflda, 0),
+        ILOperandType.Method => OperandMethod((IMethodReference)value!),
+        ILOperandType.Field => OperandField((IFieldReference)value!, code is ILCode.Ldsfld or ILCode.Stsfld or ILCode.Ldsflda),
         // CCI hands newarr the array type; Cilica, like the encoding, the element type.
-        ILOperandType.Type => code == ILCode.Newarr ? MapType(((IArrayTypeReference)value!).ElementType, default, 0) : MapType((ITypeReference)value!, default, 0),
+        ILOperandType.Type => code == ILCode.Newarr ? OperandType(((IArrayTypeReference)value!).ElementType) : OperandType((ITypeReference)value!),
         ILOperandType.Tok => value switch
         {
-            IMethodReference method => MapMethod(method, 0),
-            IFieldReference field => MapField(field, null, 0),
-            ITypeReference type => MapType(type, default, 0),
+            IMethodReference method => OperandMethod(method),
+            IFieldReference field => OperandField(field, null),
+            ITypeReference type => OperandType(type),
             _ => throw new SsaAdapterException("An ldtoken operand that is not a type, method or field"),
         },
         ILOperandType.Sig => value is IFunctionPointerTypeReference function
-            ? new FuncPtrType(MapSignature(function, function.ExtraArgumentTypes, 0, default, 0))
+            ? Once(function, OperandKind.Signature, () => Bounded(new FuncPtrType(MapSignature(function, function.ExtraArgumentTypes, 0, default, 0))))
             : throw new SsaAdapterException("A calli signature that cannot be read"),
         var other => throw new SsaAdapterException($"An operand type the adapter does not map ({other})"),
     };
+
+    private TypeDesc OperandType(ITypeReference? type) =>
+        type is null ? MapType(type, default, 0) : Once(type, OperandKind.Type, () => MapType(type, default, 0));
+
+    private MethodDesc OperandMethod(IMethodReference method) => Once(method, OperandKind.Method, () => MapMethod(method, 0));
+
+    private FieldDesc OperandField(IFieldReference field, bool? isStatic) =>
+        Once(field, isStatic switch { true => OperandKind.StaticField, false => OperandKind.InstanceField, null => OperandKind.TokenField },
+            () => MapField(field, isStatic, 0));
+
+    // A context-free operand (a token, a local's or a handler's type) maps the same wherever one body names it, so it is
+    // mapped once per body, failures included: a body naming one large type a thousand times pays for it once. Only within
+    // a body: a token's generic parameters resolve against its owner, so another body may read it otherwise. Keyed by its
+    // token (CCI may hand out a new reference per use), else by the reference; a source maps one module, so a token is
+    // one row. A path-dependent failure, or a mapping CCI asserted on, is not kept.
+    private T Once<T>(object reference, OperandKind kind, Func<T> map) where T : class
+    {
+        if (operands is null)
+            return map();
+        var key = (reference is IMetadataObjectWithToken { TokenValue: var token } && token is not (0 or uint.MaxValue) ? (object)token : reference, kind);
+        if (operands.TryGetValue(key, out var known))
+            return known is ExceptionBox box ? throw box.Exception : (T)known;
+        using var reads = CciAssertions.BeginScope();
+        try
+        {
+            var value = map();
+            if (reads.Count == 0)
+                operands[key] = value;
+            return value;
+        }
+        catch (Exception ex) when (ex is UnresolvedFactException or SsaAdapterException { IsPathDependent: false } && reads.Count == 0)
+        {
+            operands[key] = new ExceptionBox(ex);
+            throw;
+        }
+    }
 
     // CCI hands an argument operand as its parameter definition, and the instance argument as null.
     private static int ArgumentIndex(object? value, IMethodDefinition owner) => value switch
@@ -149,7 +200,7 @@ internal sealed partial class CciModuleSource
             var (element, modifiers) = MapElement(local.Type, default, 0);
             return modifiers.IsDefaultOrEmpty ? element.CreateByref() : new ByrefType(element, modifiers);
         }
-        return MapType(local.Type is IModifiedTypeReference modified ? modified.UnmodifiedType : local.Type, default, 0);
+        return OperandType(local.Type is IModifiedTypeReference modified ? modified.UnmodifiedType : local.Type);
     }
 
     private ExceptionClause Clause(IOperationExceptionInformation region)
@@ -165,7 +216,7 @@ internal sealed partial class CciModuleSource
         return new ExceptionClause
         {
             Kind = kind,
-            CatchType = kind == ExceptionRegionKind.Catch ? MapType(region.ExceptionType, default, 0) : null,
+            CatchType = kind == ExceptionRegionKind.Catch ? OperandType(region.ExceptionType) : null,
             TryStart = checked((int)region.TryStartOffset),
             TryEnd = checked((int)region.TryEndOffset),
             HandlerStart = checked((int)region.HandlerStartOffset),

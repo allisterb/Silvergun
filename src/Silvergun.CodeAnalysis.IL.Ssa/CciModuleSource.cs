@@ -2,6 +2,7 @@ namespace Silvergun.CodeAnalysis.IL.Ssa;
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -368,6 +369,9 @@ internal sealed partial class CciModuleSource : IModuleSource, IDisposable
     private readonly Dictionary<IFieldDefinition, Exception> omittedFields = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<TypeDef, Dictionary<string, Exception>> omittedNames = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<object, object?> memo = new();
+    private readonly Dictionary<TypeSpec, long> typeParts = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<(TypeDef, TypeDescList), TypeDesc> instances = new();
+    private Dictionary<(object, OperandKind), object>? operands;
     private readonly HashSet<TypeDef> validating = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<(int, uint, int), byte[]?> mappedData = new();
     private long mappedBytes;
@@ -377,6 +381,27 @@ internal sealed partial class CciModuleSource : IModuleSource, IDisposable
     private enum Load { Base, GenericParams, Constraints, Fields, Methods, Interfaces, MethodImpls }
 
     private sealed record ExceptionBox(Exception Exception);
+
+    // Type arguments compared element by element by reference: a key that never walks a type.
+    private readonly record struct TypeDescList(ImmutableArray<TypeDesc> Items)
+    {
+        public bool Equals(TypeDescList other) =>
+            Items.Length == other.Items.Length && Items.Zip(other.Items).All(p => ReferenceEquals(p.First, p.Second));
+
+        public override int GetHashCode() =>
+            Items.Aggregate(new HashCode(), (h, t) => { h.Add(RuntimeHelpers.GetHashCode(t)); return h; }).ToHashCode();
+    }
+
+    // What a body operand is mapped as: one token maps differently as a static, an instance or an ldtoken field.
+    private enum OperandKind
+    {
+        Type,
+        Method,
+        StaticField,
+        InstanceField,
+        TokenField,
+        Signature,
+    }
 
     /// <summary>CCI assertions a read has already charged to a part of it (one member of a list), not to the whole.</summary>
     private sealed class Excused

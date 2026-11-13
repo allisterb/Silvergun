@@ -127,6 +127,41 @@ public static partial class SsaSinkFacts
             [.. unknown.Select(u => new SsaFailureCount(u.Key, u.Value))], methodBudget, timeBudget, budget.Spent, 0);
     }
 
+    /// <summary>
+    /// The call sites of a lifted body, as <see cref="Extract"/> joins them to graph edges: every <c>CallInst</c>,
+    /// <c>NewObjInst</c> and <c>FuncAddrInst</c> with an IL offset, in body order. Empty when not lifted.
+    /// </summary>
+    public static IReadOnlyList<SsaCallSite> CallSites(SsaMethodOutcome outcome)
+    {
+        ArgumentNullException.ThrowIfNull(outcome);
+        if (outcome.Body is not { } body)
+            return [];
+        return
+        [
+            .. body.Instructions()
+                .Select(i => (Kind: KindOf(i), Offset: outcome.OffsetOf(i), Callee: CalleeOf(i)))
+                .Where(c => c.Kind is not null && c.Offset is not null)
+                .Select(c => new SsaCallSite(c.Offset!.Value, c.Kind!.Value, ClassificationKey(c.Callee!))),
+        ];
+    }
+
+    // The edge kind an instruction's opcode makes, or null for an instruction that is not a call site.
+    private static MethodEdgeKind? KindOf(Instruction instruction) => instruction switch
+    {
+        CallInst call => call.IsVirtual ? MethodEdgeKind.CallVirt : MethodEdgeKind.Call,
+        NewObjInst => MethodEdgeKind.NewObj,
+        FuncAddrInst address => address.IsVirtual ? MethodEdgeKind.Ldvirtftn : MethodEdgeKind.Ldftn,
+        _ => null,
+    };
+
+    private static MethodDesc? CalleeOf(Instruction instruction) => instruction switch
+    {
+        CallInst call => call.Method,
+        NewObjInst create => create.Constructor,
+        FuncAddrInst address => address.Method,
+        _ => null,
+    };
+
     // Every site MethodUnknown, naming the assemblies the session could not read (up to three).
     private static SsaFolderFacts Lost(SinkSite[] kept, int total, SsaAssembly[] lost)
     {
@@ -363,7 +398,8 @@ public static partial class SsaSinkFacts
                 return SsaValue.OfDynamic(SsaDynamicOrigin.TypeParameter);
             if (!types.TryGetValue(type, out var constant))
             {
-                types[type] = constant = Make(SsaConstantKind.Type, TypeNames.Name(type, 0));
+                var (name, whole) = TypeNames.Name(type);
+                types[type] = constant = Make(SsaConstantKind.Type, name, whole);
                 if (TypeNames.DefinitionName(type) is { } definition)
                 {
                     if (!definitions.TryGetValue(constant, out var named))
@@ -447,9 +483,13 @@ public static partial class SsaSinkFacts
             return SsaValue.OfConstant(constant);
         }
 
-        private SsaConstant Make(SsaConstantKind kind, string raw)
+        // A text that is not whole (a type name past its budget) is always cut, so it reads Cut with the suffix whatever
+        // MaxTextChars is; its hash is over the text rendered. When MaxTextChars would have kept all of that text, the cut
+        // drops its last char, so the suffix reads "+1 chars": the name was cut before, by its budget.
+        private SsaConstant Make(SsaConstantKind kind, string raw, bool whole = true)
         {
-            var constant = new SsaConstant(kind, UntrustedText.EscapeBounded(raw, bounds.MaxTextChars, out var hashOnly, out var cut), cut);
+            var max = whole ? bounds.MaxTextChars : Math.Max(1, Math.Min(bounds.MaxTextChars, raw.Length - 1));
+            var constant = new SsaConstant(kind, UntrustedText.EscapeBounded(raw, max, out var hashOnly, out var cut), cut);
             HashOnly.TryAdd(constant, hashOnly);
             return constant;
         }
@@ -493,32 +533,14 @@ public static partial class SsaSinkFacts
     private static class TypeNames
     {
         #region Methods
-        // T as a signature type; <unknown> for what cannot be read.
-        public static string Name(TypeDesc type, int depth)
+        // T as a signature type, and whether it is whole; <unknown> for what cannot be read. Metadata may name a TypeSpec
+        // inside another's signature, so types can share parts and a name can double per level: each type is rendered once
+        // per call, its chars charged as rendered, and once MaxNameChars are spent the rest render <unknown> (not whole).
+        public static (string Name, bool Whole) Name(TypeDesc type)
         {
-            if (depth > MaxDepth)
-                return CanonicalName.UnknownPart;
-            try
-            {
-                return type switch
-                {
-                    ByrefType byref => CanonicalName.ByRefTo(Name(byref.ElemType, depth + 1)),
-                    PointerType pointer => CanonicalName.PointerTo(Name(pointer.ElemType, depth + 1)),
-                    MDArrayType array => CanonicalName.ArrayOf(Name(array.ElemType, depth + 1), array.Rank),
-                    ArrayType array => CanonicalName.ArrayOf(Name(array.ElemType, depth + 1)),
-                    GenericParamType parameter => parameter.IsMethodParam
-                        ? CanonicalName.MethodGenericParameter(parameter.Index)
-                        : CanonicalName.TypeGenericParameter(parameter.Index),
-                    PrimType primitive => CanonicalName.NodeId(Identity(primitive)!.Value),
-                    TypeSpec spec => CanonicalName.GenericInstance(CanonicalName.NodeId(Definition(spec.Definition)), Arguments(spec, depth)),
-                    TypeDef definition => CanonicalName.NodeId(Definition(definition)),
-                    _ => CanonicalName.UnknownPart,
-                };
-            }
-            catch (Exception ex) when (ex is not OutOfMemoryException)
-            {
-                return CanonicalName.UnknownPart;
-            }
+            var renderer = new Renderer();
+            var name = renderer.Name(type, 0);
+            return (name, !renderer.Spent);
         }
 
         // The identity of a named type's definition; null for any other type.
@@ -562,13 +584,13 @@ public static partial class SsaSinkFacts
 
         // CciNames' rule: a link contributes its own arguments only when it is instantiated itself (has generic parameters
         // of its own), and then after its container's; so List<int>.Enumerator has none. Cilica's spec holds them all.
-        private static IEnumerable<string> Arguments(TypeSpec spec, int depth)
+        private static IEnumerable<TypeDesc> Arguments(TypeSpec spec)
         {
             var all = spec.GenericParams;
             var ranges = new List<(int Start, int End)>();
             for (var link = spec.Definition; link is not null && ranges.Count < MaxDepth && Own(link) > 0; link = link.DeclaringType)
                 ranges.Insert(0, (link.GenericParams.Length - Own(link), link.GenericParams.Length));
-            return ranges.SelectMany(r => Enumerable.Range(r.Start, r.End - r.Start)).Where(i => i < all.Count).Select(i => Name(all[i], depth + 1));
+            return ranges.SelectMany(r => Enumerable.Range(r.Start, r.End - r.Start)).Where(i => i < all.Count).Select(i => all[i]);
         }
 
         private static int Own(TypeDef type) => type.GenericParams.Length - (type.DeclaringType?.GenericParams.Length ?? 0);
@@ -580,6 +602,95 @@ public static partial class SsaSinkFacts
 
         #region Fields
         private const int MaxDepth = 64;
+
+        // Chars one name renders before the rest are <unknown>.
+        private const int MaxNameChars = 4_096;
+        #endregion
+
+        #region Child types
+        // One name's rendering: each type once (by reference), every char charged as it is rendered (a part, or what a
+        // container adds around its parts), so the work is bounded by the budget, never by the metadata's ranks or names.
+        private sealed class Renderer
+        {
+            #region Properties
+            // The budget ran out, so some part reads <unknown>.
+            public bool Spent { get; private set; }
+            #endregion
+
+            #region Methods
+            public string Name(TypeDesc type, int depth)
+            {
+                if (depth > MaxDepth)
+                    return CanonicalName.UnknownPart;
+                if (left <= 0)
+                {
+                    Spent = true;
+                    return CanonicalName.UnknownPart;
+                }
+                if (rendered.TryGetValue(type, out var known))
+                    return Charge(known);
+                string name;
+                try
+                {
+                    name = type switch
+                    {
+                        ByrefType byref => Wrapped(Name(byref.ElemType, depth + 1), CanonicalName.ByRefTo),
+                        PointerType pointer => Wrapped(Name(pointer.ElemType, depth + 1), CanonicalName.PointerTo),
+                        MDArrayType array => Wrapped(Name(array.ElemType, depth + 1), e => CanonicalName.ArrayOf(e, array.Rank)),
+                        ArrayType array => Wrapped(Name(array.ElemType, depth + 1), e => CanonicalName.ArrayOf(e)),
+                        GenericParamType parameter => Charge(parameter.IsMethodParam
+                            ? CanonicalName.MethodGenericParameter(parameter.Index)
+                            : CanonicalName.TypeGenericParameter(parameter.Index)),
+                        PrimType primitive => Charge(CanonicalName.NodeId(Identity(primitive)!.Value)),
+                        TypeSpec spec => Instance(spec, depth),
+                        TypeDef definition => Charge(CanonicalName.NodeId(Definition(definition))),
+                        _ => CanonicalName.UnknownPart,
+                    };
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException)
+                {
+                    name = CanonicalName.UnknownPart;
+                }
+                rendered[type] = name;
+                return name;
+            }
+
+            // The definition's name is charged before its arguments are rendered.
+            private string Instance(TypeSpec spec, int depth)
+            {
+                var definition = Charge(CanonicalName.NodeId(Definition(spec.Definition)));
+                var arguments = Arguments(spec).Select(a => Name(a, depth + 1)).ToArray();
+                var name = CanonicalName.GenericInstance(definition, arguments);
+                left -= name.Length - definition.Length - arguments.Sum(a => (long)a.Length);
+                return name;
+            }
+
+            private string Wrapped(string inner, Func<string, string> wrap)
+            {
+                var name = wrap(inner);
+                left -= name.Length - inner.Length;
+                return name;
+            }
+
+            // A part that does not fit what is left reads <unknown>.
+            private string Charge(string part)
+            {
+                if (part.Length > left)
+                {
+                    Spent = true;
+                    left = 0;
+                    return CanonicalName.UnknownPart;
+                }
+                left -= part.Length;
+                return part;
+            }
+            #endregion
+
+            #region Fields
+            private readonly Dictionary<TypeDesc, string> rendered = new(ReferenceEqualityComparer.Instance);
+            private long left = MaxNameChars;
+            #endregion
+        }
         #endregion
     }
     #endregion

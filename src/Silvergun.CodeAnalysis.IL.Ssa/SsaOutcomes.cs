@@ -111,6 +111,12 @@ public sealed record SsaBounds
     /// <summary>Type-forwarder hops followed for one type.</summary>
     public int MaxForwarderHops { get; init; } = 16;
 
+    /// <summary>
+    /// Parts one mapped type expands to as a tree, a shared part counted each time it is used. Metadata can name a TypeSpec
+    /// inside another's signature, so a few rows can make a type that doubles per level, and Cilica walks types as trees.
+    /// </summary>
+    public int MaxTypeParts { get; init; } = 4_096;
+
     /// <summary>Bytes of RVA field data kept for one assembly (aliasing fields share one copy).</summary>
     public long MaxMappedDataBytesPerAssembly { get; init; } = 64L * 1024 * 1024;
     #endregion
@@ -120,7 +126,7 @@ public sealed record SsaBounds
     public SsaBounds Validated()
     {
         if (MaxDepth <= 0 || MaxInstructions <= 0 || MaxExceptionClauses <= 0 || MaxMappedDataBytes <= 0
-            || MaxNesting <= 0 || MaxForwarderHops <= 0 || MaxMappedDataBytesPerAssembly <= 0)
+            || MaxNesting <= 0 || MaxForwarderHops <= 0 || MaxMappedDataBytesPerAssembly <= 0 || MaxTypeParts <= 0)
             throw new ArgumentOutOfRangeException(nameof(SsaBounds), "Every bound must be positive");
         return this;
     }
