@@ -245,8 +245,8 @@ public static class SsaReport
     /// <c>InitializeArray</c> call is Cilica's intrinsic, not a call (S3); an MD-array accessor is CCI's <c>Array_*</c>
     /// pseudo-operation with no edge (S4.1); a node merged from several definitions, one of which did not lift, has edges
     /// from that one with no SSA site; a truncated graph lacks what it did not reach; the Model drops the module type, so
-    /// <c>&lt;Module&gt;</c> methods are not graph nodes (module-type); and the Model renders some pointer parameters as
-    /// by-refs, a NodeId parity gap (ADR 0025) on the graph's side (pointer-as-byref). Every other class is a problem.
+    /// <c>&lt;Module&gt;</c> methods are not graph nodes (module-type). Every other class is a problem, pointer-as-byref
+    /// included: ModelNames rendered <c>[Out]</c> pointer parameters as by-refs until S4.5 fixed it.
     /// </summary>
     public static bool Explained(string @class) =>
         (@class.StartsWith("truncated:", StringComparison.Ordinal) && !@class.EndsWith("sink:unexplained", StringComparison.Ordinal)) || explained.Contains(@class);
@@ -287,8 +287,6 @@ public static class SsaReport
         [
             "edge:initialize-array-intrinsic", "site:no-edge(md-array-accessor)", "edge:node-partly-lifted",
             "method:lifted-node-not-in-graph(module-type)", "method:unknown-node-not-in-graph(module-type)",
-            "method:lifted-node-not-in-graph(pointer-as-byref)", "method:unknown-node-not-in-graph(pointer-as-byref)",
-            "edge:node-not-in-ssa(pointer-as-byref)",
         ];
 
     // The cut suffix a bounded text may end with, "…[+N chars, sha256:<8 hex>]", at most this long.

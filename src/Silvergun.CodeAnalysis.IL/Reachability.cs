@@ -102,9 +102,10 @@ public static class Reachability
     private static readonly Capability[] capabilities = Enum.GetValues<Capability>();
 
     // The opacity kinds that make a node a site of unseen code. Module-level kinds are sited at [assembly]<Module>, which
-    // is no node, and reach the verdicts through the facts' gaps and the coverage instead.
+    // is no node, and reach the verdicts through the facts' gaps and the coverage instead. An OversizedType node may be
+    // several methods merged under one id, so which one runs is not seen.
     private static readonly HashSet<OpacityKind> unseenKinds =
-        [OpacityKind.IndirectCall, OpacityKind.Unresolved, OpacityKind.Ambiguous, OpacityKind.BodyUnreadable];
+        [OpacityKind.IndirectCall, OpacityKind.Unresolved, OpacityKind.Ambiguous, OpacityKind.BodyUnreadable, OpacityKind.OversizedType];
 
     private const int MaxProfiles = 64;
     private const int MaxExamples = 3;

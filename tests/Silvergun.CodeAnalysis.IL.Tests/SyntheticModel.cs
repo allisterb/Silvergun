@@ -45,11 +45,12 @@ internal static class SyntheticModel
     }
 
     /// <summary>
-    /// A by-ref parameter as CCIProvider models it: a <see cref="ModelTypes.PointerType"/> whose by-ref-ness lives only
-    /// in the parameter kind.
+    /// A by-ref parameter as CCIProvider models it: a <em>managed</em> <see cref="ModelTypes.PointerType"/>
+    /// (<c>IsManaged: true</c>, ADR 0025) with kind <c>Ref</c>. The kind is carried for fidelity only; naming reads
+    /// <c>IsManaged</c>.
     /// </summary>
     public static ModelTypes.MethodParameterReference ByRef(ushort index, ModelTypes.IType target) =>
-        new(index, new ModelTypes.PointerType(target)) { Kind = ModelTypes.MethodParameterKind.Ref };
+        new(index, new ModelTypes.PointerType(target, isManaged: true)) { Kind = ModelTypes.MethodParameterKind.Ref };
 
     /// <summary>The positional type generic parameter <c>!index</c>.</summary>
     public static ModelTypes.GenericParameterReference TypeParameter(ushort index) => new(ModelTypes.GenericParameterKind.Type, index);

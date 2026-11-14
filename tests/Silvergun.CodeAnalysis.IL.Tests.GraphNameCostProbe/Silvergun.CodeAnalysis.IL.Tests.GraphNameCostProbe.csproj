@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Measurement probe for docs/agent/tasks/graph-names-hostile-types.md step 1: per-phase cost of a TypeSpec DAG
+       (T_k = Pair<T_(k-1),T_(k-1)>) in signatures. Run by hand, one size per process, through tools/guarded-dotnet.ps1.
+       Referenced by no test project, so it costs the IL suite nothing. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Linked, not copied: the row-by-row writer and the load helper the IL tests' SsaTypeNameDagFixture uses. -->
+    <Compile Include="..\Silvergun.CodeAnalysis.IL.Tests\RawAssembly.cs" Link="Shared\RawAssembly.cs" />
+    <Compile Include="..\Silvergun.CodeAnalysis.IL.Tests\ModelAssemblies.cs" Link="Shared\ModelAssemblies.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Silvergun.CodeAnalysis.IL\Silvergun.CodeAnalysis.IL.csproj" />
+    <ProjectReference Include="..\..\src\Silvergun.CodeAnalysis.IL.Ssa\Silvergun.CodeAnalysis.IL.Ssa.csproj" />
+  </ItemGroup>
+
+</Project>

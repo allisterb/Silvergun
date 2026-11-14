@@ -149,6 +149,16 @@ public static class CanonicalName
     /// <summary>The positional rendering of a method generic parameter: <c>!!0</c>, <c>!!1</c>…</summary>
     public static string MethodGenericParameter(int index) => "!!" + Math.Max(0, index);
 
+    /// <summary>
+    /// A generic instance too large to name (hostile metadata: a TypeSpec DAG whose tree doubles per level), in place of
+    /// its whole rendering: <c>&lt;oversized:8191 parts:1a2b3c4d5e6f7081&gt;</c>, its tree size and structural hash as both
+    /// object models measure it (<c>CCIProvider.TypeSize</c>).
+    /// </summary>
+    public static string Oversized(long parts, string? hash) => $"{OversizedOpen}{parts} parts:{Part(hash)}>";
+
+    /// <summary>Whether <paramref name="name"/> holds an <see cref="Oversized"/> marker.</summary>
+    public static bool HasOversized(string? name) => name?.Contains(OversizedOpen, StringComparison.Ordinal) == true;
+
     /// <summary>A function-pointer type: <c>fnptr:Ret(P1,P2)</c>.</summary>
     public static string FunctionPointer(string? returnType, IEnumerable<string>? parameterTypes) =>
         $"fnptr:{Part(returnType)}{Signature(parameterTypes)}";
@@ -172,6 +182,7 @@ public static class CanonicalName
     /// </summary>
     public const string UnknownPart = "<unknown>";
 
+    private const string OversizedOpen = "<oversized:";
     private const char NestingSeparator = '.';
     private const char ParameterSeparator = ',';
     private const char ArgumentsOpen = '<';

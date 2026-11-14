@@ -62,6 +62,7 @@ internal static class ReachabilityPresentation
         OpacityKind.Unresolved => "an unresolved call",
         OpacityKind.Ambiguous => "an ambiguous call",
         OpacityKind.BodyUnreadable => "an unreadable method body",
+        OpacityKind.OversizedType => "a method whose signature type is too large to name",
         { } other => $"an opacity site ({other})",
         null => ownSink ? "an internal call" : "an API the map marks unanalyzed",
     };

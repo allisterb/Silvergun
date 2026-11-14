@@ -114,6 +114,10 @@
          copied here; PdbReaderRegressionTests copies the pair to a temp directory, corrupts it there, and loads it only in
          a child (the PathologicalSignatureProbe's pdb-load verb). Never loaded by this host. -->
     <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.AliasedPdbFixture\Silvergun.CodeAnalysis.IL.Tests.AliasedPdbFixture.csproj" />
+    <!-- Pointer/by-ref parameter shapes for the ModelNames/CciNames node-id parity of ADR 0025 ([Out] T* that is not
+         by-ref, and every C# by-ref flavour). Own project so it moves no pinned baseline; located via typeof(PointerParameters)
+         and read as metadata only. -->
+    <ProjectReference Include="..\Silvergun.CodeAnalysis.IL.Tests.PointerParameterFixture\Silvergun.CodeAnalysis.IL.Tests.PointerParameterFixture.csproj" />
   </ItemGroup>
 
 </Project>

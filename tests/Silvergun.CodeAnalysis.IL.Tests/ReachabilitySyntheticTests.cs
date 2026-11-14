@@ -170,6 +170,7 @@ public sealed class ReachabilitySyntheticTests
     [InlineData(OpacityKind.Unresolved)]
     [InlineData(OpacityKind.Ambiguous)]
     [InlineData(OpacityKind.BodyUnreadable)]
+    [InlineData(OpacityKind.OversizedType)]
     public void Sink_AnUnseenOpacitySite_IsAnUnseenSink_EndingInThatOpacity(OpacityKind kind)
     {
         var report = new Parts()
@@ -182,6 +183,44 @@ public sealed class ReachabilitySyntheticTests
         Assert.Equal([(RootClass.PublicApi, (Capability?)null), (RootClass.Hidden, (Capability?)null)], report.Reaches.Select(r => (r.Class, r.Capability)));
         AssertPath(Assert.Single(report.Reaches[0].Examples), "App.A", ReachEvidence.Bound, kind, OwnHop("App.A"), OwnHop("App.B", MethodEdgeKind.Call, 2));
         AssertPath(Assert.Single(report.Reaches[1].Examples), "App.B", ReachEvidence.Bound, kind, OwnHop("App.B"));
+    }
+
+    // graph-names-hostile-types.md: an own method whose signature holds an oversized type (OversizedType at the node, offset
+    // 0) is unseen code, so a reach to it reads Unseen and its root class Unknown, never None.
+    [Fact]
+    public void Sink_AnOwnNodeWithAnOversizedSignature_MakesAReachToIt_Unseen_NeverClean()
+    {
+        var report = new Parts()
+            .Own("App.A", RootClass.PublicApi)
+            .Own("App.Big", RootClass.Hidden)
+            .Edge("App.A", "App.Big", MethodEdgeKind.Call, 3)
+            .Opacity("App.Big", OpacityKind.OversizedType, 0)
+            .Analyze();
+
+        var row = Assert.Single(report.Reaches, r => r.Class == RootClass.PublicApi);
+        Assert.Null(row.Capability);
+        AssertPath(Assert.Single(row.Examples), "App.A", ReachEvidence.Bound, OpacityKind.OversizedType, OwnHop("App.A"), OwnHop("App.Big", MethodEdgeKind.Call, 3));
+        Assert.Equal(RootClassVerdict.Unknown, Status(report, RootClass.PublicApi).Verdict);
+    }
+
+    // The call-site form: OversizedType sited at the caller (at the call's offset) makes the caller itself an unseen site,
+    // even though the call resolved to a clean own target.
+    [Fact]
+    public void Sink_ACallSiteToAnOversizedSignature_MakesTheCallerAnUnseenSite()
+    {
+        var report = new Parts()
+            .Own("App.A", RootClass.PublicApi)
+            .Own("App.Big", RootClass.Hidden)
+            .Edge("App.A", "App.Big", MethodEdgeKind.Call, 5)
+            .Opacity("App.A", OpacityKind.OversizedType, 5)
+            .Analyze();
+
+        var row = Assert.Single(report.Reaches, r => r.Class == RootClass.PublicApi);
+        Assert.Null(row.Capability);
+        AssertPath(Assert.Single(row.Examples), "App.A", ReachEvidence.Bound, OpacityKind.OversizedType, OwnHop("App.A"));
+        Assert.Equal(RootClassVerdict.Unknown, Status(report, RootClass.PublicApi).Verdict);
+        // The target carries no opacity: its own root class reaches nothing.
+        Assert.DoesNotContain(report.Reaches, r => r.Class == RootClass.Hidden);
     }
 
     // Twin: the opacity kinds that are not about a call site's target are no sinks.
@@ -2185,7 +2224,8 @@ public sealed class ReachabilitySyntheticTests
             edges = [.. parts.Edges.Where(e => nodes.ContainsKey(e.From) && nodes.ContainsKey(e.To) && !map.IsIgnoredEdge(nodes[e.From].ClassificationKey, nodes[e.To].ClassificationKey))];
             // Each node's out-edges, in input order: the same edges the BFS scanned, indexed so a long chain is linear.
             outgoing = edges.ToLookup(e => e.From, StringComparer.Ordinal);
-            unseenSites = parts.Opacities.Where(o => o.Kind is OpacityKind.IndirectCall or OpacityKind.Unresolved or OpacityKind.Ambiguous or OpacityKind.BodyUnreadable)
+            unseenSites = parts.Opacities.Where(o => o.Kind is OpacityKind.IndirectCall or OpacityKind.Unresolved or OpacityKind.Ambiguous or OpacityKind.BodyUnreadable
+                    or OpacityKind.OversizedType)
                 .Select(o => o.Site).ToHashSet(StringComparer.Ordinal);
             this.map = map;
         }

@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Pointer and by-ref parameter shapes for the ModelNames/CciNames node-id parity of ADR 0025: [Out] on a
+         parameter that is NOT by-ref (P/Invoke style `[Out] byte** p`), next to every by-ref flavour C# emits
+         (ref, out, in, ref readonly, out T*, a by-ref inside a function pointer). Its own project, like the other
+         fixtures, so nothing here perturbs a pinned method-count baseline elsewhere. net10.0 so `in`/`ref readonly`
+         bind the framework's IsReadOnlyAttribute/RequiresLocationAttribute rather than compiler-embedded copies.
+         Read as metadata only; nothing in it is ever executed. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>false</IsTestProject>
+  </PropertyGroup>
+
+</Project>

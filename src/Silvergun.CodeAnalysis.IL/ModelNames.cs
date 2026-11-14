@@ -3,6 +3,7 @@ namespace Silvergun.CodeAnalysis.IL;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 using Model.Types;
 
@@ -17,11 +18,12 @@ using Model.Types;
 /// the empty string and <em>reverses</em> the nesting chain at depth 3 or more — exactly the
 /// compiler-generated async/iterator/lambda types the call graph depends on.
 /// </para>
-/// <para>Two <c>Model</c> quirks are compensated for here:</para>
+/// <para><c>Model</c> quirks:</para>
 /// <list type="bullet">
-/// <item><description><c>CCIProvider</c> maps a by-ref parameter to a <see cref="PointerType"/> and records
-/// the by-ref-ness only in <see cref="IMethodParameterReference.Kind"/>, so a non-<see cref="MethodParameterKind.In"/>
-/// pointer parameter is unwrapped and rendered <c>T&amp;</c>, matching CCI's by-ref flag.</description></item>
+/// <item><description>By-ref-ness is read from <see cref="PointerType.IsManaged"/> (our fork), never from the parameter
+/// kind, which is <c>Out</c> for a non-by-ref <c>[Out] T*</c>.</description></item>
+/// <item><description>A generic instance past <c>CCIProvider.TypeSize.MaxParts</c> is not built (<see cref="BasicType.Oversized"/>)
+/// and renders as <see cref="CanonicalName.Oversized"/>, as CciNames renders the same measure.</description></item>
 /// <item><description>A type's <c>GenericParameterCount</c> is already cumulative over its nesting chain, so
 /// arity is read from the innermost type only and never summed. Its <c>GenericArguments</c> are cumulative only
 /// over links that are themselves instantiated; node ids take them as-is in signature position (CciNames
@@ -58,10 +60,9 @@ public static class ModelNames
     public static TypeIdentity Of(IBasicType? type) => Guard(() => Walk(type), TypeIdentity.Unknown);
 
     /// <summary>
-    /// Renders <paramref name="type"/> as it appears in a signature: arrays <c>T[]</c>, pointers <c>T*</c>,
-    /// generic parameters positionally (<c>!0</c>/<c>!!0</c>), and any named type as its
-    /// <see cref="CanonicalName.NodeId(TypeIdentity)"/>. By-ref is not visible on a type here — see
-    /// <see cref="Of(IMethodReference)"/>, which recovers it from the parameter kind.
+    /// Renders <paramref name="type"/> as it appears in a signature: arrays <c>T[]</c>, pointers <c>T*</c>, managed
+    /// pointers (by-refs) <c>T&amp;</c>, generic parameters positionally (<c>!0</c>/<c>!!0</c>), and any named type as its
+    /// <see cref="CanonicalName.NodeId(TypeIdentity)"/>.
     /// </summary>
     public static string TypeName(IType? type) => Guard(() => TypeName(type, 0, []), CanonicalName.UnknownPart);
 
@@ -141,17 +142,28 @@ public static class ModelNames
     // definition's are, so both sides render alike even for a generic modifier in hostile metadata.
     private static string ReturnName(IMethodReference method, IReadOnlyList<string> typeArguments)
     {
-        var type = TypeName(method.ReturnType, 1, typeArguments);
+        var type = Substituted(method.ReturnType, 1, typeArguments);
         return string.Concat([
             method.ReturnValueIsByRef ? CanonicalName.ByRefTo(type) : type,
             .. method.ReturnValueCustomModifiers.Select(m => $" {(m.IsOptional ? "modopt" : "modreq")}({TypeName(m.Modifier, 1, [])})")]);
     }
 
-    // CCIProvider erases by-ref into a PointerType and keeps the distinction only in the parameter kind.
+    // A by-ref parameter's type is a managed PointerType (TypeName renders it T&), as CCI's IsByReference flag is.
     private static string ParameterName(IMethodParameterReference parameter, int depth, IReadOnlyList<string> substitution) =>
-        parameter.Kind != MethodParameterKind.In && parameter.Type is PointerType byRef
-            ? CanonicalName.ByRefTo(TypeName(byRef.TargetType, depth + 1, substitution))
-            : TypeName(parameter.Type, depth + 1, substitution);
+        Substituted(parameter.Type, depth + 1, substitution);
+
+    // Substitution composes two types each within CCIProvider.TypeSize's bound into one that need not be (2,048 !0 leaves,
+    // each a 51K-char argument), and CCI marks such a type oversized, so it could never match: past MaxSubstitutedChars,
+    // measured on the unsubstituted rendering before anything is built, it is <unknown> and the site resolves Unresolved.
+    private static string Substituted(IType? type, int depth, IReadOnlyList<string> substitution)
+    {
+        if (substitution.Count == 0)
+            return TypeName(type, depth, substitution);
+        var raw = TypeName(type, depth, []);
+        var grown = typeParameter.Matches(raw).Sum(m =>
+            int.TryParse(m.Groups[1].ValueSpan, out var n) && n < substitution.Count ? (long)substitution[n].Length - m.Length : 0L);
+        return raw.Length + grown > MaxSubstitutedChars ? CanonicalName.UnknownPart : TypeName(type, depth, substitution);
+    }
 
     // Case order mirrors CCIProvider.TypeExtractor.ExtractType so both layers classify a reference the same way.
     private static string TypeName(IType? type, int depth, IReadOnlyList<string> substitution) =>
@@ -159,6 +171,7 @@ public static class ModelNames
         : type switch
         {
             ArrayType array => CanonicalName.ArrayOf(TypeName(array.ElementsType, depth + 1, substitution), (int)array.Rank),
+            PointerType { IsManaged: true } pointer => CanonicalName.ByRefTo(TypeName(pointer.TargetType, depth + 1, substitution)),
             PointerType pointer => CanonicalName.PointerTo(TypeName(pointer.TargetType, depth + 1, substitution)),
             IGenericParameterReference parameter => parameter.Kind == GenericParameterKind.Method
                 ? CanonicalName.MethodGenericParameter(parameter.Index)
@@ -169,6 +182,8 @@ public static class ModelNames
             FunctionPointerType pointer => CanonicalName.FunctionPointer(
                 TypeName(pointer.ReturnType, depth + 1, []),
                 pointer.Parameters.Select(p => ParameterName(p, depth + 1, []))),
+            // Never built past the bound (our fork's TypeExtractor); CciNames renders the same measure.
+            BasicType { Oversized: { } oversized } => CanonicalName.Oversized(oversized.Parts, oversized.Hash),
             IBasicType basic => CanonicalName.GenericInstance(CanonicalName.NodeId(Of(basic)), GenericArguments(basic, depth, substitution)),
             _ => CanonicalName.UnknownPart,
         };
@@ -190,6 +205,9 @@ public static class ModelNames
     // (unknown) - never padded, never guessed.
     private static IReadOnlyList<string>? CumulativeArguments(IBasicType type, int depth)
     {
+        // An oversized instance carries no arguments, but is no definition.
+        if (type is BasicType { Oversized: not null })
+            return null;
         var own = GenericArguments(type, depth, []);
         var missing = type.GenericParameterCount - own.Count;
         if (missing == 0)
@@ -235,5 +253,11 @@ public static class ModelNames
     // Bounds every walk over hostile metadata: nesting chains and type decoration are attacker-controlled, and
     // a stack overflow cannot be caught.
     private const int MaxDepth = 64;
+
+    // The longest substituted rendering built (see Substituted); benign signatures stay far below it.
+    private const long MaxSubstitutedChars = 65_536;
+
+    // A type generic parameter (!n, not !!n) in a rendering; inside a fnptr it is never substituted, so this over-counts.
+    private static readonly Regex typeParameter = new(@"(?<!!)!(\d+)", RegexOptions.CultureInvariant);
     #endregion
 }

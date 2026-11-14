@@ -346,6 +346,6 @@ public static class ReachabilityChild
 
     /// <summary>The opacity kinds <see cref="Reachability"/> treats as unseen sinks (its private <c>unseenKinds</c>; pinned by a test).</summary>
     public static readonly IReadOnlySet<OpacityKind> UnseenOpacityKinds =
-        new HashSet<OpacityKind> { OpacityKind.IndirectCall, OpacityKind.Unresolved, OpacityKind.Ambiguous, OpacityKind.BodyUnreadable };
+        new HashSet<OpacityKind> { OpacityKind.IndirectCall, OpacityKind.Unresolved, OpacityKind.Ambiguous, OpacityKind.BodyUnreadable, OpacityKind.OversizedType };
     #endregion
 }

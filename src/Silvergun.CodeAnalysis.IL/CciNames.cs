@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
+using CCIProvider;
 using Microsoft.Cci;
 
 /// <summary>
@@ -154,10 +155,8 @@ public static class CciNames
         : type switch
         {
             IArrayTypeReference array => CanonicalName.ArrayOf(TypeName(array.ElementType, depth + 1), (int)array.Rank),
-            // Defensive only, and deliberately asymmetric: TypeExtractor maps a managed pointer to a
-            // Model PointerType, so Model would render T*. Unreachable from C# - CCI carries by-ref-ness as a
-            // flag on the parameter (see ParameterName), which both layers agree renders T&. Do not "align"
-            // this with the Model side without a reachable case proving the two disagree in practice.
+            // TypeExtractor maps a managed pointer to a PointerType marked IsManaged (our fork), which ModelNames
+            // renders T& too. A by-ref parameter is CCI's flag instead (see ParameterName).
             IManagedPointerTypeReference pointer => CanonicalName.ByRefTo(TypeName(pointer.TargetType, depth + 1)),
             IPointerTypeReference pointer => CanonicalName.PointerTo(TypeName(pointer.TargetType, depth + 1)),
             IGenericTypeParameterReference parameter => CanonicalName.TypeGenericParameter(TypeParameterIndex(parameter)),
@@ -174,6 +173,9 @@ public static class CciNames
             // remaining CCI reference is a named type and is worth naming. Unreachable divergence - every
             // reference that survives the cases above is an IBasicType on the Model side and takes its named
             // branch, not its default. Do not collapse this to <unknown> to "match" ModelNames.
+            // Measured before it is walked: a TypeSpec DAG's tree doubles per level (CCIProvider.TypeSize).
+            IGenericTypeInstanceReference instance when TypeSize.Parts(instance) is var parts && parts > TypeSize.MaxParts =>
+                CanonicalName.Oversized(parts, TypeSize.Hash(instance)),
             _ => CanonicalName.GenericInstance(CanonicalName.NodeId(Of(type)), GenericArguments(type, depth)),
         };
 

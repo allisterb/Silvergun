@@ -691,6 +691,7 @@ public sealed class ReachabilitySummaryTests
     [InlineData(OpacityKind.Ambiguous, "an ambiguous call")]
     [InlineData(OpacityKind.BodyUnreadable, "an unreadable method body")]
     [InlineData(OpacityKind.NameShadowed, "an opacity site (NameShadowed)")]
+    [InlineData(OpacityKind.OversizedType, "a method whose signature type is too large to name")]
     public void Summary_UnseenSink_NamesEachOpacityKind(OpacityKind kind, string phrase)
     {
         var statement = Assert.Single(StatementsOf(Row(RootClass.TypeInitializer, null, 1, 1, PathOf(true, opacity: kind))));

@@ -102,7 +102,14 @@ public enum OpacityKind
     /// <c>Implements</c>, hand-written IL), which CHA's name match does not follow (decision D3). One per assembly,
     /// sited at <c>[assembly]&lt;Module&gt;</c>, naming the count.
     /// </summary>
-    RenamedImplementation
+    RenamedImplementation,
+
+    /// <summary>
+    /// A signature names a generic instance too large to build or name (<see cref="CanonicalName.Oversized"/>): hostile
+    /// metadata whose type tree doubles per level. Methods that differ only in such types may share a node. Sited at the
+    /// own method (offset 0) or at the call site whose target it is.
+    /// </summary>
+    OversizedType
 }
 
 /// <summary>A method in the graph, keyed by its <see cref="CanonicalName"/> node id.</summary>
@@ -290,7 +297,11 @@ public sealed class MethodGraph
                     nodes[method.NodeId] = existing with { Kind = kind };
             }
             else if (Room(nodes.Count, budget.MaxNodes, "nodes"))
+            {
                 nodes[method.NodeId] = new MethodNode(method.NodeId, CanonicalName.ClassificationKey(method.Identity), kind);
+                if (CanonicalName.HasOversized(method.NodeId))
+                    opacities.Add(new GraphOpacity(method.NodeId, 0, OpacityKind.OversizedType, OversizedDetail));
+            }
         }
 
         public void Walk(MemberIndex index, MemberIndex.IndexedMethod method)
@@ -424,6 +435,8 @@ public sealed class MethodGraph
                     offset,
                     resolution.Kind == ResolutionKind.Ambiguous ? OpacityKind.Ambiguous : OpacityKind.Unresolved,
                     $"{(resolution.Kind == ResolutionKind.Ambiguous ? resolution.NodeId : leaf)}: {resolution.Reason}"));
+            if (CanonicalName.HasOversized(resolution.NodeId))
+                opacities.Add(new GraphOpacity(caller, offset, OpacityKind.OversizedType, OversizedDetail));
             if (shadowed && resolution.Kind == ResolutionKind.External)
                 opacities.Add(new GraphOpacity(caller, offset, OpacityKind.NameShadowed,
                     $"{resolution.NodeId} in {resolution.Assembly} shares its name with an own method{(resolution.Reason is { } reason ? $" ({reason})" : "")}"));
@@ -506,6 +519,7 @@ public sealed class MethodGraph
         private readonly Dictionary<string, MethodNode> nodes = new(StringComparer.Ordinal);
         private readonly List<MethodEdge> edges = [];
         private readonly List<GraphOpacity> opacities = [];
+        private const string OversizedDetail = "a signature type too large to name; methods that differ only in such types may share this node";
         private readonly MemberIndex.DispatchWork dispatchWork = new(budget.MaxDispatchWork);
         private ResolutionCounts resolutions = ResolutionCounts.None;
         private int bodiesRead;
