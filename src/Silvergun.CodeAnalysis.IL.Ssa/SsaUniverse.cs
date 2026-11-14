@@ -47,6 +47,9 @@ internal sealed class SsaUniverse : ModuleResolver
 
     /// <summary>Type-forwarder hops in progress.</summary>
     public Nesting Forwarders { get; }
+
+    /// <summary>The lift in progress's deadline, checked as each type is mapped (<see cref="SsaSession.Lift(Func{MethodIdentity, bool}, CancellationToken)"/>).</summary>
+    public CancellationToken Cancellation { get; set; }
     #endregion
 
     #region Methods

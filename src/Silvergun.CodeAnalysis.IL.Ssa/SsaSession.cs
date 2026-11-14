@@ -98,7 +98,8 @@ public sealed class SsaSession : IDisposable
 
     /// <summary>
     /// Every method with a body, of every assembly that was read, in a fixed order (assembly path, then metadata order):
-    /// verified SSA, or Unknown with the reason. A method with no body is not listed.
+    /// verified SSA, or Unknown with the reason. A method with no body is not listed. In a spent session (see
+    /// <see cref="Lift(Func{MethodIdentity, bool}, CancellationToken)"/>) every method is TimedOut.
     /// </summary>
     public IEnumerable<SsaMethodOutcome> Lift()
     {
@@ -107,7 +108,7 @@ public sealed class SsaSession : IDisposable
         {
             foreach (var method in methods)
             {
-                if (Lift(source, method, CciNames.Of(method)) is { } outcome)
+                if (Lift(source, method, CciNames.Of(method), default) is { } outcome)
                     yield return outcome;
             }
         }
@@ -116,9 +117,13 @@ public sealed class SsaSession : IDisposable
     /// <summary>
     /// The methods <paramref name="select"/> accepts, lifted lazily as <see cref="Lift()"/> would, ordinal by node id and
     /// then in <see cref="Lift()"/>'s order, so all definitions sharing a node id come together. Each body is the caller's
-    /// to drop once read.
+    /// to drop once read. Once <paramref name="cancellation"/> is cancelled, the method being lifted, and each one after,
+    /// is Unknown with <see cref="SsaFailureKind.TimedOut"/>. It is checked as each type is mapped, each instruction
+    /// imported, and between stages; verification and SSA promotion are not interrupted. A cancellation that lands after
+    /// adaptation began may be memoised as a failure inside the adapter, so the session is then spent: every later lift,
+    /// with or without a token, is TimedOut too.
     /// </summary>
-    public IEnumerable<SsaMethodOutcome> Lift(Func<MethodIdentity, bool> select)
+    public IEnumerable<SsaMethodOutcome> Lift(Func<MethodIdentity, bool> select, CancellationToken cancellation = default)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
         var selected = modules
@@ -126,7 +131,7 @@ public sealed class SsaSession : IDisposable
             .Where(c => select(c.Identity))
             .OrderBy(c => CanonicalName.NodeId(c.Identity), StringComparer.Ordinal)
             .ToArray();
-        return Lifted(selected);
+        return Lifted(selected, cancellation);
     }
 
     public void Dispose()
@@ -145,17 +150,17 @@ public sealed class SsaSession : IDisposable
         }
     }
 
-    private IEnumerable<SsaMethodOutcome> Lifted((CciModuleSource Source, IMethodDefinition Method, MethodIdentity Identity)[] selected)
+    private IEnumerable<SsaMethodOutcome> Lifted((CciModuleSource Source, IMethodDefinition Method, MethodIdentity Identity)[] selected, CancellationToken cancellation)
     {
         foreach (var (source, method, identity) in selected)
         {
             ObjectDisposedException.ThrowIf(disposed, this);
-            if (Lift(source, method, identity) is { } outcome)
+            if (Lift(source, method, identity, cancellation) is { } outcome)
                 yield return outcome;
         }
     }
 
-    private SsaMethodOutcome? Lift(CciModuleSource source, IMethodDefinition method, MethodIdentity identity)
+    private SsaMethodOutcome? Lift(CciModuleSource source, IMethodDefinition method, MethodIdentity identity, CancellationToken cancellation)
     {
         var token = method is IMetadataObjectWithToken { TokenValue: var t and not uint.MaxValue } ? t : 0u;
         SsaMethodOutcome Unknown(SsaFailureKind kind, string reason) => new(source.Path, token, identity, new SsaFailure(kind, reason), null);
@@ -170,29 +175,51 @@ public sealed class SsaSession : IDisposable
         if (source.CoreProblem is { } core)
             return Unknown(SsaFailureKind.Adapter, $"Its primitive types cannot be trusted: {core}");
 
+        if (spent)
+            return Unknown(SsaFailureKind.TimedOut, "An earlier lift in this session was cut by its deadline while adapting, so what the session read may be partial");
+
         var stage = SsaFailureKind.Adapter;
+        var adapting = false;
         using var reads = CciAssertions.BeginScope();
+        universe.Cancellation = cancellation;
         try
         {
+            cancellation.ThrowIfCancellationRequested();
+            adapting = true;
             var definition = source.Method(method);
             if (definition.ILBody is null)
                 return Unknown(SsaFailureKind.Adapter, "The body could not be adapted");
             stage = SsaFailureKind.Import;
             var offsets = new Dictionary<Cilica.IR.Instruction, int>(ReferenceEqualityComparer.Instance);
-            var body = ILImporter.ParseCode(definition, offsets);
+            var body = ILImporter.ParseCode(definition, offsets, cancellation);
             stage = SsaFailureKind.Verify;
+            cancellation.ThrowIfCancellationRequested();
             IRVerifier.Verify(body);
             stage = SsaFailureKind.Ssa;
+            cancellation.ThrowIfCancellationRequested();
             PassRunner.Run(new SsaPromotion(), new MethodTransformContext(CompilationOf(definition.Module), body));
             stage = SsaFailureKind.VerifyAfterSsa;
+            cancellation.ThrowIfCancellationRequested();
             IRVerifier.Verify(body);
+            // Verify and promotion load lazily; a cancellation the adapter swallowed there may have truncated what they read.
+            cancellation.ThrowIfCancellationRequested();
             return reads.Count > 0
                 ? Unknown(SsaFailureKind.ReaderAssertion, $"CCI failed {reads.Count} assertion(s) reading what the method needs")
                 : new SsaMethodOutcome(source.Path, token, identity, null, body) { ILOffsets = Surviving(offsets, body) };
         }
+        // Cancelled however it surfaced (Cilica or the adapter may wrap it): the deadline, not the input, stopped it.
+        catch (Exception ex) when (ex is not OutOfMemoryException && cancellation.IsCancellationRequested)
+        {
+            spent |= adapting;
+            return Unknown(SsaFailureKind.TimedOut, $"The lift's deadline passed while it ran ({stage})");
+        }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             return Unknown(Classify(ex, stage), Describe(ex));
+        }
+        finally
+        {
+            universe.Cancellation = default;
         }
     }
 
@@ -252,5 +279,8 @@ public sealed class SsaSession : IDisposable
     private readonly IReadOnlyList<(CciModuleSource Source, IMethodDefinition[] Methods)> modules;
     private readonly Dictionary<ModuleDef, Compilation> compilations = new(ReferenceEqualityComparer.Instance);
     private bool disposed;
+
+    // Set once a lift is cancelled after adaptation began: the adapter's memos may hold the cancellation as a failure.
+    private bool spent;
     #endregion
 }

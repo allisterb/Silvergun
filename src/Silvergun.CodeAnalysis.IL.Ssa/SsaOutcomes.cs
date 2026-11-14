@@ -27,6 +27,8 @@ public enum SsaFailureKind
     Ssa,
     /// <summary>The promoted IR failed <c>IRVerifier</c>.</summary>
     VerifyAfterSsa,
+    /// <summary>The lift's deadline passed while it ran (<see cref="SsaSession.Lift(Func{MethodIdentity, bool}, CancellationToken)"/>).</summary>
+    TimedOut,
 }
 
 /// <summary>The facts about a type outside the folder that only its definition could prove.</summary>

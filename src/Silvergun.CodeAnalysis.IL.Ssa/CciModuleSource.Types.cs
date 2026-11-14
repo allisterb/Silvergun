@@ -21,6 +21,7 @@ internal sealed partial class CciModuleSource
     /// </summary>
     internal TypeDesc MapType(ITypeReference? type, GenericContext ctx, int depth)
     {
+        universe.Cancellation.ThrowIfCancellationRequested();
         if (type is null or Dummy)
             throw new SsaAdapterException("An unreadable type reference");
         if (depth > universe.Bounds.MaxDepth)

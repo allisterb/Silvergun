@@ -257,6 +257,9 @@ internal static class GraphWorkerProcess
             return "it lost assemblies but did not read every site MethodUnknown";
         if (facts.Sites.Any(s => s.Status == SsaSiteStatus.NotRun) && !facts.MethodBudget && !facts.TimeBudget)
             return "it has a NotRun site but no budget was spent";
+        // A lift cut by its deadline cuts the folder by time: its kind never reaches a fact.
+        if (facts.Unknown.Any(u => u.Kind == SsaFailureKind.TimedOut) || facts.Sites.Any(s => s.FailureKind == SsaFailureKind.TimedOut))
+            return "it reports a TimedOut lift as a fact";
         return facts.Sites.Select(s => SiteProblem(s, bounds)).FirstOrDefault(p => p is not null);
     }
 

@@ -24,7 +24,8 @@ public static partial class SsaSinkFacts
     /// <summary>
     /// The facts of <paramref name="sites"/> (as <see cref="SinkSites.Of"/> gives them) over <paramref name="session"/>'s
     /// folder, which must be opened on the files the graph read, bounded by <paramref name="bounds"/> (default
-    /// <see cref="SsaFactBounds.Default"/>), timed by <paramref name="clock"/> (default the system's). Reflection targets
+    /// <see cref="SsaFactBounds.Default"/>), timed by <paramref name="clock"/> (default the system's: its timestamps between
+    /// methods and sites, and a timer of it inside a lift, so a fake clock must fake both). Reflection targets
     /// follow <paramref name="reflection"/> (default <see cref="ReflectionMap.Default"/>) and take their candidates from
     /// <paramref name="members"/> (<see cref="OwnMembers.Of"/> of the same graph; default none). When the session lost an
     /// assembly, any node may have an unread definition in it, so nothing is lifted and every site reads MethodUnknown.
@@ -62,7 +63,11 @@ public static partial class SsaSinkFacts
         // The first node id not read whole when a budget stopped: nodes come in ordinal order, so one before it with no
         // outcome was reached and had no method, and one from it on was not read.
         string? cutAt = null;
-        foreach (var outcome in session.Lift(identity => byNode.ContainsKey(CanonicalName.NodeId(identity))))
+        // The same budget inside a lift, so one crafted method cannot outlast it (SsaFailureKind.TimedOut): a timer of the
+        // same clock. Past a timer's longest due time (about 49.7 days) only the checks between nodes and sites apply.
+        var left = bounds.FolderTime - clock.GetElapsedTime(started);
+        using var deadline = left <= maxTimerDelay ? new CancellationTokenSource(left > TimeSpan.Zero ? left : TimeSpan.FromTicks(1), clock) : new CancellationTokenSource();
+        foreach (var outcome in session.Lift(identity => byNode.ContainsKey(CanonicalName.NodeId(identity)), deadline.Token))
         {
             var nodeId = outcome.NodeId;
             if (nodeId != current)
@@ -77,6 +82,14 @@ public static partial class SsaSinkFacts
                 }
                 current = nodeId;
                 nodes[nodeId] = new NodeState();
+            }
+            if (outcome.Failure is { Kind: SsaFailureKind.TimedOut })
+            {
+                // Cut as the between-site check cuts: this node and every one after it read NotRun.
+                timeBudget = true;
+                cutAt = nodeId;
+                nodes.Remove(nodeId);
+                break;
             }
             tried++;
             var state = nodes[nodeId];
@@ -285,6 +298,11 @@ public static partial class SsaSinkFacts
         }
         return SsaValue.OfDynamic(a.Origin ?? b.Origin ?? SsaDynamicOrigin.Other);
     }
+    #endregion
+
+    #region Fields
+    // A timer's longest due time (uint.MaxValue - 1 milliseconds).
+    private static readonly TimeSpan maxTimerDelay = TimeSpan.FromMilliseconds(uint.MaxValue - 1d);
     #endregion
 
     #region Child types

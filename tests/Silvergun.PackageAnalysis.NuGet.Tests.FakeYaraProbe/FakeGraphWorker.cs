@@ -61,7 +61,8 @@ using Silvergun.PackageAnalysis.NuGet.Yara.Worker;
 /// keeping its values), <c>notrunsite</c> (a NotRun site with no budget flag), <c>longname</c> (a node id past its bound),
 /// <c>targetmember</c> (a Type target with a member), <c>candidatestotal</c> (more candidates than candidatesTotal).
 /// Folder contracts: <c>unknownneg</c> (a failure count of -9), <c>unknowndup</c> (one failure kind twice),
-/// <c>lostanalyzed</c> (assembliesLost 1 with Analyzed sites). Valid controls: <c>unknownok</c> (the first site
+/// <c>lostanalyzed</c> (assembliesLost 1 with Analyzed sites), <c>unknowntimedout</c> (one TimedOut failure count),
+/// <c>sitetimedout</c> (the first site MethodUnknown with kind TimedOut and a reason). Valid controls: <c>unknownok</c> (the first site
 /// MethodUnknown with kind and reason), <c>notrunok</c> (the first site NotRun, methodBudget set). Every <c>null*</c>,
 /// count, value and site modifier needs facts with a site (<c>graph build</c> over a folder with sink sites).</description></item>
 /// <item><term><c>skip [k]</c></term><description>count the next <c>k</c> folders answered without writing anything.</description></item>
@@ -458,6 +459,9 @@ internal static class FakeGraphWorker
                 case "unknownneg": _ = Sites(); facts!["unknown"] = new JsonArray(Failure("Import", -9)); break;
                 case "unknowndup": _ = Sites(); facts!["unknown"] = new JsonArray(Failure("Import", 1), Failure("Import", 2)); break;
                 case "lostanalyzed": Analyzed(); facts!["assembliesLost"] = 1; break;
+                // In-lift deadline, review round 1: a TimedOut lift never reaches a fact, as a count or as a site's kind.
+                case "unknowntimedout": _ = Sites(); facts!["unknown"] = new JsonArray(Failure("TimedOut", 1)); break;
+                case "sitetimedout": Unanalyzed(First(), "MethodUnknown", "TimedOut", "fake: timed out"); break;
                 case "longname": First()["site"]!["nodeId"] = new string('n', Silvergun.CodeAnalysis.IL.Reachability.MaxNameChars + 49); break;
                 case "targetmember": Analyzed()["target"] = Target(new JsonArray(), member: Dynamic()); break;
                 case "candidatestotal":

@@ -689,7 +689,8 @@ public sealed class SsaSinkFactsTests : IClassFixture<SsaSinkFactsFixture>
     }
 
     // C1: the clock is read before each site too. Sites ReadsConstant (one) then TwoSites (two) are read as: the start,
-    // RC's node, RC's site, TS's node, TS's first site, TS's second site; six reads in all.
+    // the time left for the in-lift deadline (FolderTime less the elapsed time, read once before the first lift), RC's
+    // node, RC's site, TS's node, TS's first site, TS's second site; seven reads in all.
     [Fact]
     public void Sites_ClockReadBeforeEachSite()
     {
@@ -697,7 +698,7 @@ public sealed class SsaSinkFactsTests : IClassFixture<SsaSinkFactsFixture>
 
         var facts = Extract(new SsaFactBounds(), clock, MidNodeSites());
 
-        Assert.Equal(6, clock.Reads);
+        Assert.Equal(7, clock.Reads);
         Assert.All(facts.Sites, f => Assert.Equal(SsaSiteStatus.Analyzed, f.Status));
     }
 
@@ -764,10 +765,11 @@ public sealed class SsaSinkFactsTests : IClassFixture<SsaSinkFactsFixture>
     }
 
     // C1: time runs out before TwoSites' second site, after its first was read. The node is dropped whole: both its sites
-    // read NotRun (time), and the earlier node stays Analyzed.
+    // read NotRun (time), and the earlier node stays Analyzed. Reads 5 and 6 are TwoSites' two site checks (see
+    // Sites_ClockReadBeforeEachSite for the order).
     [Theory]
-    [InlineData(4)]
     [InlineData(5)]
+    [InlineData(6)]
     public void Sites_TimeRunsOutMidNode_TheNodeIsDroppedWhole(int jumpAtRead)
     {
         var facts = Extract(new SsaFactBounds { FolderTime = TimeSpan.FromSeconds(1) }, new ScriptedClock(jumpAtRead), MidNodeSites());
@@ -1142,13 +1144,14 @@ public sealed class SsaSinkFactsTests : IClassFixture<SsaSinkFactsFixture>
         return [fixture.SiteOf("ReadsConstant"), .. two];
     }
 
-    // The clock read at which, over all the fixture's sites, the second node is checked: the start (0), the first node's
-    // check (1), then one read per site of the first node, which must lift with one definition.
+    // The clock read at which, over all the fixture's sites, the second node is checked: the start (0), the time left for
+    // the in-lift deadline (1), the first node's check (2), then one read per site of the first node, which must lift with
+    // one definition.
     private int SecondNodeCheck()
     {
         var first = fixture.Sites[0].NodeId;
         Assert.Null(Assert.Single(fixture.Outcomes, o => o.NodeId == first).Failure);
-        return 2 + fixture.Sites.Count(s => s.NodeId == first);
+        return 3 + fixture.Sites.Count(s => s.NodeId == first);
     }
 
     private static string NoCall(MethodEdgeKind kind) => $"no {kind} instruction at this offset in the lifted body";
@@ -1216,14 +1219,61 @@ public sealed class SsaSinkFactsTests : IClassFixture<SsaSinkFactsFixture>
     #endregion
 
     #region Child types
-    // A clock that reads 0 until its read number jumpAtRead (the first read is 0), and an hour from then on.
+    // A clock that reads 0 until its read number jumpAtRead (the first read is 0), and an hour from then on. Its timers
+    // (Extract's in-lift deadline) run on the same script, as Extract's contract asks of a fake clock: one fires on the
+    // read whose time reaches its due time (measured from the time last read when it was created), on the reading thread,
+    // and never by real time.
     private sealed class ScriptedClock(int jumpAtRead) : TimeProvider
     {
         public int Reads { get; private set; }
 
         public override long TimestampFrequency => TimeSpan.TicksPerSecond;
 
-        public override long GetTimestamp() => Reads++ >= jumpAtRead ? TimeSpan.FromHours(1).Ticks : 0;
+        public override long GetTimestamp()
+        {
+            var now = Reads++ >= jumpAtRead ? TimeSpan.FromHours(1).Ticks : 0;
+            foreach (var timer in timers.Where(t => now >= t.DueAt).ToArray())
+                timer.Fire();
+            return now;
+        }
+
+        public override global::System.Threading.ITimer CreateTimer(global::System.Threading.TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            // The time of the last read, without reading (which would shift the script).
+            var now = Reads > 0 && Reads - 1 >= jumpAtRead ? TimeSpan.FromHours(1).Ticks : 0;
+            var timer = new ScriptedTimer(callback, state, dueTime == global::System.Threading.Timeout.InfiniteTimeSpan ? long.MaxValue : now + dueTime.Ticks);
+            timers.Add(timer);
+            return timer;
+        }
+
+        private readonly List<ScriptedTimer> timers = [];
+    }
+
+    // A one-shot timer its clock fires; Change and a period are not scripted (Extract's deadline uses neither).
+    private sealed class ScriptedTimer(System.Threading.TimerCallback callback, object? state, long dueAt) : System.Threading.ITimer
+    {
+        public long DueAt { get; } = dueAt;
+
+        public void Fire()
+        {
+            if (fired || disposed)
+                return;
+            fired = true;
+            callback(state);
+        }
+
+        public bool Change(TimeSpan dueTime, TimeSpan period) => throw new NotSupportedException("The scripted clock does not reschedule timers.");
+
+        public void Dispose() => disposed = true;
+
+        public System.Threading.Tasks.ValueTask DisposeAsync()
+        {
+            Dispose();
+            return System.Threading.Tasks.ValueTask.CompletedTask;
+        }
+
+        private bool fired;
+        private bool disposed;
     }
 
     // Writes only well-formed strings, as the graph worker's record writer does.

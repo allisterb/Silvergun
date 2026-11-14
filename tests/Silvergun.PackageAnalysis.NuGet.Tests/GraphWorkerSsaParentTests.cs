@@ -260,6 +260,9 @@ public sealed class GraphWorkerSsaParentTests : IDisposable
         { "one failure kind twice", ["graph build", "ssa unknowndup"], FolderCounts },
         { "assembliesLost with Analyzed sites", ["graph build", "ssa lostanalyzed"], "it lost assemblies but did not read every site MethodUnknown" },
         { "a NotRun site without a budget flag", ["graph build", "ssa notrunsite"], "it has a NotRun site but no budget was spent" },
+        // In-lift deadline, review round 1: Extract turns a TimedOut lift into its time cut, so the kind is never a fact.
+        { "a TimedOut failure count", ["graph build", "ssa unknowntimedout"], TimedOutFact },
+        { "a MethodUnknown site of kind TimedOut", ["graph build", "ssa sitetimedout"], TimedOutFact },
         { "arguments over MaxArguments", ["graph build", "ssa overargs"], ArgumentCounts },
         { "an ArgumentCount of -7", ["graph build", "ssa argcountneg"], ArgumentCounts },
         { "an Analyzed site with a reason", ["graph build", "ssa analyzedreason"], ArgumentCounts },
@@ -291,6 +294,7 @@ public sealed class GraphWorkerSsaParentTests : IDisposable
     private const string ArgumentCounts = "an Analyzed site carries a reason, or its argument counts are inconsistent";
     private const string MalformedValue = "a site holds a malformed value";
     private const string MalformedTarget = "a site's reflection target is malformed";
+    private const string TimedOutFact = "it reports a TimedOut lift as a fact";
 
     /// <summary>
     /// <c>SsaMismatch</c> and the line checks: an <c>ssa</c> record that is not exactly folder a's fails a's SSA only
