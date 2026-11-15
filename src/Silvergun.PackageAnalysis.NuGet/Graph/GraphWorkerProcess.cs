@@ -10,6 +10,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -288,7 +289,7 @@ internal static class GraphWorkerProcess
     }
 
     // Whether a value breaks SsaValue's contract: one constant, 2 to MaxAlternatives, a parameter index, or an origin, by
-    // kind; constant text bounded and holding nothing the escaper would still escape.
+    // kind; constant text bounded, holding nothing the escaper would still escape, and with no backslash outside an escape.
     private static bool ValueProblem(SsaValue value, GraphWorkerSsaBounds bounds) =>
         value.Kind switch
         {
@@ -297,7 +298,7 @@ internal static class GraphWorkerProcess
             SsaValueKind.Parameter => value.Constants.Count != 0 || value.Parameter is not >= 0 || value.Origin is not null,
             _ => value.Constants.Count != 0 || value.Parameter is not null || value.Origin is null,
         }
-        || value.Constants.Any(c => c.Text.Length > bounds.MaxTextChars + MaxSuffixChars || UntrustedText.Escape(c.Text) != c.Text);
+        || value.Constants.Any(c => c.Text.Length > bounds.MaxTextChars + MaxSuffixChars || UntrustedText.Escape(c.Text) != c.Text || !escapedText.IsMatch(c.Text));
 
     // Whether any list in the facts holds a null element.
     private static bool HasNullElement(SsaFolderFacts facts)
@@ -617,6 +618,10 @@ internal static class GraphWorkerProcess
     // Amendment a5's suffix ("…[+N chars, sha256:<8 hex>]") is at most 40 chars; a name or text may end with one.
     private const int MaxSuffixChars = 48;
     private const int MaxSiteNameChars = Reachability.MaxNameChars + MaxSuffixChars;
+
+    // Text as UntrustedText.EscapeBounded writes it: every backslash starts one of its escapes, so a quote the summary
+    // escapes can never be preceded by a lone backslash that a reader pairs with it (S5 review round 2, N1).
+    private static readonly Regex escapedText = new(@"\A(?:[^\\]|\\(?:\\|[nrt]|x[0-9a-f]{2}|u[0-9a-fA-F]{4}|U[0-9A-F]{8}))*\z", RegexOptions.CultureInvariant);
 
     // A site's reason: fixed text with up to three bounded names (a lost-assemblies reason).
     private const int MaxReasonTextChars = 4 * MaxSiteNameChars;

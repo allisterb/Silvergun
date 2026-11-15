@@ -3,6 +3,7 @@ namespace Silvergun.PackageAnalysis.NuGet.Graph;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json.Serialization;
 
 using Silvergun.CodeAnalysis.IL;
 using Silvergun.PackageAnalysis.NuGet.Yara;
@@ -50,7 +51,8 @@ public sealed record ReachClassVerdict(RootClass Class, int Roots, RootClassVerd
 /// <summary>
 /// One package folder's reachability, as presented. A folder that was not <see cref="FolderOutcome.Analyzed"/> has a
 /// <paramref name="Reason"/> and nothing else. A folder with the same files as an earlier one names it in
-/// <paramref name="SameAs"/> and carries no classes, notes or statements of its own.
+/// <paramref name="SameAs"/> and carries no classes, notes or statements of its own. <paramref name="Ssa"/> is present
+/// exactly when SSA facts were asked for; it never changes anything else here.
 /// </summary>
 public sealed record FolderReachSummary(
     string Folder,
@@ -60,7 +62,8 @@ public sealed record FolderReachSummary(
     string? SameAs,
     IReadOnlyList<ReachClassVerdict> Classes,
     IReadOnlyList<string> Notes,
-    IReadOnlyList<ReachStatement> Statements);
+    IReadOnlyList<ReachStatement> Statements,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] FolderSsaSummary? Ssa = null);
 
 /// <summary>
 /// A <see cref="PackageReachabilityReport"/> projected for a scan report (<c>docs/agent/tasks/reachability-r3.md</c>):
@@ -90,7 +93,7 @@ public sealed record ReachabilitySummary(IReadOnlyList<FolderReachSummary> Folde
                 .Select(t => (t.Folder, t.Index))
                 .ToHashSet();
             return new(
-                [.. folders.Select((f, i) => f.Folder with { Statements = [.. f.Folder.Statements.Where((_, j) => kept.Contains((i, j)))] })],
+                SsaSummary.Capped([.. folders.Select((f, i) => f.Folder with { Statements = [.. f.Folder.Statements.Where((_, j) => kept.Contains((i, j)))] })]),
                 all.Length - kept.Count,
                 folders.All(f => f.Complete));
         }
@@ -107,9 +110,17 @@ public sealed record ReachabilitySummary(IReadOnlyList<FolderReachSummary> Folde
     internal static ReachabilitySummary Failed(string reason) =>
         new([new(string.Empty, PackageItemRole.Other, FolderOutcome.NotRun, Name(reason), null, [], [], [])], 0, false);
 
+    // One folder with its SSA summary, if asked for. SSA never moves Complete (ssa-facts-s5.md D4), and its own failure
+    // costs only its own summary (SsaSummary.Of never throws).
+    private static (FolderReachSummary Folder, bool Complete) Summarize(FolderReachability folder, IReadOnlyDictionary<string, FolderReachability> byName)
+    {
+        var (summary, complete) = SummarizeGraph(folder, byName);
+        return (summary with { Ssa = SsaSummary.Of(folder?.Ssa, copy: summary.SameAs is not null) }, complete);
+    }
+
     // One folder, and whether it is complete. A failure here costs only this folder, which then reads not analysed.
     // `byName` finds a SameAs copy's primary: the copy is summarized in full when its trigger role differs (review C1).
-    private static (FolderReachSummary Folder, bool Complete) Summarize(FolderReachability folder, IReadOnlyDictionary<string, FolderReachability> byName)
+    private static (FolderReachSummary Folder, bool Complete) SummarizeGraph(FolderReachability folder, IReadOnlyDictionary<string, FolderReachability> byName)
     {
         try
         {

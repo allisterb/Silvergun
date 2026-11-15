@@ -104,6 +104,12 @@ internal static class PackageReportRenderer
         {
             ReachabilitySectionRenderer.Write(console, rich, reachability);
             console.WriteLine();
+            // SSA facts (S5, scan-package --ssa): present exactly when asked for, so absent says nothing.
+            if (reachability.Folders.Any(f => f.Ssa is not null))
+            {
+                SsaSectionRenderer.Write(console, rich, reachability);
+                console.WriteLine();
+            }
         }
 
         // Files only: a declared entry never written as a file of its own is not an assembly, so it is listed apart

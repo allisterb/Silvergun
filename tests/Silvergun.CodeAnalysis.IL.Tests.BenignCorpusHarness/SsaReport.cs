@@ -68,6 +68,24 @@ public static class SsaReport
                 problems.Add($"{Clean(package)} {Clean(f.Folder)}: a bound was passed or a string is ill-formed ({o})");
         }
 
+        // S5's presentation (ssa-facts-s5.md, S5.3): additive, Complete untouched, repeatable but where a backstop cut.
+        foreach (var p in packages)
+        {
+            if (p.Presentation is not { } s5)
+                problems.Add($"{Clean(p.Package)}: no S5 presentation was measured");
+            else if (s5.Status != "ok")
+                problems.Add($"{Clean(p.Package)}: S5 presentation {Clean(s5.Status)}");
+            else
+            {
+                if (!s5.Additive)
+                    problems.Add($"{Clean(p.Package)}: the summary with SSA is not the summary without it outside the Ssa objects ({Clean(string.Join("; ", s5.Mismatches))})");
+                if (!s5.CompleteEqual)
+                    problems.Add($"{Clean(p.Package)}: the summary's Complete differs with SSA on");
+                if (s5.Determinism == "differs")
+                    problems.Add($"{Clean(p.Package)}: the repeat's SSA summary differs");
+            }
+        }
+
         var text = new StringBuilder();
         void Line(string line = "") => text.AppendLine(line);
         string N(long n) => n.ToString("N0", CultureInfo.InvariantCulture);
@@ -211,8 +229,56 @@ public static class SsaReport
         Line($"- worker facts against the join child's in-process facts: {Tally(f2.Select(f => f.InProcess))}");
         Line();
 
+        // S5.
+        var shown = packages.Select(p => (p.Package, S5: p.Presentation)).Where(x => x.S5 is { Status: "ok" }).Select(x => (x.Package, S5: x.S5!)).ToArray();
+        Line("## S5 presentation");
+        Line();
+        Line("`ReachabilitySummary.From` of the off, on and repeat passes above, serialized with the report's own JSON options (indented,");
+        Line("enums by name), as scan-package `--json` writes its `Reachability` member (there nested one level deeper, so a few");
+        Line("bytes of indentation more). Section lines are the terminal section's logical lines, estimated from the summary as");
+        Line("`SsaSectionRenderer` writes them (title rule, count line; per listed folder its header, the copy line, its first 10");
+        Line("sites each with its `acts on` line, one `N more site(s) ... in --json` line past them, the summary caps' dropped line,");
+        Line("each gap); a terminal narrower than a line wraps it. Sites listed below are the summary's (`--json`), not the terminal's.");
+        Line();
+        Line($"- packages with a presentation: {N(shown.Length)} of {N(packages.Count)}; not measured or failed: {Tally(packages.Where(p => p.Presentation is not { Status: "ok" }).Select(p => p.Presentation?.Status ?? "none"))}");
+        Line($"- additive (the on summary without its `Ssa` objects is byte for byte the off summary): {N(shown.Count(x => x.S5.Additive))}; mismatches: {N(shown.Count(x => !x.S5.Additive))}; `Complete` differs: {N(shown.Count(x => !x.S5.CompleteEqual))}");
+        Line($"- determinism, the on and repeat summaries' `Ssa` parts: {Tally(shown.Select(x => x.S5.Determinism))}");
+        Line();
+        Line("| Summary bytes per package | Max | p95 | Total |");
+        Line("|---|---:|---:|---:|");
+        Line($"| without SSA | {Stats(shown.Select(x => x.S5.OffBytes))} |");
+        Line($"| with SSA | {Stats(shown.Select(x => x.S5.OnBytes))} |");
+        Line($"| of which the `Ssa` objects | {Stats(shown.Select(x => x.S5.SsaBytes))} |");
+        Line($"| terminal section lines | {Stats(shown.Select(x => (long)x.S5.SectionLines))} |");
+        Line();
+        if (shown.Length > 0)
+        {
+            var mostSites = shown.MaxBy(x => x.S5.SitesListed);
+            var mostLines = shown.MaxBy(x => x.S5.SectionLines);
+            var mostBytes = shown.MaxBy(x => x.S5.OnBytes);
+            Line($"- sites listed: {N(shown.Sum(x => (long)x.S5.SitesListed))} in all, at most {N(mostSites.S5.SitesListed)} in a package ({Clean(mostSites.Package)}); not listed (caps): {N(shown.Sum(x => (long)x.S5.SitesDropped))}");
+            Line($"- largest summary with SSA: {Clean(mostBytes.Package)}; longest section: {Clean(mostLines.Package)}");
+        }
+        Line($"- packages with a folder past the per-folder cap ({SsaSummary.MaxSitesPerFolder}): {N(shown.Count(x => x.S5.FolderCapHits > 0))} ({N(shown.Sum(x => (long)x.S5.FolderCapHits))} folder(s)); past the per-package cap ({N(SsaSummary.MaxSites)}): {N(shown.Count(x => x.S5.PackageCapHit))}");
+        Line($"- folders: {N(shown.Sum(x => (long)x.S5.Folders))}; with SSA {N(shown.Sum(x => (long)x.S5.FoldersWithSsa))}; analysed copies (listed under their primary) {N(shown.Sum(x => (long)x.S5.Copies))}");
+        Line($"- SSA-incomplete folders: {N(shown.Sum(x => (long)x.S5.FoldersIncomplete))}, in {N(shown.Count(x => x.S5.FoldersIncomplete > 0))} package(s); folders by gap kind (a folder may have several): " +
+             string.Join(", ", Merge(shown.Select(x => x.S5.GapKinds)).OrderByDescending(g => g.Value).ThenBy(g => g.Key, StringComparer.Ordinal).Select(g => $"{Clean(g.Key)} {N(g.Value)}")));
+        Line();
+
         var md = stem + ".md";
         PackageReachResult.WriteAtomically(md, text.ToString());
+        PackageReachResult.WriteAtomically(stem + "-presentation.tsv", Tsv(
+            ["package", "status", "additive", "complete_equal", "off_bytes", "on_bytes", "ssa_bytes", "folders", "with_ssa", "copies", "sites_listed", "sites_dropped",
+             "folder_cap_hits", "package_cap_hit", "incomplete", "gap_kinds", "section_lines", "repeat", "mismatches"],
+            packages.Select(p => p.Presentation is not { } s
+                ? [p.Package, "none", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""]
+                : new[]
+                {
+                    p.Package, s.Status, s.Additive ? "yes" : "no", s.CompleteEqual ? "yes" : "no", I(s.OffBytes), I(s.OnBytes), I(s.SsaBytes), I(s.Folders), I(s.FoldersWithSsa),
+                    I(s.Copies), I(s.SitesListed), I(s.SitesDropped), I(s.FolderCapHits), s.PackageCapHit ? "yes" : "no", I(s.FoldersIncomplete),
+                    string.Join(",", s.GapKinds.OrderBy(g => g.Key, StringComparer.Ordinal).Select(g => $"{g.Key}={g.Value}")), I(s.SectionLines), s.Determinism,
+                    string.Join("; ", s.Mismatches),
+                })));
         PackageReachResult.WriteAtomically(stem + "-folders.tsv", Tsv(
             ["package", "folder", "off", "on", "differs", "child", "same_as", "ssa", "repeat", "in_process", "sites","kept", "analyzed", "method_unknown", "not_joined", "not_run", "with_constant", "reflection", "record_chars", "ssa_reason"],
             folders.Select(x => new[]
@@ -237,7 +303,16 @@ public static class SsaReport
         PackageReachResult.WriteAtomically(stem + "-constant-sinks.tsv", Tsv(
             ["capability", "callee", "sites", "packages"],
             constants.Select(c => c.Key.Split('\t')).Zip(constants, (k, c) => new[] { k[0], k[^1], I(c.Sites), I(c.Packages) })));
-        return ([md, stem + "-folders.tsv", stem + "-packages.tsv", stem + "-join-examples.tsv", stem + "-constant-sinks.tsv"], problems.Count);
+        return ([md, stem + "-folders.tsv", stem + "-packages.tsv", stem + "-join-examples.tsv", stem + "-constant-sinks.tsv", stem + "-presentation.tsv"], problems.Count);
+    }
+
+    // "max | p95 | total" of per-package values (p95 by nearest rank).
+    private static string Stats(IEnumerable<long> values)
+    {
+        var sorted = values.Order().ToArray();
+        string N(long n) => n.ToString("N0", CultureInfo.InvariantCulture);
+        return sorted.Length == 0 ? "n/a | n/a | 0"
+            : $"{N(sorted[^1])} | {N(sorted[Math.Max(0, (int)Math.Ceiling(0.95 * sorted.Length) - 1)])} | {N(sorted.Sum())}";
     }
 
     /// <summary>

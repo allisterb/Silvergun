@@ -562,9 +562,9 @@ public sealed class ScriptScanCoverageTests : IClassFixture<PackageFixture>
         public (string? Status, string? Reason, int FindingCount) ScanPackage(string nupkg)
         {
             // Reflection passes every parameter, the optional ones too: (path, resolveReferences, runYara, yaraScanner,
-            // runReachability). The internal overload taking a reachability delegate is not Public, so this stays unique.
+            // runReachability, runSsa). The internal overload taking a reachability delegate is not Public, so this stays unique.
             var scan = Type("PackageScanner").GetMethod("Scan", BindingFlags.Public | BindingFlags.Static)!
-                .Invoke(null, [nupkg, false, false, null, false])!;
+                .Invoke(null, [nupkg, false, false, null, false, false])!;
             Assert.True((bool)Property(scan, "IsSuccess")!, (string?)Property(scan, "Message"));
             var report = Property(scan, "Value")!;
             return (

@@ -1,0 +1,506 @@
+package	folder	off	on	differs	child	same_as	ssa	repeat	in_process	sites	kept	analyzed	method_unknown	not_joined	not_run	with_constant	reflection	record_chars	ssa_reason
+Microsoft.EntityFrameworkCore.Analyzers 10.0.14	analyzers/dotnet/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.Analyzers 5.9.0	analyzers/dotnet/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	120	120	115	5	0	0	18	17	76253	
+Microsoft.CodeAnalysis.Analyzers 5.9.0	analyzers/dotnet/cs/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.Analyzers 5.9.0	analyzers/dotnet/cs/de	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.Analyzers 5.9.0	analyzers/dotnet/cs/es	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.Analyzers 5.9.0	analyzers/dotnet/cs/fr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.Analyzers 5.9.0	analyzers/dotnet/cs/it	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.Analyzers 5.9.0	analyzers/dotnet/cs/ja	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.Analyzers 5.9.0	analyzers/dotnet/cs/ko	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.Analyzers 5.9.0	analyzers/dotnet/cs/pl	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.Analyzers 5.9.0	analyzers/dotnet/cs/pt-BR	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.Analyzers 5.9.0	analyzers/dotnet/cs/ru	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.Analyzers 5.9.0	analyzers/dotnet/cs/tr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.Analyzers 5.9.0	analyzers/dotnet/cs/zh-Hans	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.Analyzers 5.9.0	analyzers/dotnet/cs/zh-Hant	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.Analyzers 5.9.0	analyzers/dotnet/vb	Analyzed	Analyzed		equal		Analyzed	equal	equal	120	120	115	5	0	0	18	17	76253	
+Microsoft.CodeAnalysis.Analyzers 5.9.0	analyzers/dotnet/vb/cs	Analyzed	Analyzed		equal	analyzers/dotnet/cs/cs	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.Analyzers 5.9.0	analyzers/dotnet/vb/de	Analyzed	Analyzed		equal	analyzers/dotnet/cs/de	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.Analyzers 5.9.0	analyzers/dotnet/vb/es	Analyzed	Analyzed		equal	analyzers/dotnet/cs/es	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.Analyzers 5.9.0	analyzers/dotnet/vb/fr	Analyzed	Analyzed		equal	analyzers/dotnet/cs/fr	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.Analyzers 5.9.0	analyzers/dotnet/vb/it	Analyzed	Analyzed		equal	analyzers/dotnet/cs/it	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.Analyzers 5.9.0	analyzers/dotnet/vb/ja	Analyzed	Analyzed		equal	analyzers/dotnet/cs/ja	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.Analyzers 5.9.0	analyzers/dotnet/vb/ko	Analyzed	Analyzed		equal	analyzers/dotnet/cs/ko	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.Analyzers 5.9.0	analyzers/dotnet/vb/pl	Analyzed	Analyzed		equal	analyzers/dotnet/cs/pl	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.Analyzers 5.9.0	analyzers/dotnet/vb/pt-BR	Analyzed	Analyzed		equal	analyzers/dotnet/cs/pt-BR	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.Analyzers 5.9.0	analyzers/dotnet/vb/ru	Analyzed	Analyzed		equal	analyzers/dotnet/cs/ru	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.Analyzers 5.9.0	analyzers/dotnet/vb/tr	Analyzed	Analyzed		equal	analyzers/dotnet/cs/tr	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.Analyzers 5.9.0	analyzers/dotnet/vb/zh-Hans	Analyzed	Analyzed		equal	analyzers/dotnet/cs/zh-Hans	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.Analyzers 5.9.0	analyzers/dotnet/vb/zh-Hant	Analyzed	Analyzed		equal	analyzers/dotnet/cs/zh-Hant	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+xunit.analyzers 2.2.0	analyzers/dotnet/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	4	4	4	0	0	0	0	0	2553	
+Microsoft.AspNetCore.Components.Analyzers 10.0.14	analyzers/dotnet/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+StyleCop.Analyzers 1.1.118	analyzers/dotnet/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	10	10	9	1	0	0	2	4	6361	
+StyleCop.Analyzers 1.1.118	analyzers/dotnet/cs/de-DE	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+StyleCop.Analyzers 1.1.118	analyzers/dotnet/cs/en-GB	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+StyleCop.Analyzers 1.1.118	analyzers/dotnet/cs/es-MX	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+StyleCop.Analyzers 1.1.118	analyzers/dotnet/cs/fr-FR	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+StyleCop.Analyzers 1.1.118	analyzers/dotnet/cs/pl-PL	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+StyleCop.Analyzers 1.1.118	analyzers/dotnet/cs/pt-BR	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+StyleCop.Analyzers 1.1.118	analyzers/dotnet/cs/ru-RU	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+coverlet.msbuild 10.1.0	tasks/net10.0	Analyzed	Analyzed		equal		Analyzed	equal	equal	1405	1405	1401	4	0	0	112	11	914376	
+coverlet.msbuild 10.1.0	tasks/net10.0/runtimes/win/lib/net10.0	Analyzed	Analyzed		equal		Analyzed	equal	equal	1407	1407	1407	0	0	0	95	0	917788	
+coverlet.msbuild 10.1.0	tasks/net8.0	Analyzed	Analyzed		equal		Analyzed	equal	equal	2011	2011	2007	4	0	0	158	12	1300457	
+coverlet.msbuild 10.1.0	tasks/net8.0/runtimes/win/lib/net8.0	Analyzed	Analyzed		equal		Analyzed	equal	equal	1411	1411	1383	28	0	0	95	0	921359	
+coverlet.msbuild 10.1.0	tasks/net9.0	Analyzed	Analyzed		equal		Analyzed	equal	equal	1927	1927	1923	4	0	0	156	12	1240804	
+coverlet.msbuild 10.1.0	tasks/net9.0/runtimes/win/lib/net9.0	Analyzed	Analyzed		equal		Analyzed	equal	equal	1407	1407	1379	28	0	0	95	0	918427	
+coverlet.msbuild 10.1.0	tasks/netstandard2.0	Analyzed	Analyzed		equal		Analyzed	equal	equal	1552	1552	1548	4	0	0	164	38	970202	
+Microsoft.AspNetCore.Razor.Design 2.3.13	tasks/net46	Analyzed	Analyzed		equal		Analyzed	equal	equal	43	43	37	6	0	0	14	0	24561	
+Microsoft.AspNetCore.Razor.Design 2.3.13	tasks/netstandard2.0	Analyzed	Analyzed		equal	tasks/net46	Analyzed	equal	equal	43	43	37	6	0	0	14	0	24561	
+Microsoft.AspNetCore.Razor.Design 2.3.13	tools	Analyzed	Analyzed		equal		Analyzed	equal	equal	478	478	478	0	0	0	82	62	284812	
+Microsoft.AspNetCore.Razor.Design 2.3.13	tools/runtimes/unix/lib/netstandard1.3	Analyzed	Analyzed		equal		Analyzed	equal	equal	6	6	6	0	0	0	0	0	3123	
+Microsoft.AspNetCore.Razor.Design 2.3.13	tools/runtimes/win/lib/netstandard1.3	Analyzed	Analyzed		equal		Analyzed	equal	equal	7	7	7	0	0	0	1	0	3801	
+Microsoft.Azure.WebJobs.Script.ExtensionsMetadataGenerator 4.0.1	tools/net46	Analyzed	Analyzed		equal		Analyzed	equal	equal	36	36	14	22	0	0	1	1	19826	
+Microsoft.Azure.WebJobs.Script.ExtensionsMetadataGenerator 4.0.1	tools/netstandard2.0	Analyzed	Analyzed		equal		Analyzed	equal	equal	650	650	650	0	0	0	104	31	377894	
+Microsoft.Azure.WebJobs.Script.ExtensionsMetadataGenerator 4.0.1	tools/netstandard2.0/generator	Analyzed	Analyzed		equal		Analyzed	equal	equal	102	102	102	0	0	0	32	5	60476	
+NUnit.Analyzers 4.15.0	analyzers/dotnet/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	2	2	1	1	0	0	0	1	1666	
+Microsoft.NET.ILLink.Tasks 10.0.14	analyzers/dotnet/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	10	10	7	3	0	0	0	4	6005	
+Microsoft.NET.ILLink.Tasks 10.0.14	tools/net	Analyzed	Analyzed		equal		Analyzed	equal	equal	173	173	165	8	0	0	45	14	97782	
+Microsoft.NET.ILLink.Tasks 10.0.14	tools/netframework	Analyzed	Analyzed		equal		Analyzed	equal	equal	154	154	146	8	0	0	44	5	89932	
+Microsoft.AspNetCore.Mvc.Analyzers 2.3.13	analyzers/dotnet/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Azure.Functions.Analyzers 1.0.0	analyzers/dotnet/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.VisualStudio.Threading.Analyzers 18.12.1	analyzers/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.VisualStudio.Threading.Analyzers 18.12.1	analyzers/cs/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.VisualStudio.Threading.Analyzers 18.12.1	analyzers/cs/de	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.VisualStudio.Threading.Analyzers 18.12.1	analyzers/cs/es	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.VisualStudio.Threading.Analyzers 18.12.1	analyzers/cs/fr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.VisualStudio.Threading.Analyzers 18.12.1	analyzers/cs/it	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.VisualStudio.Threading.Analyzers 18.12.1	analyzers/cs/ja	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.VisualStudio.Threading.Analyzers 18.12.1	analyzers/cs/ko	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.VisualStudio.Threading.Analyzers 18.12.1	analyzers/cs/pl	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.VisualStudio.Threading.Analyzers 18.12.1	analyzers/cs/pt-BR	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.VisualStudio.Threading.Analyzers 18.12.1	analyzers/cs/ru	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.VisualStudio.Threading.Analyzers 18.12.1	analyzers/cs/tr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.VisualStudio.Threading.Analyzers 18.12.1	analyzers/cs/zh-Hans	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.VisualStudio.Threading.Analyzers 18.12.1	analyzers/cs/zh-Hant	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.VisualStudio.Threading.Analyzers 18.12.1	analyzers/vb	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.VisualStudio.Threading.Analyzers 18.12.1	analyzers/vb/cs	Analyzed	Analyzed		equal	analyzers/cs/cs	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.VisualStudio.Threading.Analyzers 18.12.1	analyzers/vb/de	Analyzed	Analyzed		equal	analyzers/cs/de	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.VisualStudio.Threading.Analyzers 18.12.1	analyzers/vb/es	Analyzed	Analyzed		equal	analyzers/cs/es	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.VisualStudio.Threading.Analyzers 18.12.1	analyzers/vb/fr	Analyzed	Analyzed		equal	analyzers/cs/fr	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.VisualStudio.Threading.Analyzers 18.12.1	analyzers/vb/it	Analyzed	Analyzed		equal	analyzers/cs/it	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.VisualStudio.Threading.Analyzers 18.12.1	analyzers/vb/ja	Analyzed	Analyzed		equal	analyzers/cs/ja	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.VisualStudio.Threading.Analyzers 18.12.1	analyzers/vb/ko	Analyzed	Analyzed		equal	analyzers/cs/ko	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.VisualStudio.Threading.Analyzers 18.12.1	analyzers/vb/pl	Analyzed	Analyzed		equal	analyzers/cs/pl	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.VisualStudio.Threading.Analyzers 18.12.1	analyzers/vb/pt-BR	Analyzed	Analyzed		equal	analyzers/cs/pt-BR	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.VisualStudio.Threading.Analyzers 18.12.1	analyzers/vb/ru	Analyzed	Analyzed		equal	analyzers/cs/ru	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.VisualStudio.Threading.Analyzers 18.12.1	analyzers/vb/tr	Analyzed	Analyzed		equal	analyzers/cs/tr	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.VisualStudio.Threading.Analyzers 18.12.1	analyzers/vb/zh-Hans	Analyzed	Analyzed		equal	analyzers/cs/zh-Hans	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.VisualStudio.Threading.Analyzers 18.12.1	analyzers/vb/zh-Hant	Analyzed	Analyzed		equal	analyzers/cs/zh-Hant	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Build.Tasks.Git 10.0.403	tools/net	Analyzed	Analyzed		equal		Analyzed	equal	equal	66	66	66	0	0	0	2	0	36202	
+Microsoft.Build.Tasks.Git 10.0.403	tools/net/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Build.Tasks.Git 10.0.403	tools/net/de	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Build.Tasks.Git 10.0.403	tools/net/es	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Build.Tasks.Git 10.0.403	tools/net/fr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Build.Tasks.Git 10.0.403	tools/net/it	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Build.Tasks.Git 10.0.403	tools/net/ja	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Build.Tasks.Git 10.0.403	tools/net/ko	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Build.Tasks.Git 10.0.403	tools/net/pl	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Build.Tasks.Git 10.0.403	tools/net/pt-BR	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Build.Tasks.Git 10.0.403	tools/net/ru	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Build.Tasks.Git 10.0.403	tools/net/tr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Build.Tasks.Git 10.0.403	tools/net/zh-Hans	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Build.Tasks.Git 10.0.403	tools/net/zh-Hant	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Build.Tasks.Git 10.0.403	tools/netframework	Analyzed	Analyzed		equal		Analyzed	equal	equal	47	47	47	0	0	0	6	0	23023	
+Microsoft.Build.Tasks.Git 10.0.403	tools/netframework/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Build.Tasks.Git 10.0.403	tools/netframework/de	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Build.Tasks.Git 10.0.403	tools/netframework/es	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Build.Tasks.Git 10.0.403	tools/netframework/fr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Build.Tasks.Git 10.0.403	tools/netframework/it	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Build.Tasks.Git 10.0.403	tools/netframework/ja	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Build.Tasks.Git 10.0.403	tools/netframework/ko	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Build.Tasks.Git 10.0.403	tools/netframework/pl	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Build.Tasks.Git 10.0.403	tools/netframework/pt-BR	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Build.Tasks.Git 10.0.403	tools/netframework/ru	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Build.Tasks.Git 10.0.403	tools/netframework/tr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Build.Tasks.Git 10.0.403	tools/netframework/zh-Hans	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Build.Tasks.Git 10.0.403	tools/netframework/zh-Hant	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+StyleCop.Analyzers.Unstable 1.2.0.556	analyzers/dotnet/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	27	27	16	11	0	0	2	4	15323	
+StyleCop.Analyzers.Unstable 1.2.0.556	analyzers/dotnet/cs/de-DE	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+StyleCop.Analyzers.Unstable 1.2.0.556	analyzers/dotnet/cs/en-GB	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+StyleCop.Analyzers.Unstable 1.2.0.556	analyzers/dotnet/cs/es-MX	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+StyleCop.Analyzers.Unstable 1.2.0.556	analyzers/dotnet/cs/fr-FR	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+StyleCop.Analyzers.Unstable 1.2.0.556	analyzers/dotnet/cs/pl-PL	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+StyleCop.Analyzers.Unstable 1.2.0.556	analyzers/dotnet/cs/pt-BR	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+StyleCop.Analyzers.Unstable 1.2.0.556	analyzers/dotnet/cs/ru-RU	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.Common 10.0.403	tools/net	Analyzed	Analyzed		equal		Analyzed	equal	equal	4	4	0	4	0	0	0	0	2184	
+Microsoft.SourceLink.Common 10.0.403	tools/net/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.Common 10.0.403	tools/net/de	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.Common 10.0.403	tools/net/es	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.Common 10.0.403	tools/net/fr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.Common 10.0.403	tools/net/it	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.Common 10.0.403	tools/net/ja	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.Common 10.0.403	tools/net/ko	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.Common 10.0.403	tools/net/pl	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.Common 10.0.403	tools/net/pt-BR	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.Common 10.0.403	tools/net/ru	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.Common 10.0.403	tools/net/tr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.Common 10.0.403	tools/net/zh-Hans	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.Common 10.0.403	tools/net/zh-Hant	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.Common 10.0.403	tools/netframework	Analyzed	Analyzed		equal		Analyzed	equal	equal	4	4	0	4	0	0	0	0	2184	
+Microsoft.SourceLink.Common 10.0.403	tools/netframework/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.Common 10.0.403	tools/netframework/de	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.Common 10.0.403	tools/netframework/es	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.Common 10.0.403	tools/netframework/fr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.Common 10.0.403	tools/netframework/it	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.Common 10.0.403	tools/netframework/ja	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.Common 10.0.403	tools/netframework/ko	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.Common 10.0.403	tools/netframework/pl	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.Common 10.0.403	tools/netframework/pt-BR	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.Common 10.0.403	tools/netframework/ru	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.Common 10.0.403	tools/netframework/tr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.Common 10.0.403	tools/netframework/zh-Hans	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.Common 10.0.403	tools/netframework/zh-Hant	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Net.Compilers 4.2.0	tools	Analyzed	Analyzed		equal		Analyzed	equal	equal	513	513	486	27	0	0	96	43	318441	
+Microsoft.Net.Compilers 4.2.0	tools/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Net.Compilers 4.2.0	tools/de	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Net.Compilers 4.2.0	tools/es	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Net.Compilers 4.2.0	tools/fr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Net.Compilers 4.2.0	tools/it	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Net.Compilers 4.2.0	tools/ja	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Net.Compilers 4.2.0	tools/ko	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Net.Compilers 4.2.0	tools/pl	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Net.Compilers 4.2.0	tools/pt-BR	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Net.Compilers 4.2.0	tools/ru	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Net.Compilers 4.2.0	tools/tr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Net.Compilers 4.2.0	tools/zh-Hans	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Net.Compilers 4.2.0	tools/zh-Hant	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+dotnet-reportgenerator-globaltool 5.5.12	tools/net10.0/any	Analyzed	Analyzed		equal		Analyzed	equal	equal	419	419	419	0	0	0	67	23	233619	
+dotnet-reportgenerator-globaltool 5.5.12	tools/net8.0/any	Analyzed	Analyzed		equal		Analyzed	equal	equal	557	557	557	0	0	0	89	49	330079	
+dotnet-reportgenerator-globaltool 5.5.12	tools/net8.0/any/runtimes/browser/lib/net8.0	Analyzed	Analyzed		equal		Analyzed	equal	equal	2	2	2	0	0	0	0	0	1352	
+dotnet-reportgenerator-globaltool 5.5.12	tools/net9.0/any	Analyzed	Analyzed		equal		Analyzed	equal	equal	556	556	556	0	0	0	89	49	329631	
+dotnet-reportgenerator-globaltool 5.5.12	tools/net9.0/any/runtimes/browser/lib/net8.0	Analyzed	Analyzed		equal	tools/net8.0/any/runtimes/browser/lib/net8.0	Analyzed	equal	equal	2	2	2	0	0	0	0	0	1352	
+dotnet-reportgenerator-globaltool 5.5.12	tools/net9.0/any/runtimes/win/lib/net9.0	Analyzed	Analyzed		equal		Analyzed	equal	equal	2	2	2	0	0	0	0	0	1352	
+SonarAnalyzer.CSharp 10.35.0.4138	analyzers	Analyzed	Analyzed		equal		Analyzed	equal	equal	57	57	54	3	0	0	9	26	39119	
+Microsoft.Azure.Functions.Worker.Sdk.Generators 1.4.0	analyzers/dotnet/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	112	112	112	0	0	0	16	26	76228	
+NSwag.MSBuild 14.7.1	tools/Net100	Analyzed	Analyzed		equal		Analyzed	equal	equal	1819	1819	1815	4	0	0	1402	148	1561098	
+NSwag.MSBuild 14.7.1	tools/Net80	Analyzed	Analyzed		equal		Analyzed	equal	equal	1814	1814	1810	4	0	0	1402	148	1558382	
+NSwag.MSBuild 14.7.1	tools/Net90	Analyzed	Analyzed		equal		Analyzed	equal	equal	1819	1819	1815	4	0	0	1402	148	1561098	
+NSwag.MSBuild 14.7.1	tools/Win	Analyzed	Analyzed		equal		Analyzed	equal	equal	2832	2832	2802	30	0	0	1538	256	2177787	
+Microsoft.Azure.Functions.Worker.Sdk.Analyzers 1.2.2	analyzers/dotnet/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.GitHub 10.0.403	tools/net	Analyzed	Analyzed		equal		Analyzed	equal	equal	35	35	35	0	0	0	0	0	20866	
+Microsoft.SourceLink.GitHub 10.0.403	tools/net/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.GitHub 10.0.403	tools/net/de	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.GitHub 10.0.403	tools/net/es	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.GitHub 10.0.403	tools/net/fr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.GitHub 10.0.403	tools/net/it	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.GitHub 10.0.403	tools/net/ja	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.GitHub 10.0.403	tools/net/ko	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.GitHub 10.0.403	tools/net/pl	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.GitHub 10.0.403	tools/net/pt-BR	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.GitHub 10.0.403	tools/net/ru	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.GitHub 10.0.403	tools/net/tr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.GitHub 10.0.403	tools/net/zh-Hans	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.GitHub 10.0.403	tools/net/zh-Hant	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.GitHub 10.0.403	tools/netframework	Analyzed	Analyzed		equal		Analyzed	equal	equal	16	16	16	0	0	0	4	0	7686	
+Microsoft.SourceLink.GitHub 10.0.403	tools/netframework/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.GitHub 10.0.403	tools/netframework/de	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.GitHub 10.0.403	tools/netframework/es	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.GitHub 10.0.403	tools/netframework/fr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.GitHub 10.0.403	tools/netframework/it	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.GitHub 10.0.403	tools/netframework/ja	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.GitHub 10.0.403	tools/netframework/ko	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.GitHub 10.0.403	tools/netframework/pl	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.GitHub 10.0.403	tools/netframework/pt-BR	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.GitHub 10.0.403	tools/netframework/ru	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.GitHub 10.0.403	tools/netframework/tr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.GitHub 10.0.403	tools/netframework/zh-Hans	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.GitHub 10.0.403	tools/netframework/zh-Hant	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+MessagePackAnalyzer 3.1.12	analyzers/roslyn4.3/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	27	27	27	0	0	0	0	6	16163	
+Microsoft.CodeAnalysis.NetAnalyzers 10.0.403	analyzers/dotnet/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	30	30	19	11	0	0	3	6	19645	
+Microsoft.CodeAnalysis.NetAnalyzers 10.0.403	analyzers/dotnet/cs/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.NetAnalyzers 10.0.403	analyzers/dotnet/cs/de	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.NetAnalyzers 10.0.403	analyzers/dotnet/cs/es	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.NetAnalyzers 10.0.403	analyzers/dotnet/cs/fr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.NetAnalyzers 10.0.403	analyzers/dotnet/cs/it	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.NetAnalyzers 10.0.403	analyzers/dotnet/cs/ja	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.NetAnalyzers 10.0.403	analyzers/dotnet/cs/ko	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.NetAnalyzers 10.0.403	analyzers/dotnet/cs/pl	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.NetAnalyzers 10.0.403	analyzers/dotnet/cs/pt-BR	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.NetAnalyzers 10.0.403	analyzers/dotnet/cs/ru	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.NetAnalyzers 10.0.403	analyzers/dotnet/cs/tr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.NetAnalyzers 10.0.403	analyzers/dotnet/cs/zh-Hans	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.NetAnalyzers 10.0.403	analyzers/dotnet/cs/zh-Hant	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.NetAnalyzers 10.0.403	analyzers/dotnet/vb	Analyzed	Analyzed		equal		Analyzed	equal	equal	31	31	20	11	0	0	3	6	20058	
+Microsoft.CodeAnalysis.NetAnalyzers 10.0.403	analyzers/dotnet/vb/cs	Analyzed	Analyzed		equal	analyzers/dotnet/cs/cs	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.NetAnalyzers 10.0.403	analyzers/dotnet/vb/de	Analyzed	Analyzed		equal	analyzers/dotnet/cs/de	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.NetAnalyzers 10.0.403	analyzers/dotnet/vb/es	Analyzed	Analyzed		equal	analyzers/dotnet/cs/es	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.NetAnalyzers 10.0.403	analyzers/dotnet/vb/fr	Analyzed	Analyzed		equal	analyzers/dotnet/cs/fr	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.NetAnalyzers 10.0.403	analyzers/dotnet/vb/it	Analyzed	Analyzed		equal	analyzers/dotnet/cs/it	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.NetAnalyzers 10.0.403	analyzers/dotnet/vb/ja	Analyzed	Analyzed		equal	analyzers/dotnet/cs/ja	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.NetAnalyzers 10.0.403	analyzers/dotnet/vb/ko	Analyzed	Analyzed		equal	analyzers/dotnet/cs/ko	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.NetAnalyzers 10.0.403	analyzers/dotnet/vb/pl	Analyzed	Analyzed		equal	analyzers/dotnet/cs/pl	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.NetAnalyzers 10.0.403	analyzers/dotnet/vb/pt-BR	Analyzed	Analyzed		equal	analyzers/dotnet/cs/pt-BR	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.NetAnalyzers 10.0.403	analyzers/dotnet/vb/ru	Analyzed	Analyzed		equal	analyzers/dotnet/cs/ru	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.NetAnalyzers 10.0.403	analyzers/dotnet/vb/tr	Analyzed	Analyzed		equal	analyzers/dotnet/cs/tr	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.NetAnalyzers 10.0.403	analyzers/dotnet/vb/zh-Hans	Analyzed	Analyzed		equal	analyzers/dotnet/cs/zh-Hans	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.NetAnalyzers 10.0.403	analyzers/dotnet/vb/zh-Hant	Analyzed	Analyzed		equal	analyzers/dotnet/cs/zh-Hant	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+SpecFlow.Tools.MsBuild.Generation 3.9.74	tasks/net461	Analyzed	Analyzed		equal		Analyzed	equal	equal	2271	2271	2035	236	0	0	494	138	1348834	
+SpecFlow.Tools.MsBuild.Generation 3.9.74	tasks/net5.0	Analyzed	Analyzed		equal		Analyzed	equal	equal	1664	1664	1664	0	0	0	348	173	956599	
+SpecFlow.Tools.MsBuild.Generation 3.9.74	tasks/net6.0	Analyzed	Analyzed		equal		Analyzed	equal	equal	1664	1664	1664	0	0	0	348	173	956601	
+SpecFlow.Tools.MsBuild.Generation 3.9.74	tasks/netcoreapp2.1	Analyzed	Analyzed		equal		Analyzed	equal	equal	1670	1670	1670	0	0	0	348	173	959569	
+MSTest.Analyzers 4.5.2	analyzers/dotnet/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	17	17	13	4	0	0	1	0	9367	
+MSTest.Analyzers 4.5.2	analyzers/dotnet/cs/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+MSTest.Analyzers 4.5.2	analyzers/dotnet/cs/de	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+MSTest.Analyzers 4.5.2	analyzers/dotnet/cs/es	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+MSTest.Analyzers 4.5.2	analyzers/dotnet/cs/fr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+MSTest.Analyzers 4.5.2	analyzers/dotnet/cs/it	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+MSTest.Analyzers 4.5.2	analyzers/dotnet/cs/ja	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+MSTest.Analyzers 4.5.2	analyzers/dotnet/cs/ko	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+MSTest.Analyzers 4.5.2	analyzers/dotnet/cs/pl	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+MSTest.Analyzers 4.5.2	analyzers/dotnet/cs/pt-BR	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+MSTest.Analyzers 4.5.2	analyzers/dotnet/cs/ru	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+MSTest.Analyzers 4.5.2	analyzers/dotnet/cs/tr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+MSTest.Analyzers 4.5.2	analyzers/dotnet/cs/zh-Hans	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+MSTest.Analyzers 4.5.2	analyzers/dotnet/cs/zh-Hant	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+MSTest.Analyzers 4.5.2	analyzers/dotnet/vb	Analyzed	Analyzed		equal		Analyzed	equal	equal	16	16	13	3	0	0	1	0	8816	
+MSTest.Analyzers 4.5.2	analyzers/dotnet/vb/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+MSTest.Analyzers 4.5.2	analyzers/dotnet/vb/de	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+MSTest.Analyzers 4.5.2	analyzers/dotnet/vb/es	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+MSTest.Analyzers 4.5.2	analyzers/dotnet/vb/fr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+MSTest.Analyzers 4.5.2	analyzers/dotnet/vb/it	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+MSTest.Analyzers 4.5.2	analyzers/dotnet/vb/ja	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+MSTest.Analyzers 4.5.2	analyzers/dotnet/vb/ko	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+MSTest.Analyzers 4.5.2	analyzers/dotnet/vb/pl	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+MSTest.Analyzers 4.5.2	analyzers/dotnet/vb/pt-BR	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+MSTest.Analyzers 4.5.2	analyzers/dotnet/vb/ru	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+MSTest.Analyzers 4.5.2	analyzers/dotnet/vb/tr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+MSTest.Analyzers 4.5.2	analyzers/dotnet/vb/zh-Hans	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+MSTest.Analyzers 4.5.2	analyzers/dotnet/vb/zh-Hant	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+dotnet-sonarscanner 12.1.0	tools/netcoreapp3.1/any	Analyzed	Analyzed		equal		Analyzed	equal	equal	604	604	600	4	0	0	117	57	356204	
+Microsoft.CodeQuality.Analyzers 3.3.2	analyzers/dotnet/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	26	26	18	8	0	0	1	7	16840	
+Microsoft.CodeQuality.Analyzers 3.3.2	analyzers/dotnet/cs/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeQuality.Analyzers 3.3.2	analyzers/dotnet/cs/de	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeQuality.Analyzers 3.3.2	analyzers/dotnet/cs/es	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeQuality.Analyzers 3.3.2	analyzers/dotnet/cs/fr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeQuality.Analyzers 3.3.2	analyzers/dotnet/cs/it	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeQuality.Analyzers 3.3.2	analyzers/dotnet/cs/ja	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeQuality.Analyzers 3.3.2	analyzers/dotnet/cs/ko	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeQuality.Analyzers 3.3.2	analyzers/dotnet/cs/pl	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeQuality.Analyzers 3.3.2	analyzers/dotnet/cs/pt-BR	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeQuality.Analyzers 3.3.2	analyzers/dotnet/cs/ru	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeQuality.Analyzers 3.3.2	analyzers/dotnet/cs/tr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeQuality.Analyzers 3.3.2	analyzers/dotnet/cs/zh-Hans	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeQuality.Analyzers 3.3.2	analyzers/dotnet/cs/zh-Hant	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeQuality.Analyzers 3.3.2	analyzers/dotnet/vb	Analyzed	Analyzed		equal		Analyzed	equal	equal	27	27	19	8	0	0	1	7	17253	
+Microsoft.CodeQuality.Analyzers 3.3.2	analyzers/dotnet/vb/cs	Analyzed	Analyzed		equal	analyzers/dotnet/cs/cs	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeQuality.Analyzers 3.3.2	analyzers/dotnet/vb/de	Analyzed	Analyzed		equal	analyzers/dotnet/cs/de	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeQuality.Analyzers 3.3.2	analyzers/dotnet/vb/es	Analyzed	Analyzed		equal	analyzers/dotnet/cs/es	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeQuality.Analyzers 3.3.2	analyzers/dotnet/vb/fr	Analyzed	Analyzed		equal	analyzers/dotnet/cs/fr	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeQuality.Analyzers 3.3.2	analyzers/dotnet/vb/it	Analyzed	Analyzed		equal	analyzers/dotnet/cs/it	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeQuality.Analyzers 3.3.2	analyzers/dotnet/vb/ja	Analyzed	Analyzed		equal	analyzers/dotnet/cs/ja	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeQuality.Analyzers 3.3.2	analyzers/dotnet/vb/ko	Analyzed	Analyzed		equal	analyzers/dotnet/cs/ko	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeQuality.Analyzers 3.3.2	analyzers/dotnet/vb/pl	Analyzed	Analyzed		equal	analyzers/dotnet/cs/pl	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeQuality.Analyzers 3.3.2	analyzers/dotnet/vb/pt-BR	Analyzed	Analyzed		equal	analyzers/dotnet/cs/pt-BR	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeQuality.Analyzers 3.3.2	analyzers/dotnet/vb/ru	Analyzed	Analyzed		equal	analyzers/dotnet/cs/ru	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeQuality.Analyzers 3.3.2	analyzers/dotnet/vb/tr	Analyzed	Analyzed		equal	analyzers/dotnet/cs/tr	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeQuality.Analyzers 3.3.2	analyzers/dotnet/vb/zh-Hans	Analyzed	Analyzed		equal	analyzers/dotnet/cs/zh-Hans	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeQuality.Analyzers 3.3.2	analyzers/dotnet/vb/zh-Hant	Analyzed	Analyzed		equal	analyzers/dotnet/cs/zh-Hant	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetCore.Analyzers 3.3.2	analyzers/dotnet/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	15	15	11	4	0	0	0	4	9744	
+Microsoft.NetCore.Analyzers 3.3.2	analyzers/dotnet/cs/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetCore.Analyzers 3.3.2	analyzers/dotnet/cs/de	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetCore.Analyzers 3.3.2	analyzers/dotnet/cs/es	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetCore.Analyzers 3.3.2	analyzers/dotnet/cs/fr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetCore.Analyzers 3.3.2	analyzers/dotnet/cs/it	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetCore.Analyzers 3.3.2	analyzers/dotnet/cs/ja	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetCore.Analyzers 3.3.2	analyzers/dotnet/cs/ko	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetCore.Analyzers 3.3.2	analyzers/dotnet/cs/pl	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetCore.Analyzers 3.3.2	analyzers/dotnet/cs/pt-BR	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetCore.Analyzers 3.3.2	analyzers/dotnet/cs/ru	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetCore.Analyzers 3.3.2	analyzers/dotnet/cs/tr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetCore.Analyzers 3.3.2	analyzers/dotnet/cs/zh-Hans	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetCore.Analyzers 3.3.2	analyzers/dotnet/cs/zh-Hant	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetCore.Analyzers 3.3.2	analyzers/dotnet/vb	Analyzed	Analyzed		equal		Analyzed	equal	equal	16	16	12	4	0	0	0	4	10158	
+Microsoft.NetCore.Analyzers 3.3.2	analyzers/dotnet/vb/cs	Analyzed	Analyzed		equal	analyzers/dotnet/cs/cs	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetCore.Analyzers 3.3.2	analyzers/dotnet/vb/de	Analyzed	Analyzed		equal	analyzers/dotnet/cs/de	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetCore.Analyzers 3.3.2	analyzers/dotnet/vb/es	Analyzed	Analyzed		equal	analyzers/dotnet/cs/es	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetCore.Analyzers 3.3.2	analyzers/dotnet/vb/fr	Analyzed	Analyzed		equal	analyzers/dotnet/cs/fr	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetCore.Analyzers 3.3.2	analyzers/dotnet/vb/it	Analyzed	Analyzed		equal	analyzers/dotnet/cs/it	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetCore.Analyzers 3.3.2	analyzers/dotnet/vb/ja	Analyzed	Analyzed		equal	analyzers/dotnet/cs/ja	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetCore.Analyzers 3.3.2	analyzers/dotnet/vb/ko	Analyzed	Analyzed		equal	analyzers/dotnet/cs/ko	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetCore.Analyzers 3.3.2	analyzers/dotnet/vb/pl	Analyzed	Analyzed		equal	analyzers/dotnet/cs/pl	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetCore.Analyzers 3.3.2	analyzers/dotnet/vb/pt-BR	Analyzed	Analyzed		equal	analyzers/dotnet/cs/pt-BR	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetCore.Analyzers 3.3.2	analyzers/dotnet/vb/ru	Analyzed	Analyzed		equal	analyzers/dotnet/cs/ru	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetCore.Analyzers 3.3.2	analyzers/dotnet/vb/tr	Analyzed	Analyzed		equal	analyzers/dotnet/cs/tr	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetCore.Analyzers 3.3.2	analyzers/dotnet/vb/zh-Hans	Analyzed	Analyzed		equal	analyzers/dotnet/cs/zh-Hans	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetCore.Analyzers 3.3.2	analyzers/dotnet/vb/zh-Hant	Analyzed	Analyzed		equal	analyzers/dotnet/cs/zh-Hant	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetFramework.Analyzers 3.3.2	analyzers/dotnet/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	15	15	10	5	0	0	0	4	9987	
+Microsoft.NetFramework.Analyzers 3.3.2	analyzers/dotnet/cs/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetFramework.Analyzers 3.3.2	analyzers/dotnet/cs/de	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetFramework.Analyzers 3.3.2	analyzers/dotnet/cs/es	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetFramework.Analyzers 3.3.2	analyzers/dotnet/cs/fr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetFramework.Analyzers 3.3.2	analyzers/dotnet/cs/it	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetFramework.Analyzers 3.3.2	analyzers/dotnet/cs/ja	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetFramework.Analyzers 3.3.2	analyzers/dotnet/cs/ko	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetFramework.Analyzers 3.3.2	analyzers/dotnet/cs/pl	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetFramework.Analyzers 3.3.2	analyzers/dotnet/cs/pt-BR	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetFramework.Analyzers 3.3.2	analyzers/dotnet/cs/ru	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetFramework.Analyzers 3.3.2	analyzers/dotnet/cs/tr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetFramework.Analyzers 3.3.2	analyzers/dotnet/cs/zh-Hans	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetFramework.Analyzers 3.3.2	analyzers/dotnet/cs/zh-Hant	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetFramework.Analyzers 3.3.2	analyzers/dotnet/vb	Analyzed	Analyzed		equal		Analyzed	equal	equal	15	15	10	5	0	0	0	4	9987	
+Microsoft.NetFramework.Analyzers 3.3.2	analyzers/dotnet/vb/cs	Analyzed	Analyzed		equal	analyzers/dotnet/cs/cs	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetFramework.Analyzers 3.3.2	analyzers/dotnet/vb/de	Analyzed	Analyzed		equal	analyzers/dotnet/cs/de	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetFramework.Analyzers 3.3.2	analyzers/dotnet/vb/es	Analyzed	Analyzed		equal	analyzers/dotnet/cs/es	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetFramework.Analyzers 3.3.2	analyzers/dotnet/vb/fr	Analyzed	Analyzed		equal	analyzers/dotnet/cs/fr	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetFramework.Analyzers 3.3.2	analyzers/dotnet/vb/it	Analyzed	Analyzed		equal	analyzers/dotnet/cs/it	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetFramework.Analyzers 3.3.2	analyzers/dotnet/vb/ja	Analyzed	Analyzed		equal	analyzers/dotnet/cs/ja	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetFramework.Analyzers 3.3.2	analyzers/dotnet/vb/ko	Analyzed	Analyzed		equal	analyzers/dotnet/cs/ko	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetFramework.Analyzers 3.3.2	analyzers/dotnet/vb/pl	Analyzed	Analyzed		equal	analyzers/dotnet/cs/pl	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetFramework.Analyzers 3.3.2	analyzers/dotnet/vb/pt-BR	Analyzed	Analyzed		equal	analyzers/dotnet/cs/pt-BR	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetFramework.Analyzers 3.3.2	analyzers/dotnet/vb/ru	Analyzed	Analyzed		equal	analyzers/dotnet/cs/ru	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetFramework.Analyzers 3.3.2	analyzers/dotnet/vb/tr	Analyzed	Analyzed		equal	analyzers/dotnet/cs/tr	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetFramework.Analyzers 3.3.2	analyzers/dotnet/vb/zh-Hans	Analyzed	Analyzed		equal	analyzers/dotnet/cs/zh-Hans	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.NetFramework.Analyzers 3.3.2	analyzers/dotnet/vb/zh-Hant	Analyzed	Analyzed		equal	analyzers/dotnet/cs/zh-Hant	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Roslynator.Analyzers 5.0.1	analyzers/dotnet/roslyn3.8/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	40	40	31	9	0	0	5	1	22141	
+Roslynator.Analyzers 5.0.1	analyzers/dotnet/roslyn4.7/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	40	40	31	9	0	0	5	1	22141	
+Roslynator.Analyzers 5.0.1	analyzers/dotnet/roslyn5.0/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	40	40	31	9	0	0	5	1	22141	
+ReportGenerator 5.5.12	tools/net10.0	Analyzed	Analyzed		equal		Analyzed	equal	equal	440	440	438	2	0	0	68	23	244493	
+ReportGenerator 5.5.12	tools/net47	Analyzed	Analyzed		equal		Analyzed	equal	equal	610	610	578	32	0	0	94	55	363473	
+ReportGenerator 5.5.12	tools/net8.0	Analyzed	Analyzed		equal		Analyzed	equal	equal	578	578	576	2	0	0	90	49	340953	
+ReportGenerator 5.5.12	tools/net8.0/runtimes/browser/lib/net8.0	Analyzed	Analyzed		equal		Analyzed	equal	equal	2	2	2	0	0	0	0	0	1352	
+ReportGenerator 5.5.12	tools/net9.0	Analyzed	Analyzed		equal		Analyzed	equal	equal	577	577	575	2	0	0	90	49	340505	
+ReportGenerator 5.5.12	tools/net9.0/runtimes/browser/lib/net8.0	Analyzed	Analyzed		equal	tools/net8.0/runtimes/browser/lib/net8.0	Analyzed	equal	equal	2	2	2	0	0	0	0	0	1352	
+ReportGenerator 5.5.12	tools/net9.0/runtimes/win/lib/net9.0	Analyzed	Analyzed		equal		Analyzed	equal	equal	2	2	2	0	0	0	0	0	1352	
+Microsoft.CodeAnalysis.VersionCheckAnalyzer 3.3.2	analyzers/dotnet	Analyzed	Analyzed		equal		Analyzed	equal	equal	3	3	0	3	0	0	0	0	2209	
+Microsoft.CodeAnalysis.VersionCheckAnalyzer 3.3.2	analyzers/dotnet/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.VersionCheckAnalyzer 3.3.2	analyzers/dotnet/de	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.VersionCheckAnalyzer 3.3.2	analyzers/dotnet/es	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.VersionCheckAnalyzer 3.3.2	analyzers/dotnet/fr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.VersionCheckAnalyzer 3.3.2	analyzers/dotnet/it	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.VersionCheckAnalyzer 3.3.2	analyzers/dotnet/ja	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.VersionCheckAnalyzer 3.3.2	analyzers/dotnet/ko	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.VersionCheckAnalyzer 3.3.2	analyzers/dotnet/pl	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.VersionCheckAnalyzer 3.3.2	analyzers/dotnet/pt-BR	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.VersionCheckAnalyzer 3.3.2	analyzers/dotnet/ru	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.VersionCheckAnalyzer 3.3.2	analyzers/dotnet/tr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.VersionCheckAnalyzer 3.3.2	analyzers/dotnet/zh-Hans	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.VersionCheckAnalyzer 3.3.2	analyzers/dotnet/zh-Hant	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Azure.Functions.Worker.Extensions.Http.AspNetCore.Analyzers 1.0.4	analyzers/dotnet/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.BannedApiAnalyzers 5.6.0	analyzers/dotnet/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	113	113	112	1	0	0	16	17	72280	
+Microsoft.CodeAnalysis.BannedApiAnalyzers 5.6.0	analyzers/dotnet/cs/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.BannedApiAnalyzers 5.6.0	analyzers/dotnet/cs/de	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.BannedApiAnalyzers 5.6.0	analyzers/dotnet/cs/es	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.BannedApiAnalyzers 5.6.0	analyzers/dotnet/cs/fr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.BannedApiAnalyzers 5.6.0	analyzers/dotnet/cs/it	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.BannedApiAnalyzers 5.6.0	analyzers/dotnet/cs/ja	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.BannedApiAnalyzers 5.6.0	analyzers/dotnet/cs/ko	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.BannedApiAnalyzers 5.6.0	analyzers/dotnet/cs/pl	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.BannedApiAnalyzers 5.6.0	analyzers/dotnet/cs/pt-BR	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.BannedApiAnalyzers 5.6.0	analyzers/dotnet/cs/ru	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.BannedApiAnalyzers 5.6.0	analyzers/dotnet/cs/tr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.BannedApiAnalyzers 5.6.0	analyzers/dotnet/cs/zh-Hans	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.BannedApiAnalyzers 5.6.0	analyzers/dotnet/cs/zh-Hant	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.BannedApiAnalyzers 5.6.0	analyzers/dotnet/vb	Analyzed	Analyzed		equal		Analyzed	equal	equal	113	113	112	1	0	0	16	17	72280	
+Microsoft.CodeAnalysis.BannedApiAnalyzers 5.6.0	analyzers/dotnet/vb/cs	Analyzed	Analyzed		equal	analyzers/dotnet/cs/cs	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.BannedApiAnalyzers 5.6.0	analyzers/dotnet/vb/de	Analyzed	Analyzed		equal	analyzers/dotnet/cs/de	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.BannedApiAnalyzers 5.6.0	analyzers/dotnet/vb/es	Analyzed	Analyzed		equal	analyzers/dotnet/cs/es	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.BannedApiAnalyzers 5.6.0	analyzers/dotnet/vb/fr	Analyzed	Analyzed		equal	analyzers/dotnet/cs/fr	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.BannedApiAnalyzers 5.6.0	analyzers/dotnet/vb/it	Analyzed	Analyzed		equal	analyzers/dotnet/cs/it	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.BannedApiAnalyzers 5.6.0	analyzers/dotnet/vb/ja	Analyzed	Analyzed		equal	analyzers/dotnet/cs/ja	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.BannedApiAnalyzers 5.6.0	analyzers/dotnet/vb/ko	Analyzed	Analyzed		equal	analyzers/dotnet/cs/ko	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.BannedApiAnalyzers 5.6.0	analyzers/dotnet/vb/pl	Analyzed	Analyzed		equal	analyzers/dotnet/cs/pl	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.BannedApiAnalyzers 5.6.0	analyzers/dotnet/vb/pt-BR	Analyzed	Analyzed		equal	analyzers/dotnet/cs/pt-BR	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.BannedApiAnalyzers 5.6.0	analyzers/dotnet/vb/ru	Analyzed	Analyzed		equal	analyzers/dotnet/cs/ru	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.BannedApiAnalyzers 5.6.0	analyzers/dotnet/vb/tr	Analyzed	Analyzed		equal	analyzers/dotnet/cs/tr	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.BannedApiAnalyzers 5.6.0	analyzers/dotnet/vb/zh-Hans	Analyzed	Analyzed		equal	analyzers/dotnet/cs/zh-Hans	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.CodeAnalysis.BannedApiAnalyzers 5.6.0	analyzers/dotnet/vb/zh-Hant	Analyzed	Analyzed		equal	analyzers/dotnet/cs/zh-Hant	Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Extensions.ApiDescription.Client 10.0.14	tasks/netstandard2.0	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+NSubstitute.Analyzers.CSharp 1.0.17	analyzers/dotnet/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	12	12	12	0	0	0	1	12	9658	
+Riok.Mapperly 4.3.1	analyzers/roslyn4.0/dotnet/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	32	32	30	2	0	0	1	2	19645	
+Riok.Mapperly 4.3.1	analyzers/roslyn4.11/dotnet/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	31	31	30	1	0	0	1	2	19034	
+Riok.Mapperly 4.3.1	analyzers/roslyn4.14/dotnet/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	31	31	30	1	0	0	1	2	19034	
+Riok.Mapperly 4.3.1	analyzers/roslyn4.4/dotnet/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	31	31	30	1	0	0	1	2	19034	
+Riok.Mapperly 4.3.1	analyzers/roslyn4.5/dotnet/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	31	31	30	1	0	0	1	2	19034	
+Riok.Mapperly 4.3.1	analyzers/roslyn4.7/dotnet/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	31	31	30	1	0	0	1	2	19034	
+Riok.Mapperly 4.3.1	analyzers/roslyn5.0/dotnet/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	31	31	30	1	0	0	1	2	19034	
+Riok.Mapperly 4.3.1	lib/netstandard2.0	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Azure.WebJobs.Extensions.DurableTask.Analyzers 0.5.0	analyzers/dotnet/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Aspire.Hosting.AppHost 13.6.4	analyzers/dotnet/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Aspire.Hosting.AppHost 13.6.4	lib/net10.0	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Aspire.Hosting.AppHost 13.6.4	lib/net8.0	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Aspire.Hosting.AppHost 13.6.4	lib/net9.0	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Aspire.Hosting.AppHost 13.6.4	tools/net472	Analyzed	Analyzed		equal		Analyzed	equal	equal	69	69	45	24	0	0	15	0	37120	
+Aspire.Hosting.AppHost 13.6.4	tools/net8.0	Analyzed	Analyzed		equal		Analyzed	equal	equal	55	55	31	24	0	0	11	0	29507	
+GraphQL.Analyzers 8.8.5	analyzers/dotnet/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+OpenCover 4.7.1221	build	Analyzed	Analyzed		equal		Analyzed	equal	equal	4	4	0	4	0	0	0	0	2137	
+OpenCover 4.7.1221	tools	Analyzed	Analyzed		equal		Analyzed	equal	equal	962	962	943	19	0	0	204	147	587359	
+OpenCover 4.7.1221	tools/Samples/x64	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+OpenCover 4.7.1221	tools/Samples/x86	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+OpenCover 4.7.1221	tools/x64	NothingLoaded	NothingLoaded		equal		NotRun	n/a	n/a	0	0	0	0	0	0	0	0	0	the folder's graph was not built, so it has no sink sites
+OpenCover 4.7.1221	tools/x86	NothingLoaded	NothingLoaded		equal		NotRun	n/a	n/a	0	0	0	0	0	0	0	0	0	the folder's graph was not built, so it has no sink sites
+Meziantou.Analyzer 3.0.321	analyzers/dotnet/roslyn4.14/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	13	13	10	3	0	0	5	6	9240	
+Meziantou.Analyzer 3.0.321	analyzers/dotnet/roslyn4.8/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	13	13	10	3	0	0	5	6	9240	
+Meziantou.Analyzer 3.0.321	analyzers/dotnet/roslyn5.0/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	13	13	10	3	0	0	5	6	9240	
+Meziantou.Analyzer 3.0.321	analyzers/dotnet/roslyn5.6/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	13	13	10	3	0	0	5	6	9240	
+Meziantou.Analyzer 3.0.321	analyzers/dotnet/roslyn5.9/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	13	13	10	3	0	0	5	6	9240	
+Reqnroll.Tools.MsBuild.Generation 3.3.4	build/net462	Analyzed	Analyzed		equal		Analyzed	equal	equal	412	412	395	17	0	0	72	65	252669	
+Reqnroll.Tools.MsBuild.Generation 3.3.4	build/netstandard2.0	Analyzed	Analyzed		equal		Analyzed	equal	equal	525	525	518	7	0	0	99	84	308446	
+Xamarin.Build.Download 0.11.6	build	Analyzed	Analyzed		equal		Analyzed	equal	equal	208	208	183	25	0	0	63	33	133375	
+Xamarin.Build.Download 0.11.6	buildTransitive	Analyzed	Analyzed		equal		Analyzed	equal	equal	208	208	183	25	0	0	63	33	133375	
+Xamarin.AndroidX.Migration 1.0.10	build/monoandroid120	Analyzed	Analyzed		equal		Analyzed	equal	equal	1081	1081	1059	22	0	0	113	21	604655	
+Xamarin.AndroidX.Migration 1.0.10	buildTransitive/monoandroid120	Analyzed	Analyzed		equal		Analyzed	equal	equal	1081	1081	1059	22	0	0	113	21	604655	
+AsyncFixer 2.1.0	analyzers/dotnet/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0	Analyzed	Analyzed		equal		Analyzed	equal	equal	409	409	373	36	0	0	67	99	268195	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/ar	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/ca	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/da	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/de	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/el	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/es	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/fi	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/fr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/he	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/hi	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/hr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/hu	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/id	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/it	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/ja	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/ko	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/ms	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/nb	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/nl	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/pl	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/pt	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/pt-BR	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/ro	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/ru	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/sk	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/sv	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/th	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/tr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/uk	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/vi	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/zh-HK	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/zh-Hans	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	buildTransitive/netstandard2.0/zh-Hant	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.AzureRepos.Git 10.0.403	tools/net	Analyzed	Analyzed		equal		Analyzed	equal	equal	36	36	36	0	0	0	0	0	21415	
+Microsoft.SourceLink.AzureRepos.Git 10.0.403	tools/net/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.AzureRepos.Git 10.0.403	tools/net/de	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.AzureRepos.Git 10.0.403	tools/net/es	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.AzureRepos.Git 10.0.403	tools/net/fr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.AzureRepos.Git 10.0.403	tools/net/it	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.AzureRepos.Git 10.0.403	tools/net/ja	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.AzureRepos.Git 10.0.403	tools/net/ko	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.AzureRepos.Git 10.0.403	tools/net/pl	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.AzureRepos.Git 10.0.403	tools/net/pt-BR	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.AzureRepos.Git 10.0.403	tools/net/ru	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.AzureRepos.Git 10.0.403	tools/net/tr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.AzureRepos.Git 10.0.403	tools/net/zh-Hans	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.AzureRepos.Git 10.0.403	tools/net/zh-Hant	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.AzureRepos.Git 10.0.403	tools/netframework	Analyzed	Analyzed		equal		Analyzed	equal	equal	17	17	17	0	0	0	4	0	8236	
+Microsoft.SourceLink.AzureRepos.Git 10.0.403	tools/netframework/cs	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.AzureRepos.Git 10.0.403	tools/netframework/de	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.AzureRepos.Git 10.0.403	tools/netframework/es	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.AzureRepos.Git 10.0.403	tools/netframework/fr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.AzureRepos.Git 10.0.403	tools/netframework/it	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.AzureRepos.Git 10.0.403	tools/netframework/ja	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.AzureRepos.Git 10.0.403	tools/netframework/ko	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.AzureRepos.Git 10.0.403	tools/netframework/pl	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.AzureRepos.Git 10.0.403	tools/netframework/pt-BR	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.AzureRepos.Git 10.0.403	tools/netframework/ru	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.AzureRepos.Git 10.0.403	tools/netframework/tr	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.AzureRepos.Git 10.0.403	tools/netframework/zh-Hans	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	
+Microsoft.SourceLink.AzureRepos.Git 10.0.403	tools/netframework/zh-Hant	Analyzed	Analyzed		equal		Analyzed	equal	equal	0	0	0	0	0	0	0	0	154	

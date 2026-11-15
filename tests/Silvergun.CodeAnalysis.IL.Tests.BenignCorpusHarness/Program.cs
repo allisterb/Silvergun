@@ -594,11 +594,14 @@ public static class Program
           result is cached as <results>/<Id>.<Version>.ssa.json and reused (results of another build are refused);
           --max-packages bounds the new ones per invocation, --max-seconds the time after which none is started (so a
           batch fits the guard's timeout). A failed or timed-out result is cached like any other, and reported as a
-          problem; delete it to measure again. Once every entry has a result, writes
-          ssa-facts-<manifest>-<configuration>-<date>.md and its -folders, -packages, -join-examples and -constant-sinks TSVs
-          into --out. Exit 4 after writing them when a problem is found (not additive, the worker's graphs not the
-          child's, not repeatable, a join miss of an unexplained class, a bound or a default budget passed, a pass not
-          finished, no SSA facts at all); 3 when an entry is not cached.
+          problem; delete it to measure again. A result also carries S5's presentation (ssa-facts-s5.md, S5.3: the
+          ReachabilitySummary of each pass, its JSON bytes, sites listed, incomplete folders, section lines); one without
+          it (written before S5.3) is measured again. Once every entry has a result, writes
+          ssa-facts-<manifest>-<configuration>-<date>.md and its -folders, -packages, -join-examples, -constant-sinks and
+          -presentation TSVs into --out. Exit 4 after writing them when a problem is found (not additive, the worker's
+          graphs not the child's, not repeatable, a join miss of an unexplained class, a bound or a default budget passed,
+          a pass not finished, no SSA facts at all, the summary with SSA not the summary without it outside its Ssa
+          objects, its Complete changed, its repeat different); 3 when an entry is not cached.
 
           <harness> r3-measure <nupkg> <out-dir> [--timeout <seconds>]
 

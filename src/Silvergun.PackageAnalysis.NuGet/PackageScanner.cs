@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 
 using Silvergun.CodeAnalysis.IL;
+using Silvergun.CodeAnalysis.IL.Ssa;
 using Silvergun.PackageAnalysis.NuGet.Graph;
 using Silvergun.PackageAnalysis.NuGet.Yara;
 
@@ -23,12 +24,15 @@ public sealed class PackageScanner : Runtime
     /// cleaned up) before returning. Never throws: an open failure propagates as a failure <see cref="Result{T}"/>;
     /// a per-assembly failure is captured as an <see cref="AssemblyScanResult"/> with a <c>SkipReason</c>.
     /// <paramref name="runReachability"/> adds the graph pass (<see cref="PackageReachability"/>, in worker processes
-    /// only) as <see cref="PackageCapabilityReport.Reachability"/>; it gates nothing.
+    /// only) as <see cref="PackageCapabilityReport.Reachability"/>; it gates nothing. <paramref name="runSsa"/> also
+    /// extracts SSA facts at its sink sites (<see cref="FolderReachSummary.Ssa"/>); it has no effect without
+    /// <paramref name="runReachability"/>.
     /// </summary>
-    public static Result<PackageCapabilityReport> Scan(string nupkgPath, bool resolveReferences = true, bool runYara = true, IYaraScanner? yaraScanner = null, bool runReachability = false) =>
-        Scan(nupkgPath, resolveReferences, runYara, yaraScanner, runReachability ? p => PackageReachability.Analyze(p) : null);
+    public static Result<PackageCapabilityReport> Scan(string nupkgPath, bool resolveReferences = true, bool runYara = true, IYaraScanner? yaraScanner = null, bool runReachability = false, bool runSsa = false) =>
+        Scan(nupkgPath, resolveReferences, runYara, yaraScanner,
+            runReachability ? p => PackageReachability.Analyze(p, runSsa ? PackageReachabilityOptions.Default with { Ssa = SsaFactBounds.Default } : null) : null);
 
-    /// <summary><see cref="Scan(string, bool, bool, IYaraScanner?, bool)"/> with the graph pass supplied; null for none.</summary>
+    /// <summary><see cref="Scan(string, bool, bool, IYaraScanner?, bool, bool)"/> with the graph pass supplied; null for none.</summary>
     internal static Result<PackageCapabilityReport> Scan(string nupkgPath, bool resolveReferences, bool runYara, IYaraScanner? yaraScanner, Func<NuGetPackage, PackageReachabilityReport>? reachability)
     {
         var opened = NuGetPackage.Open(nupkgPath);

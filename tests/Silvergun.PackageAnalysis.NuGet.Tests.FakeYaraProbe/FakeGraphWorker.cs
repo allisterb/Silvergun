@@ -55,7 +55,9 @@ using Silvergun.PackageAnalysis.NuGet.Yara.Worker;
 /// the request's bound); <c>negative</c> / <c>negativelost</c> (methodsLifted or assembliesLost -1). Value contracts, on
 /// the first argument of the first Analyzed site that has one: <c>constempty</c> (Constant, no constant), <c>oneofone</c>
 /// (OneOf, one constant), <c>dynnoorigin</c> (Dynamic, no origin), <c>paramneg</c> (Parameter -5), <c>hugeconst</c> (a
-/// 100,000-char constant), <c>controlconst</c> (a raw control char in a constant). Site contracts: <c>argcountneg</c>
+/// 100,000-char constant), <c>controlconst</c> (a raw control char in a constant), <c>textconst &lt;hex&gt;</c> /
+/// <c>typeconst &lt;hex&gt;</c> (a String or Type constant of exactly that text, UTF-16 code units in hex, 4 digits
+/// each). Site contracts: <c>argcountneg</c>
 /// (argumentCount -7), <c>analyzedreason</c> (an Analyzed site with a reason), <c>unknownnokind</c> /
 /// <c>unknownnoreason</c> (MethodUnknown without its failure kind, or its reason), <c>unknownwithargs</c> (MethodUnknown
 /// keeping its values), <c>notrunsite</c> (a NotRun site with no budget flag), <c>longname</c> (a node id past its bound),
@@ -342,6 +344,10 @@ internal static class FakeGraphWorker
 
         private static JsonObject Constant(string text) => new() { ["kind"] = "String", ["text"] = text, ["cut"] = false };
 
+        // Text from UTF-16 code units in hex, 4 digits each ("005c0071" is a backslash and q).
+        private static string Utf16(string hex) =>
+            new([.. Enumerable.Range(0, hex.Length / 4).Select(i => (char)Convert.ToUInt16(hex.Substring(i * 4, 4), 16))]);
+
         private static JsonObject Failure(string kind, int methods) => new() { ["kind"] = kind, ["methods"] = methods };
 
         // A site made non-Analyzed: `status`, its failure kind and reason, and no values.
@@ -443,6 +449,14 @@ internal static class FakeGraphWorker
                 case "paramneg": FirstArgument(Value("Parameter", [], -5, null)); break;
                 case "hugeconst": FirstArgument(Value("Constant", [Constant(new string('x', 100_000))], null, null)); break;
                 case "controlconst": FirstArgument(Value("Constant", [Constant("a" + (char)1 + "b")], null, null)); break;
+                // Review round 2 (N1): a String or Type constant of exactly this text, given as UTF-16 code units in hex (4
+                // digits each), so backslashes, quotes and lone surrogates cross the script verbatim.
+                case "textconst": FirstArgument(Value("Constant", [Constant(Utf16(argument))], null, null)); break;
+                case "typeconst":
+                    var typeName = Constant(Utf16(argument));
+                    typeName["kind"] = "Type";
+                    FirstArgument(Value("Constant", [typeName], null, null));
+                    break;
                 case "argcountneg": Analyzed()["argumentCount"] = -7; break;
                 case "analyzedreason": Analyzed()["reason"] = "fake: a reason on an Analyzed site"; break;
                 case "unknownok": Unanalyzed(First(), "MethodUnknown", "Import", "fake: did not import"); break;

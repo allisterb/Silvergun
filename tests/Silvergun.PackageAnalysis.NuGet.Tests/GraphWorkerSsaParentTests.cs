@@ -348,6 +348,84 @@ public sealed class GraphWorkerSsaParentTests : IDisposable
     }
     #endregion
 
+    #region Methods: constant text is the escaper's own (review round 2, N1)
+    // Text whose backslashes do not each start an EscapeBounded escape: a lone backslash before a quote (which would let
+    // a forged name close its literal in the summary: SsaSummary escapes the quote but trusts the worker's backslashes),
+    // a lone trailing backslash, an unknown escape, a short or ill-cased one. Built from code points; the source holds
+    // no escape of a hostile character.
+    public static TheoryData<string, string, bool> BadlyEscapedConstants() => new()
+    {
+        // what, the constant's text, as a Type constant (else a String)
+        { "a lone backslash before a quote", "T" + Bs + "\"), typeof(\"cmd", false },
+        { "a lone backslash before a quote, in a Type name", "T" + Bs + "\"), typeof(\"cmd", true },
+        { "a lone trailing backslash", "abc" + Bs, false },
+        { "a lone trailing backslash, in a Type name", "abc" + Bs, true },
+        { "an unknown escape", Bs + "q", false },
+        { "a short hex escape at the end", "a" + Bs + "x1", false },
+        { "a short hex escape", Bs + "x1g", false },
+        { "a hex escape of non-hex", Bs + "xZZ", false },
+        { "an upper-case hex escape", Bs + "x1B", false },
+        { "a short BMP escape", Bs + "u20", false },
+        { "a lower-case astral escape", Bs + "U000e0041", true },
+        { "an odd run of backslashes", "a" + Bs + Bs + Bs + "b", false },
+    };
+
+    [Theory]
+    [MemberData(nameof(BadlyEscapedConstants))]
+    public void WorkerV2_AConstantNotEscapedByTheEscaper_IsAProtocolBreak(string what, string text, bool type)
+    {
+        using var script = new FakeGraphScript("ssa-escape")
+            .Run(1, ["request", "ready", "graph build", $"ssa {(type ? "typeconst" : "textconst")} {Hex(text)}", "hang"])
+            .Otherwise("request", "ready", "build", "done");
+
+        var report = Analyze(script, Options(ssa: SsaFactBounds.Default), stage.Mechanisms("lib/a"), stage.Small("lib/b"));
+
+        var first = report.Folders[0];
+        Assert.True(first.Outcome == FolderOutcome.Analyzed, $"{what}: the graph is {first.Outcome} ({first.Reason})");
+        Assert.True(first.Ssa is { Outcome: SsaFolderOutcome.Crashed, Facts: null }, $"{what}: SSA {first.Ssa?.Outcome} ({first.Ssa?.Reason})");
+        Assert.Contains(MalformedValue, first.Ssa!.Reason, StringComparison.Ordinal);
+        Assert.Equal(2, script.Pids.Length);
+        script.AssertNoOrphans();
+    }
+
+    // The control: what EscapeBounded writes (a doubled backslash, \n \r \t, \xNN lower-case, \uXXXX either case since a
+    // lone surrogate is written upper-case, \UXXXXXXXX upper-case) and an unescaped quote, which the escaper leaves.
+    public static TheoryData<string, bool> WellEscapedConstants() => new()
+    {
+        { "a" + Bs + Bs + "b", false },
+        { "C:" + Bs + Bs + "Windows" + Bs + Bs, false },
+        { Bs + "x1b[31m", false },
+        { Bs + "u202e", false },
+        { Bs + "uD800" + Bs + "uDFFF", false },
+        { Bs + "U000E0041", true },
+        { Bs + "n" + Bs + "r" + Bs + "t", false },
+        { "say \"hi\"", false },
+        { "Own.T\"), typeof(\"cmd", true },
+        { string.Empty, false },
+    };
+
+    [Theory]
+    [MemberData(nameof(WellEscapedConstants))]
+    public void WorkerV2_AConstantTheEscaperWrites_IsAccepted(string text, bool type)
+    {
+        using var script = new FakeGraphScript("ssa-escaped")
+            .Otherwise("request", "ready", "graph build", $"ssa {(type ? "typeconst" : "textconst")} {Hex(text)}", "build", "done");
+
+        var report = Analyze(script, Options(ssa: SsaFactBounds.Default), stage.Mechanisms("lib/a"), stage.Small("lib/b"));
+
+        var ssa = report.Folders[0].Ssa!;
+        Assert.True(ssa.Outcome == SsaFolderOutcome.Analyzed, $"SSA {ssa.Outcome} ({ssa.Reason})");
+        var constant = ssa.Facts!.Sites.First(s => s.Status == SsaSiteStatus.Analyzed && s.Arguments.Count > 0).Arguments[0].Constants.Single();
+        Assert.Equal((type ? SsaConstantKind.Type : SsaConstantKind.String, text), (constant.Kind, constant.Text));
+        Assert.Single(script.Pids);
+    }
+
+    // UTF-16 code units in hex, 4 digits each: FakeGraphWorker's textconst / typeconst argument.
+    private static string Hex(string text) => string.Concat(text.Select(c => ((int)c).ToString("x4", System.Globalization.CultureInfo.InvariantCulture)));
+
+    private const char Bs = (char)0x5C;
+    #endregion
+
     #region Methods: copies share their primary's SSA
     /// <summary>
     /// lib/b is a copy of lib/a: built once, and b's SSA is a's, facts and all, byte for byte. Observed on the worker's

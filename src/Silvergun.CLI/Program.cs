@@ -117,6 +117,11 @@ internal static class Program
             Description = "Also run the call-graph reachability pass (out of process; up to 600 s and a 4 GiB worker per package). " +
                           "Informational: never affects the exit code, --strict, the completeness footer or --snapshot."
         };
+        var ssaOption = new Option<bool>("--ssa")
+        {
+            Description = "With --reachability, also derive argument values at sink call sites with SSA (in the same worker; adds " +
+                          "about half to its time). SSA-derived and informational, like --reachability."
+        };
         var noVulnsOption = new Option<bool>("--no-vulns")
         {
             Description = "Skip the OSV.dev known-vulnerability check (runs by default; network — this restores fully offline)."
@@ -145,6 +150,13 @@ internal static class Program
                 result.AddError("--json and --rich are mutually exclusive; specify at most one output format.");
         }
 
+        // SSA runs inside the reachability pass's worker, so its cost is only ever paid on purpose (ssa-facts-s5.md D1).
+        void RejectSsaWithoutReachability(CommandResult result)
+        {
+            if (result.GetValue(ssaOption) && !result.GetValue(reachabilityOption))
+                result.AddError("--ssa needs --reachability: SSA facts are derived at the call sites the reachability pass finds.");
+        }
+
         var analyzeCommand = new Command("analyze", "Analyze a .NET assembly for sensitive-API capabilities.")
         {
             assemblyPathArgument, jsonOption, richOption, outputOption, strictOption, debugOption, noResolveOption, allowIncompleteOption, snapshotOption
@@ -163,9 +175,10 @@ internal static class Program
 
         var scanPackageCommand = new Command("scan-package", "Scan a .nupkg for sensitive-API capabilities.")
         {
-            nupkgPathArgument, jsonOption, richOption, outputOption, strictOption, debugOption, noResolveOption, healthOption, noYaraOption, noVulnsOption, depthOption, allowIncompleteOption, snapshotOption, reachabilityOption
+            nupkgPathArgument, jsonOption, richOption, outputOption, strictOption, debugOption, noResolveOption, healthOption, noYaraOption, noVulnsOption, depthOption, allowIncompleteOption, snapshotOption, reachabilityOption, ssaOption
         };
         scanPackageCommand.Validators.Add(RejectJsonWithRich);
+        scanPackageCommand.Validators.Add(RejectSsaWithoutReachability);
         scanPackageCommand.SetAction(parse => RunScanPackage(
             parse.GetValue(nupkgPathArgument)!,
             parse.GetValue(jsonOption),
@@ -180,7 +193,8 @@ internal static class Program
             parse.GetValue(depthOption),
             parse.GetValue(allowIncompleteOption),
             parse.GetValue(snapshotOption),
-            parse.GetValue(reachabilityOption)));
+            parse.GetValue(reachabilityOption),
+            parse.GetValue(ssaOption)));
 
         // check-squat hits nuget.org, so its handler is async; the sync action bridges via GetAwaiter().GetResult()
         // to keep System.CommandLine's synchronous Invoke path (stdout purity handled by ConfigureLogging).
@@ -391,11 +405,11 @@ internal static class Program
         return AnalyzeExitCode(report, strict, allowIncomplete);
     }
 
-    private static int RunScanPackage(string nupkgPath, bool json, bool rich, string? output, bool strict, bool debug, bool noResolve, bool health, bool noYara, bool noVulns, int depth, bool allowIncomplete, string? snapshot, bool reachability)
+    private static int RunScanPackage(string nupkgPath, bool json, bool rich, string? output, bool strict, bool debug, bool noResolve, bool health, bool noYara, bool noVulns, int depth, bool allowIncomplete, string? snapshot, bool reachability, bool ssa)
     {
         ConfigureLogging(json, output, debug);
 
-        var scanResult = PackageScanner.Scan(nupkgPath, resolveReferences: !noResolve, runYara: !noYara, runReachability: reachability);
+        var scanResult = PackageScanner.Scan(nupkgPath, resolveReferences: !noResolve, runYara: !noYara, runReachability: reachability, runSsa: ssa);
         if (!scanResult.IsSuccess)
         {
             Console.Error.WriteLine(scanResult.Message);
@@ -446,6 +460,9 @@ internal static class Program
         // come from the folders, not the stored Complete (S1 review N2).
         if (report.Reachability is { } reachSummary && ReachabilitySectionRenderer.IncompleteNote(reachSummary) is { } reachNote)
             Console.Error.WriteLine(reachNote);
+        // SSA (S5, D4): its own note, never folded into reachability's.
+        if (ssa && report.Reachability is { } ssaSummary && SsaSectionRenderer.IncompleteNote(ssaSummary) is { } ssaNote)
+            Console.Error.WriteLine(ssaNote);
 
         // --health is the ONLY thing that adds a network call to scan-package (the offline scan above stays offline).
         // Repo resolution is offline (local nuspec); only the GitHub lookup is network. Advisory — never touches the

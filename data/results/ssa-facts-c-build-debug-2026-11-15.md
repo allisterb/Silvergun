@@ -1,0 +1,151 @@
+# SSA facts, S4.5, c-build.manifest, Debug, 2026-11-15
+
+Measured by the benign-corpus harness `--ssa` (docs/agent/tasks/ssa-facts-s4.md, S4.5). Per cached package: the `ssa-join`
+child (every folder's graph, every method lifted and joined to the graph's call-site edges by node id and IL offset, then
+the product path's facts in a fresh session), and `PackageReachability.Analyze` through the real `Silvergun.CLI` worker
+with default options: SSA off, on (`SsaFactBounds.Default`), and on again over a second extraction.
+
+- manifest: `c-build.manifest`, hash `cd9ade3633e1e3eb87e51a887afd08550769a7043e12b8e10ce148e4b74a6af0`, 50 entr(ies)
+- cache: `%LOCALAPPDATA%\Silvergun\benign-corpus` (read only; nothing downloaded); results: `%LOCALAPPDATA%\Silvergun\ssa-s5b\cbuild`
+- build: Debug, identity `commit 644bd70428cc0f5313af3d6627079f5fd93ff0f4-dirty, assemblies 37233b5474375a16871fba676427fa14090bf21ef7b16b39eaa50aa106544e35`
+- packages: 50; folders: 505; join-child folders: 505
+- **problems: 0**
+
+## Additivity (AC1)
+
+- folders compared: 505; identical with SSA off and on (outcome, serialized report, assemblies, load failures, reason, SameAs, size): 505
+- graph outcomes with SSA on: Analyzed 503, NothingLoaded 2
+- SSA outcomes: Analyzed 503, NotRun 2
+
+## The per-site join (AC4), every method lifted
+
+| Measure | Count | Rate |
+|---|---:|---:|
+| Method definitions with a body | 936,133 | |
+| Lifted | 852,089 | 91.022% |
+| Lifted, node id an own graph node (node-id join) | 852,082 | 99.999% |
+| Unknown | 84,044 | |
+| Unknown, node id an own graph node | 84,044 | 100.000% |
+| Own graph nodes with a body | 901,241 | |
+| ... with an SSA outcome under their node id | 901,241 | 100.000% |
+| SSA call sites (call, newobj, ldftn, ldvirtftn) of lifted methods in the graph | 3,154,311 | |
+| ... joined to an edge of the same kind group and callee key | 3,153,836 | 99.985% |
+| ... and of the same exact kind (call vs callvirt) | 3,153,836 | 100.000% |
+| Edge sites (node, offset, kind group) of own nodes | 3,802,452 | |
+| ... of nodes with a lifted definition (checked) | 3,075,076 | 80.871% |
+| ... ... joined to an SSA site | 3,073,168 | 99.938% |
+| ... ... with more than one callee (Ambiguous) | 3,465 | |
+| ... of nodes with only Unknown definitions (not checked) | 727,376 | 19.129% |
+| ... of nodes with no SSA outcome (a miss class) | 0 | |
+| Graph-truncated folders | 0 | |
+| Folders where SSA lost an assembly | 0 | |
+
+Misses by class (examples in the `-join-examples.tsv`):
+
+| Class | Count | Folders | Explained |
+|---|---:|---:|---|
+| `edge:initialize-array-intrinsic` | 1,858 | 84 | yes |
+| `edge:node-partly-lifted` | 50 | 1 | yes |
+| `method:lifted-node-not-in-graph(module-type)` | 7 | 6 | yes |
+| `site:no-edge(md-array-accessor)` | 475 | 22 | yes |
+- folders whose graph is not the join child's: 0; product facts misaligned with their raw sites: 0
+
+## Sink coverage (worker, SSA on)
+
+- sink sites: 39,811; kept: 39,811; truncated folders: 0
+- by status: Analyzed 38,962, MethodUnknown 849
+- Analyzed with at least one Constant or OneOf argument: 10,285 (26.398% of Analyzed)
+- MethodUnknown by failure kind (methods lifted for sinks): UnresolvedFact 289
+- NotJoined by reason: 
+
+Top constant-bearing sinks (Analyzed sites with a Constant or OneOf argument; counts only; all 332 in the `-constant-sinks.tsv`):
+
+| Capability | Callee | Sites | Packages |
+|---|---|---:|---:|
+| DynamicCodeLoading | `Microsoft.CSharp.RuntimeBinder.CSharpArgumentInfo.Create` | 2,877 | 3 |
+| EnvironmentProbe | `System.Environment.GetEnvironmentVariable` | 725 | 18 |
+| DynamicCodeLoading | `Microsoft.CSharp.RuntimeBinder.Binder.GetMember` | 708 | 2 |
+| DynamicCodeLoading | `Microsoft.CSharp.RuntimeBinder.Binder.BinaryOperation` | 456 | 1 |
+| FileSystem | `System.IO.FileStream..ctor` | 453 | 17 |
+| DynamicCodeLoading | `Microsoft.CSharp.RuntimeBinder.Binder.UnaryOperation` | 428 | 1 |
+| DynamicCodeLoading | `Microsoft.CSharp.RuntimeBinder.Binder.Convert` | 412 | 1 |
+| DynamicCodeLoading | `Microsoft.CSharp.RuntimeBinder.Binder.InvokeMember` | 303 | 2 |
+| ReflectionInvocation | `System.Reflection.MethodBase.Invoke` | 221 | 18 |
+| ReflectionInvocation | `System.Type.GetType` | 209 | 22 |
+| ReflectionInvocation | `System.Reflection.MethodInfo.CreateDelegate` | 130 | 13 |
+| NativeInterop | `System.Runtime.InteropServices.Marshal.SetLastSystemError` | 129 | 1 |
+| DynamicCodeLoading | `System.Reflection.Emit.DynamicMethod..ctor` | 114 | 8 |
+| ReflectionInvocation | `System.Reflection.PropertyInfo.GetValue` | 114 | 10 |
+| EnvironmentProbe | `System.Environment.GetFolderPath` | 109 | 13 |
+| FileSystem | `System.IO.File.Copy` | 109 | 8 |
+| Cryptography | `System.Security.Cryptography.Oid..ctor` | 86 | 1 |
+| ReflectionInvocation | `System.Reflection.PropertyInfo.SetValue` | 84 | 9 |
+| UnsafeMemory | `System.Runtime.InteropServices.GCHandle.Alloc` | 82 | 15 |
+| Cryptography | `System.Security.Cryptography.SymmetricAlgorithm.set_KeySize` | 77 | 1 |
+| FileSystem | `System.IO.File.Open` | 74 | 13 |
+| Cryptography | `System.Security.Cryptography.CryptographicException..ctor` | 68 | 10 |
+| DynamicCodeLoading | `System.Activator.CreateInstance` | 67 | 8 |
+| FileSystem | `System.IO.Directory.GetFiles` | 66 | 10 |
+| ProcessExecution | `System.Diagnostics.ProcessStartInfo.set_RedirectStandardOutput` | 59 | 12 |
+
+## Reflection targets
+
+- Analyzed reflection sites with a target: 2,688
+- type resolved (Constant or OneOf): 233 (8.668%)
+- member resolved: 259 (9.635%)
+- with own ByName candidates: 9 (0.335%); with a candidates gap: 0
+
+## Cost and the defaults (AC5)
+
+| Wall time, sum over packages | ms |
+|---|---:|
+| worker pass, SSA off (first) | 449,216 |
+| worker pass, SSA off (last) | 473,342 |
+| worker pass, SSA on | 574,319 |
+| worker pass, SSA on, repeat | 615,685 |
+| worker pass, the faster off against the faster on, per package | 413,193 against 559,144 |
+| join child, whole process | 1,174,900 |
+| join child, graphs | 423,842 |
+| join child, every method lifted and joined | 563,303 |
+| join child, product facts (sink methods only; SSA's own cost) | 122,808 |
+
+- slowest packages with SSA on (budget 600 s): SpecFlow.Tools.MsBuild.Generation 3.9.74 65,268 ms (off 64,078); Microsoft.Net.Compilers 4.2.0 64,392 ms (off 58,318); NSwag.MSBuild 14.7.1 57,640 ms (off 42,447); ReportGenerator 5.5.12 42,185 ms (off 35,245); Riok.Mapperly 4.3.1 26,800 ms (off 15,361)
+- slowest folders' product facts in the child (worker backstop 60 s, folder timeout 120 s): Microsoft.Net.Compilers 4.2.0 tools 5,822 ms; NSwag.MSBuild 14.7.1 tools/Win 3,932 ms; SpecFlow.Tools.MsBuild.Generation 3.9.74 tasks/net6.0 3,736 ms; SpecFlow.Tools.MsBuild.Generation 3.9.74 tasks/netcoreapp2.1 3,724 ms; SpecFlow.Tools.MsBuild.Generation 3.9.74 tasks/net461 3,290 ms
+- peak worker working set with SSA on: 2,193 MB (Microsoft.Net.Compilers 4.2.0); peak private 2,199 MB; with SSA off 2,236 MB (limit 4,096 MB)
+- peak join child working set (graph data held while every method lifts): 2,158 MB (Microsoft.Net.Compilers 4.2.0)
+- largest folder facts: 2,177,787 chars of JSON (NSwag.MSBuild 14.7.1 tools/Win); per package at most 7,183,413 (SSA record budget 134,217,728 bytes, record line limit 16,777,216 bytes)
+- most sites in a folder: 2,832 (MaxSites 8,192); most methods lifted for sinks: 1,137 (MaxLiftedMethods 50,000)
+- folders cut: truncated 0, method budget 0, time budget 0, text budget 0
+- largest observed: arguments 8 (MaxArguments 8), OneOf 2 (MaxAlternatives 4), constant text 287 chars (MaxTextChars 256, plus the cut suffix), candidates 2 (MaxCandidates 64), site name 806 chars (MaxNameChars 1024, plus the cut suffix); ill-formed strings 0
+
+## Determinism (AC6)
+
+- SSA on, twice, over separate extractions: equal 503, n/a 2
+- worker facts against the join child's in-process facts: equal 503, n/a 2
+
+## S5 presentation
+
+`ReachabilitySummary.From` of the off, on and repeat passes above, serialized with the report's own JSON options (indented,
+enums by name), as scan-package `--json` writes its `Reachability` member (there nested one level deeper, so a few
+bytes of indentation more). Section lines are the terminal section's logical lines, estimated from the summary as
+`SsaSectionRenderer` writes them (title rule, count line; per listed folder its header, the copy line, its first 10
+sites each with its `acts on` line, one `N more site(s) ... in --json` line past them, the summary caps' dropped line,
+each gap); a terminal narrower than a line wraps it. Sites listed below are the summary's (`--json`), not the terminal's.
+
+- packages with a presentation: 50 of 50; not measured or failed: 
+- additive (the on summary without its `Ssa` objects is byte for byte the off summary): 50; mismatches: 0; `Complete` differs: 0
+- determinism, the on and repeat summaries' `Ssa` parts: equal 50
+
+| Summary bytes per package | Max | p95 | Total |
+|---|---:|---:|---:|
+| without SSA | 143,344 | 92,598 | 1,538,512 |
+| with SSA | 450,331 | 294,641 | 3,723,036 |
+| of which the `Ssa` objects | 367,679 | 197,364 | 2,184,524 |
+| terminal section lines | 109 | 95 | 1,438 |
+
+- sites listed: 3,555 in all, at most 685 in a package (coverlet.msbuild 10.1.0); not listed (caps): 6,911
+- largest summary with SSA: coverlet.msbuild 10.1.0; longest section: coverlet.msbuild 10.1.0
+- packages with a folder past the per-folder cap (100): 9 (19 folder(s)); past the per-package cap (1,000): 0
+- folders: 505; with SSA 505; analysed copies (listed under their primary) 94
+- SSA-incomplete folders: 72, in 31 package(s); folders by gap kind (a folder may have several): method-unknown 70, not-analysed:NotRun 2
+

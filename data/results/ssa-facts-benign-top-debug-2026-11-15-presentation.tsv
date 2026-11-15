@@ -1,0 +1,101 @@
+package	status	additive	complete_equal	off_bytes	on_bytes	ssa_bytes	folders	with_ssa	copies	sites_listed	sites_dropped	folder_cap_hits	package_cap_hit	incomplete	gap_kinds	section_lines	repeat	mismatches
+AWSSDK.Core 4.0.101.1	ok	yes	yes	112075	302082	190007	4	4	0	390	14	1	no	1	method-unknown=1	58	equal	
+AWSSDK.S3 4.0.102.2	ok	yes	yes	5226	36686	31460	5	5	0	64	0	0	no	5	method-unknown=5	56	equal	
+AutoMapper 16.2.0	ok	yes	yes	11646	75781	64135	5	5	0	102	0	0	no	5	method-unknown=5	67	equal	
+Azure.Core 1.61.0	ok	yes	yes	33415	270503	237088	5	5	0	479	0	0	no	5	method-unknown=5	87	equal	
+Azure.Identity 1.21.0	ok	yes	yes	2772	4326	1554	3	3	0	0	0	0	no	0		2	equal	
+Azure.Security.KeyVault.Secrets 4.11.0	ok	yes	yes	5055	6609	1554	3	3	0	0	0	0	no	0		2	equal	
+Azure.Storage.Blobs 12.29.1	ok	yes	yes	8077	40349	32272	4	4	0	56	0	0	no	4	method-unknown=4	54	equal	
+Azure.Storage.Common 12.28.0	ok	yes	yes	5055	9589	4534	3	3	0	6	0	0	no	0		11	equal	
+Castle.Core 5.2.1	ok	yes	yes	30764	116758	85994	4	4	0	141	0	0	no	4	method-unknown=4	68	equal	
+CsvHelper 33.1.0	ok	yes	yes	13141	25615	12474	7	7	0	14	0	0	no	0		23	equal	
+Dapper 2.1.79	ok	yes	yes	6725	154393	147668	4	4	0	244	0	0	no	0		58	equal	
+FluentAssertions 8.10.0	ok	yes	yes	32503	53715	21212	4	4	0	29	0	0	no	0		55	equal	
+FluentValidation 12.1.1	ok	yes	yes	970	1488	518	1	1	0	0	0	0	no	0		2	equal	
+Google.Protobuf 3.35.1	ok	yes	yes	27139	79334	52195	4	4	0	76	0	0	no	0		90	equal	
+Grpc.Core.Api 2.83.0	ok	yes	yes	2779	9436	6657	3	3	0	9	0	0	no	0		20	equal	
+Grpc.Net.Client 2.83.0	ok	yes	yes	34985	48559	13574	6	6	0	21	0	0	no	6	method-unknown=6	35	equal	
+Grpc.Net.Common 2.83.0	ok	yes	yes	4574	7164	2590	5	5	0	0	0	0	no	0		2	equal	
+Humanizer.Core 3.0.10	ok	yes	yes	15822	53569	37747	7	7	0	72	0	0	no	0		44	equal	
+Microsoft.ApplicationInsights 3.1.2	ok	yes	yes	51476	78486	27010	5	5	0	45	0	0	no	0		57	equal	
+Microsoft.AspNetCore.Mvc.NewtonsoftJson 10.0.11	ok	yes	yes	970	4093	3123	1	1	0	3	0	0	no	1	method-unknown=1	10	equal	
+Microsoft.Azure.Amqp 2.7.4	ok	yes	yes	85164	175040	89876	7	7	0	160	0	0	no	0		75	equal	
+Microsoft.Azure.WebJobs 3.0.47	ok	yes	yes	3431	21907	18476	1	1	0	30	0	0	no	1	method-unknown=1	17	equal	
+Microsoft.Bcl.AsyncInterfaces 10.0.11	ok	yes	yes	2779	4333	1554	3	3	0	0	0	0	no	0		2	equal	
+Microsoft.Data.SqlClient 7.0.2	ok	yes	yes	160557	321173	160616	52	52	1	222	0	0	no	6	method-unknown=6	108	equal	
+Microsoft.Data.SqlClient.SNI.runtime 6.0.3	ok	yes	yes	1028	1673	645	3	3	0	0	0	0	no	3	not-analysed:NotRun=3	8	equal	
+Microsoft.EntityFrameworkCore 10.0.11	ok	yes	yes	6537	23081	16544	1	1	0	23	0	0	no	0		22	equal	
+Microsoft.Extensions.ApiDescription.Server 10.0.11	ok	yes	yes	42632	143620	100988	4	4	0	157	0	0	no	2	method-unknown=2	77	equal	
+Microsoft.Extensions.DependencyInjection 10.0.11	ok	yes	yes	5477	49096	43619	6	6	0	60	0	0	no	0		70	equal	
+Microsoft.Extensions.Diagnostics 10.0.11	ok	yes	yes	4566	7156	2590	5	5	0	0	0	0	no	0		2	equal	
+Microsoft.Extensions.Diagnostics.Abstractions 10.0.11	ok	yes	yes	4566	7156	2590	5	5	0	0	0	0	no	0		2	equal	
+Microsoft.Extensions.Diagnostics.HealthChecks 10.0.11	ok	yes	yes	2772	4326	1554	3	3	0	0	0	0	no	0		2	equal	
+Microsoft.Extensions.Diagnostics.HealthChecks.Abstractions 10.0.11	ok	yes	yes	2772	4326	1554	3	3	0	0	0	0	no	0		2	equal	
+Microsoft.Extensions.Hosting 10.0.11	ok	yes	yes	5471	8912	3441	6	6	0	0	0	0	no	3	method-unknown=3	8	equal	
+Microsoft.Extensions.Http 10.0.11	ok	yes	yes	9801	16892	7091	5	5	0	10	0	0	no	0		17	equal	
+Microsoft.Extensions.Logging 10.0.11	ok	yes	yes	5471	8579	3108	6	6	0	0	0	0	no	0		2	equal	
+Microsoft.Extensions.Logging.EventLog 10.0.11	ok	yes	yes	4566	7156	2590	5	5	0	0	0	0	no	0		2	equal	
+Microsoft.Identity.Client 4.87.0	ok	yes	yes	50597	325298	274701	6	6	0	495	0	0	no	4	method-unknown=4	79	equal	
+Microsoft.Identity.Client.Extensions.Msal 4.87.0	ok	yes	yes	7506	26465	18959	2	2	0	36	0	0	no	2	method-unknown=2	30	equal	
+Microsoft.IdentityModel.Abstractions 8.22.0	ok	yes	yes	6360	9986	3626	7	7	0	0	0	0	no	0		2	equal	
+Microsoft.IdentityModel.Clients.ActiveDirectory 5.3.0	ok	yes	yes	41945	121855	79910	5	5	0	115	0	0	no	3	method-unknown=3	93	equal	
+Microsoft.NET.Sdk.Android.Manifest-8.0.100 34.0.154	ok	yes	yes	69	69	0	0	0	0	0	0	0	no	0		2	equal	
+Microsoft.NET.Sdk.Aspire.Manifest-8.0.100 8.2.2	ok	yes	yes	69	69	0	0	0	0	0	0	0	no	0		2	equal	
+Microsoft.NET.Sdk.MacCatalyst.Manifest-8.0.100 18.0.8319	ok	yes	yes	69	69	0	0	0	0	0	0	0	no	0		2	equal	
+Microsoft.NET.Sdk.Maui.Manifest-8.0.100 8.0.100	ok	yes	yes	69	69	0	0	0	0	0	0	0	no	0		2	equal	
+Microsoft.NET.Sdk.iOS.Manifest-8.0.100 18.0.8319	ok	yes	yes	69	69	0	0	0	0	0	0	0	no	0		2	equal	
+Microsoft.NET.Sdk.macOS.Manifest-8.0.100 15.0.8319	ok	yes	yes	69	69	0	0	0	0	0	0	0	no	0		2	equal	
+Microsoft.NET.Sdk.tvOS.Manifest-8.0.100 18.0.8319	ok	yes	yes	69	69	0	0	0	0	0	0	0	no	0		2	equal	
+Microsoft.NET.Workload.Emscripten.Current.Manifest-8.0.100 8.0.30	ok	yes	yes	69	69	0	0	0	0	0	0	0	no	0		2	equal	
+Microsoft.NET.Workload.Emscripten.net6.Manifest-8.0.100 8.0.30	ok	yes	yes	69	69	0	0	0	0	0	0	0	no	0		2	equal	
+Microsoft.NET.Workload.Emscripten.net7.Manifest-8.0.100 8.0.30	ok	yes	yes	69	69	0	0	0	0	0	0	0	no	0		2	equal	
+Microsoft.NET.Workload.Mono.ToolChain.Current.Manifest-8.0.100 8.0.30	ok	yes	yes	69	69	0	0	0	0	0	0	0	no	0		2	equal	
+Microsoft.NET.Workload.Mono.ToolChain.net6.Manifest-8.0.100 8.0.30	ok	yes	yes	69	69	0	0	0	0	0	0	0	no	0		2	equal	
+Microsoft.NET.Workload.Mono.ToolChain.net7.Manifest-8.0.100 8.0.30	ok	yes	yes	69	69	0	0	0	0	0	0	0	no	0		2	equal	
+Microsoft.OpenApi 3.10.0	ok	yes	yes	7754	13286	5532	2	2	0	8	0	0	no	0		16	equal	
+Microsoft.SqlServer.Server 1.0.0	ok	yes	yes	1873	2909	1036	2	2	0	0	0	0	no	0		2	equal	
+Microsoft.Win32.SystemEvents 10.0.11	ok	yes	yes	7312	31829	24517	8	8	0	48	0	0	no	0		38	equal	
+Moq 4.20.72	ok	yes	yes	14328	34200	19872	4	4	0	30	0	0	no	0		54	equal	
+NLog 6.2.0	ok	yes	yes	74227	150312	76085	5	5	0	129	0	0	no	0		70	equal	
+NUnit 4.6.1	ok	yes	yes	30047	149916	119869	3	3	0	183	0	0	no	1	method-unknown=1	69	equal	
+Newtonsoft.Json 13.0.4	ok	yes	yes	63834	187698	123864	8	8	0	178	0	0	no	0		139	equal	
+Newtonsoft.Json.Bson 1.0.3	ok	yes	yes	2778	4332	1554	3	3	0	0	0	0	no	0		2	equal	
+Npgsql 10.0.3	ok	yes	yes	51125	119625	68500	3	3	0	138	0	0	no	0		44	equal	
+OpenTelemetry 1.17.0	ok	yes	yes	26753	42833	16080	6	6	0	24	0	0	no	0		32	equal	
+OpenTelemetry.Api 1.17.0	ok	yes	yes	7986	10687	2701	5	5	0	0	0	0	no	1	method-unknown=1	4	equal	
+OpenTelemetry.Api.ProviderBuilderExtensions 1.17.0	ok	yes	yes	4566	7156	2590	5	5	0	0	0	0	no	0		2	equal	
+Pipelines.Sockets.Unofficial 2.3.1	ok	yes	yes	55574	112077	56503	6	6	0	106	0	0	no	0		74	equal	
+Polly 8.7.0	ok	yes	yes	3672	5744	2072	4	4	0	0	0	0	no	0		2	equal	
+Polly.Core 8.7.0	ok	yes	yes	4570	7160	2590	5	5	0	0	0	0	no	0		2	equal	
+Serilog 4.4.0	ok	yes	yes	26406	57885	31479	7	7	0	42	0	0	no	0		93	equal	
+Serilog.AspNetCore 10.0.0	ok	yes	yes	5471	8579	3108	6	6	0	0	0	0	no	0		2	equal	
+Serilog.Extensions.Hosting 10.0.0	ok	yes	yes	5471	8579	3108	6	6	0	0	0	0	no	0		2	equal	
+Serilog.Extensions.Logging 10.0.0	ok	yes	yes	5471	8579	3108	6	6	0	0	0	0	no	0		2	equal	
+Serilog.Formatting.Compact 3.0.0	ok	yes	yes	4565	7155	2590	5	5	0	0	0	0	no	0		2	equal	
+Serilog.Settings.Configuration 10.0.1	ok	yes	yes	8256	45471	37215	5	5	0	50	0	0	no	5	method-unknown=5	107	equal	
+Serilog.Sinks.Console 6.1.1	ok	yes	yes	11799	17324	5525	5	5	0	5	0	0	no	5	method-unknown=5	17	equal	
+Serilog.Sinks.Debug 3.0.0	ok	yes	yes	4565	7155	2590	5	5	0	0	0	0	no	0		2	equal	
+Serilog.Sinks.File 7.0.0	ok	yes	yes	5462	20132	14670	6	6	0	24	0	0	no	6	method-unknown=6	38	equal	
+StackExchange.Redis 3.1.13	ok	yes	yes	188525	280051	91526	7	7	0	159	0	0	no	6	method-unknown=6	104	equal	
+Swashbuckle.AspNetCore 10.2.3	ok	yes	yes	69	69	0	0	0	0	0	0	0	no	0		2	equal	
+Swashbuckle.AspNetCore.Swagger 10.2.3	ok	yes	yes	2764	4318	1554	3	3	0	0	0	0	no	0		2	equal	
+Swashbuckle.AspNetCore.SwaggerGen 10.2.3	ok	yes	yes	2767	6481	3714	3	3	0	3	0	0	no	0		11	equal	
+Swashbuckle.AspNetCore.SwaggerUI 10.2.3	ok	yes	yes	2764	4651	1887	3	3	0	0	0	0	no	3	method-unknown=3	8	equal	
+System.ClientModel 1.15.0	ok	yes	yes	24977	60485	35508	5	5	0	54	0	0	no	0		82	equal	
+System.CodeDom 10.0.11	ok	yes	yes	8331	31964	23633	5	5	0	43	0	0	no	0		49	equal	
+System.Diagnostics.EventLog 10.0.11	ok	yes	yes	9847	158982	149135	8	8	0	291	0	0	no	0		38	equal	
+System.Diagnostics.PerformanceCounter 10.0.11	ok	yes	yes	15634	97658	82024	8	8	0	159	0	0	no	0		38	equal	
+System.Drawing.Common 10.0.11	ok	yes	yes	73520	241503	167983	5	5	0	300	165	3	no	3	method-unknown=3	59	equal	
+System.Formats.Asn1 10.0.11	ok	yes	yes	4566	7156	2590	5	5	0	0	0	0	no	0		2	equal	
+System.IO.Hashing 10.0.11	ok	yes	yes	4566	7171	2605	5	5	0	0	0	0	no	0		2	equal	
+System.Memory.Data 10.0.11	ok	yes	yes	4566	8200	3634	5	5	0	2	0	0	no	0		6	equal	
+System.Runtime.Caching 10.0.11	ok	yes	yes	37858	64048	26190	7	7	0	51	0	0	no	0		60	equal	
+System.Security.Cryptography.Pkcs 10.0.11	ok	yes	yes	14546	288601	274055	9	9	0	497	0	0	no	6	method-unknown=6	104	equal	
+System.Text.Json 10.0.11	ok	yes	yes	34037	125539	91502	47	47	26	100	0	0	no	0		140	equal	
+System.Threading.Channels 10.0.11	ok	yes	yes	5471	8579	3108	6	6	0	0	0	0	no	0		2	equal	
+System.Windows.Extensions 10.0.11	ok	yes	yes	5510	30209	24699	6	6	0	48	0	0	no	0		38	equal	
+coverlet.collector 10.0.1	ok	yes	yes	102938	441824	338886	45	45	0	585	198	3	no	2	method-unknown=2	94	equal	
+runtime.win-arm64.runtime.native.System.Data.SqlClient.sni 4.4.0	ok	yes	yes	369	584	215	1	1	0	0	0	0	no	1	not-analysed:NotRun=1	4	equal	
+runtime.win-x64.runtime.native.System.Data.SqlClient.sni 4.4.0	ok	yes	yes	365	580	215	1	1	0	0	0	0	no	1	not-analysed:NotRun=1	4	equal	
+runtime.win-x86.runtime.native.System.Data.SqlClient.sni 4.4.0	ok	yes	yes	365	580	215	1	1	0	0	0	0	no	1	not-analysed:NotRun=1	4	equal	
+xunit 2.9.3	ok	yes	yes	69	69	0	0	0	0	0	0	0	no	0		2	equal	

@@ -1,0 +1,51 @@
+package	status	additive	complete_equal	off_bytes	on_bytes	ssa_bytes	folders	with_ssa	copies	sites_listed	sites_dropped	folder_cap_hits	package_cap_hit	incomplete	gap_kinds	section_lines	repeat	mismatches
+Microsoft.EntityFrameworkCore.Analyzers 10.0.14	ok	yes	yes	985	1503	518	1	1	0	0	0	0	no	0		2	equal	
+Microsoft.CodeAnalysis.Analyzers 5.9.0	ok	yes	yes	41976	80328	38352	28	28	13	42	0	0	no	2	method-unknown=2	64	equal	
+xunit.analyzers 2.2.0	ok	yes	yes	2111	2629	518	1	1	0	0	0	0	no	0		2	equal	
+Microsoft.AspNetCore.Components.Analyzers 10.0.14	ok	yes	yes	985	1503	518	1	1	0	0	0	0	no	0		2	equal	
+StyleCop.Analyzers 1.1.118	ok	yes	yes	14148	19658	5510	8	8	0	2	0	0	no	1	method-unknown=1	8	equal	
+coverlet.msbuild 10.1.0	ok	yes	yes	82652	450331	367679	7	7	0	685	198	4	no	6	method-unknown=6	109	equal	
+Microsoft.AspNetCore.Razor.Design 2.3.13	ok	yes	yes	49076	107018	57942	5	5	1	98	0	0	no	2	method-unknown=2	42	equal	
+Microsoft.Azure.WebJobs.Script.ExtensionsMetadataGenerator 4.0.1	ok	yes	yes	23854	94888	71034	3	3	0	133	4	1	no	1	method-unknown=1	37	equal	
+NUnit.Analyzers 4.15.0	ok	yes	yes	1742	2371	629	1	1	0	0	0	0	no	1	method-unknown=1	4	equal	
+Microsoft.NET.ILLink.Tasks 10.0.14	ok	yes	yes	36974	82025	45051	3	3	0	89	0	0	no	3	method-unknown=3	32	equal	
+Microsoft.AspNetCore.Mvc.Analyzers 2.3.13	ok	yes	yes	984	1502	518	1	1	0	0	0	0	no	0		2	equal	
+Microsoft.Azure.Functions.Analyzers 1.0.0	ok	yes	yes	984	1502	518	1	1	0	0	0	0	no	0		2	equal	
+Microsoft.VisualStudio.Threading.Analyzers 18.12.1	ok	yes	yes	16773	31277	14504	28	28	13	0	0	0	no	0		28	equal	
+Microsoft.Build.Tasks.Git 10.0.403	ok	yes	yes	37541	55635	18094	28	28	0	8	0	0	no	0		12	equal	
+StyleCop.Analyzers.Unstable 1.2.0.556	ok	yes	yes	11465	16978	5513	8	8	0	2	0	0	no	1	method-unknown=1	8	equal	
+Microsoft.SourceLink.Common 10.0.403	ok	yes	yes	26710	41436	14726	28	28	0	0	0	0	no	2	method-unknown=2	6	equal	
+Microsoft.Net.Compilers 4.2.0	ok	yes	yes	53998	115292	61294	14	14	0	99	0	0	no	1	method-unknown=1	25	equal	
+dotnet-reportgenerator-globaltool 5.5.12	ok	yes	yes	32895	171499	138604	6	6	1	260	0	0	no	0		55	equal	
+SonarAnalyzer.CSharp 10.35.0.4138	ok	yes	yes	12222	19557	7335	1	1	0	9	0	0	no	1	method-unknown=1	22	equal	
+Microsoft.Azure.Functions.Worker.Sdk.Generators 1.4.0	ok	yes	yes	13211	24594	11383	1	1	0	16	0	0	no	0		24	equal	
+NSwag.MSBuild 14.7.1	ok	yes	yes	52561	294641	242080	4	4	0	400	5393	4	no	4	method-unknown=4	98	equal	
+Microsoft.Azure.Functions.Worker.Sdk.Analyzers 1.2.2	ok	yes	yes	985	1503	518	1	1	0	0	0	0	no	0		2	equal	
+Microsoft.SourceLink.GitHub 10.0.403	ok	yes	yes	30656	46852	16196	28	28	0	4	0	0	no	0		7	equal	
+MessagePackAnalyzer 3.1.12	ok	yes	yes	4938	9651	4713	1	1	0	6	0	0	no	0		15	equal	
+Microsoft.CodeAnalysis.NetAnalyzers 10.0.403	ok	yes	yes	46941	69893	22952	28	28	13	12	0	0	no	2	method-unknown=2	54	equal	
+SpecFlow.Tools.MsBuild.Generation 3.9.74	ok	yes	yes	143344	340708	197364	4	4	0	400	1154	4	no	1	method-unknown=1	95	equal	
+MSTest.Analyzers 4.5.2	ok	yes	yes	31582	47170	15588	28	28	0	2	0	0	no	2	method-unknown=2	8	equal	
+dotnet-sonarscanner 12.1.0	ok	yes	yes	31027	86292	55265	1	1	0	100	19	1	no	1	method-unknown=1	26	equal	
+Microsoft.CodeQuality.Analyzers 3.3.2	ok	yes	yes	40778	63728	22950	28	28	13	12	0	0	no	2	method-unknown=2	56	equal	
+Microsoft.NetCore.Analyzers 3.3.2	ok	yes	yes	36840	55925	19085	28	28	13	6	0	0	no	2	method-unknown=2	44	equal	
+Microsoft.NetFramework.Analyzers 3.3.2	ok	yes	yes	23896	42980	19084	28	28	13	6	0	0	no	2	method-unknown=2	44	equal	
+Roslynator.Analyzers 5.0.1	ok	yes	yes	30642	40212	9570	3	3	0	15	0	0	no	3	method-unknown=3	23	equal	
+ReportGenerator 5.5.12	ok	yes	yes	97141	292321	195180	7	7	1	363	1	1	no	4	method-unknown=4	80	equal	
+Microsoft.CodeAnalysis.VersionCheckAnalyzer 3.3.2	ok	yes	yes	14772	22135	7363	14	14	0	0	0	0	no	1	method-unknown=1	4	equal	
+Microsoft.Azure.Functions.Worker.Extensions.Http.AspNetCore.Analyzers 1.0.4	ok	yes	yes	985	1503	518	1	1	0	0	0	0	no	0		2	equal	
+Microsoft.CodeAnalysis.BannedApiAnalyzers 5.6.0	ok	yes	yes	40442	76882	36440	28	28	13	38	0	0	no	2	method-unknown=2	64	equal	
+Microsoft.Extensions.ApiDescription.Client 10.0.14	ok	yes	yes	982	1500	518	1	1	0	0	0	0	no	0		2	equal	
+NSubstitute.Analyzers.CSharp 1.0.17	ok	yes	yes	5346	7244	1898	1	1	0	2	0	0	no	0		7	equal	
+Riok.Mapperly 4.3.1	ok	yes	yes	92598	105303	12705	8	8	0	14	0	0	no	7	method-unknown=7	37	equal	
+Microsoft.Azure.WebJobs.Extensions.DurableTask.Analyzers 0.5.0	ok	yes	yes	987	1505	518	1	1	0	0	0	0	no	0		2	equal	
+Aspire.Hosting.AppHost 13.6.4	ok	yes	yes	9348	24621	15273	6	6	0	26	0	0	no	2	method-unknown=2	28	equal	
+GraphQL.Analyzers 8.8.5	ok	yes	yes	987	1505	518	1	1	0	0	0	0	no	0		2	equal	
+OpenCover 4.7.1221	ok	yes	yes	28169	85436	57267	6	6	0	100	107	1	no	4	method-unknown=2,not-analysed:NotRun=2	32	equal	
+Meziantou.Analyzer 3.0.321	ok	yes	yes	49269	72144	22875	5	5	0	30	0	0	no	5	method-unknown=5	67	equal	
+Reqnroll.Tools.MsBuild.Generation 3.3.4	ok	yes	yes	58797	162796	103999	2	2	0	178	5	1	no	2	method-unknown=2	45	equal	
+Xamarin.Build.Download 0.11.6	ok	yes	yes	40370	113946	73576	2	2	0	126	0	0	no	2	method-unknown=2	42	equal	
+Xamarin.AndroidX.Migration 1.0.10	ok	yes	yes	67570	165830	98260	2	2	0	200	30	2	no	2	method-unknown=2	38	equal	
+AsyncFixer 2.1.0	ok	yes	yes	986	1504	518	1	1	0	0	0	0	no	0		2	equal	
+Microsoft.Maui.Controls.Build.Tasks 10.0.120	ok	yes	yes	63505	118801	55296	35	35	0	68	0	0	no	1	method-unknown=1	19	equal	
+Microsoft.SourceLink.AzureRepos.Git 10.0.403	ok	yes	yes	30782	46979	16197	28	28	0	4	0	0	no	0		7	equal	

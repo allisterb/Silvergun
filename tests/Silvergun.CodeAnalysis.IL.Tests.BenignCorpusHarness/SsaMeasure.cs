@@ -74,7 +74,8 @@ public sealed record SsaObservedBounds(int Arguments, int Alternatives, int Cons
 
 /// <summary>
 /// One package's <c>--ssa</c> result, cached in the results directory. The passes run off, on, repeat (on), then off
-/// again, so a warm-up favours neither mode; <see cref="Off2Ms"/> is the last.
+/// again, so a warm-up favours neither mode; <see cref="Off2Ms"/> is the last. <see cref="Presentation"/> is S5's, from the
+/// same passes; a result without it (written before S5.3) is measured again.
 /// </summary>
 public sealed record SsaPackageResult(
     string Package,
@@ -92,7 +93,8 @@ public sealed record SsaPackageResult(
     long OffPeakWorkingSet,
     long OnPeakWorkingSet,
     long OnPeakPrivate,
-    List<SsaFolderRow> Folders);
+    List<SsaFolderRow> Folders,
+    SsaPresentation? Presentation = null);
 
 /// <summary>
 /// <c>--ssa</c> (<c>docs/agent/tasks/ssa-facts-s4.md</c>, S4.5): per cached package, the <see cref="SsaJoinChild"/> and then
@@ -131,8 +133,12 @@ public static class SsaMeasure
                 var cached = JsonSerializer.Deserialize<SsaPackageResult>(File.ReadAllText(path), PackageReachResult.JsonOptions)!;
                 if (cached.Identity != identity)
                     throw new InvalidOperationException($"{path} is from another build ({cached.Identity}, not {identity}); use another --results directory.");
-                done.Add(cached);
-                continue;
+                // A result written before S5.3 has no presentation: measured again below, as if it were missing.
+                if (cached.Presentation is not null)
+                {
+                    done.Add(cached);
+                    continue;
+                }
             }
             var nupkg = CachedNupkg.PathOf(cacheRoot, entry);
             if (!File.Exists(nupkg))
@@ -156,6 +162,9 @@ public static class SsaMeasure
             GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
             progress.WriteLine($"join {result.JoinStatus} {result.JoinWallMs} ms ({result.JoinPeakWorkingSet / (1024 * 1024)} MB); worker {result.WorkerStatus} " +
                 $"off {result.OffMs} on {result.OnMs} repeat {result.RepeatMs} off {result.Off2Ms} ms; peak {result.OnPeakWorkingSet / (1024 * 1024)} MB; folders {result.Folders.Count}");
+            if (result.Presentation is { } s5)
+                progress.WriteLine($"    S5 {s5.Status}: additive {s5.Additive}, complete-equal {s5.CompleteEqual}; summary {s5.OffBytes} -> {s5.OnBytes} bytes (ssa {s5.SsaBytes}); " +
+                    $"sites listed {s5.SitesListed} dropped {s5.SitesDropped}; incomplete {s5.FoldersIncomplete}/{s5.Folders}; section ~{s5.SectionLines} line(s); repeat {s5.Determinism}");
         }
 
         if (pending > 0 || notCached > 0)
@@ -188,7 +197,7 @@ public static class SsaMeasure
         }
         return new SsaPackageResult(name, identity, Configuration, joinStatus, joinMs, joinPeak, join, status,
             off.WallMs, on.WallMs, repeat.WallMs, off2.WallMs, Math.Max(off.PeakWorkingSet, off2.PeakWorkingSet), Math.Max(on.PeakWorkingSet, repeat.PeakWorkingSet),
-            Math.Max(on.PeakPrivate, repeat.PeakPrivate), rows);
+            Math.Max(on.PeakPrivate, repeat.PeakPrivate), rows, SsaPresentation.Of(off.Report, on.Report, repeat.Report));
     }
 
     private static SsaFolderRow Row(FolderReachability? off, FolderReachability? on, FolderReachability? repeat, SsaJoinFolder[]? join)
