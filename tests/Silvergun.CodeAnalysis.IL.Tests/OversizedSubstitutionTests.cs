@@ -15,12 +15,13 @@ using Xunit;
 using ModelTypes = Model.Types;
 
 /// <summary>
-/// Substitution composing two types each within <c>CCIProvider.TypeSize</c>'s bound into one past it
-/// (graph-names-hostile-types.md, review round 1, W2). The parameter <c>P</c> of <c>Big.Own&lt;X&gt;.M(P)</c> is T'_10 over
-/// <c>!0</c> (4,095 parts, 2,048 <c>!0</c> leaves), and <c>Big.Own&lt;T_10&gt;</c> is exactly 4,096 parts, so neither is
-/// oversized; but <c>P[!0 := T_10]</c> would be about 100M chars. A call through <c>Own&lt;T_10&gt;</c> must resolve Unresolved
-/// without that string ever being built; one through <c>Own&lt;int&gt;</c> (51K chars substituted, under the budget) still
-/// joins its definition. Also: a merged own node with the marker carries exactly one OversizedType opacity.
+/// Substitution composing two types each within <c>CCIProvider.TypeSize</c>'s bounds into one past them
+/// (graph-names-hostile-types.md, review round 1, W2), under the char bound (names-chars-and-lift-cancellation.md). The
+/// parameter <c>P</c> of <c>Big.Own&lt;X&gt;.M(P)</c> is T'_5 over <c>!0</c> (1,577 chars, 64 <c>!0</c> leaves), and
+/// <c>Big.Own&lt;T_5&gt;</c> is 2,687 chars, so neither is oversized; but <c>P[!0 := T_5]</c> renders T_11's shape, 102,387
+/// chars, past <c>ModelNames</c>' 65,536-char substitution budget. A call through <c>Own&lt;T_5&gt;</c> must resolve Unresolved
+/// without that string being built; one through <c>Own&lt;int&gt;</c> (T_5's shape, 1,587 chars substituted) still joins its
+/// definition. Also: a merged own node with the marker carries exactly one OversizedType opacity.
 /// </summary>
 public sealed class OversizedSubstitutionTests : IClassFixture<OversizedSubstitutionFixture>
 {
@@ -29,11 +30,11 @@ public sealed class OversizedSubstitutionTests : IClassFixture<OversizedSubstitu
     #endregion
 
     #region Methods
-    /// <summary>The call through <c>Own&lt;T_10&gt;</c> is Unresolved at its offset, and draws no edge to <c>M</c>.</summary>
+    /// <summary>The call through <c>Own&lt;T_5&gt;</c> is Unresolved at its offset, and draws no edge to <c>M</c>.</summary>
     [Fact]
     public void CallThroughAComposedOversizedInstantiation_ResolvesUnresolved_NeverMatched()
     {
-        var offset = fixture.CallOffsets["OwnT10"];
+        var offset = fixture.CallOffsets["OwnT5"];
 
         Assert.Contains(fixture.Graph.Opacities, o => o.Site == Caller && o.Offset == offset && o.Kind == OpacityKind.Unresolved);
         Assert.DoesNotContain(fixture.Graph.Successors(Caller), e => e.Offset == offset && e.To == MDefinition.NodeId);
@@ -51,14 +52,14 @@ public sealed class OversizedSubstitutionTests : IClassFixture<OversizedSubstitu
     }
 
     /// <summary>
-    /// <see cref="ModelNames.ParameterTypes"/> with T_10's 51,187-char rendering as <c>!0</c>: <c>&lt;unknown&gt;</c>, promptly
-    /// (the ~100M-char rendering is never built).
+    /// <see cref="ModelNames.ParameterTypes"/> with T_5's 1,587-char rendering as <c>!0</c>: <c>&lt;unknown&gt;</c>, promptly
+    /// (the 102,387-char rendering is never built).
     /// </summary>
     [Fact]
     public void ParameterTypes_WithAComposedSubstitutionPastTheBudget_IsUnknown_Promptly()
     {
-        var argument = OversizedTypeNameTestsSupport.Name(OversizedTypeFixture.EdgeDepth);
-        Assert.Equal(51_187, argument.Length);
+        var argument = OversizedTypeNameTestsSupport.Name(OversizedSubstitutionFixture.ArgumentDepth);
+        Assert.Equal(1_587, argument.Length);
 
         var clock = Stopwatch.StartNew();
         var rendered = ModelNames.ParameterTypes(MDefinition.Definition, [argument]);
@@ -68,16 +69,33 @@ public sealed class OversizedSubstitutionTests : IClassFixture<OversizedSubstitu
         Assert.True(clock.Elapsed < TimeSpan.FromMilliseconds(500), $"{clock.ElapsedMilliseconds} ms.");
     }
 
-    /// <summary>The same definition substituted with <c>System.Int32</c> renders whole: T_10's own name.</summary>
+    /// <summary>The same definition substituted with <c>System.Int32</c> renders whole: T_5's own name.</summary>
     [Fact]
     public void ParameterTypes_WithAShortSubstitution_RendersWhole() =>
-        Assert.Equal([OversizedTypeNameTestsSupport.Name(OversizedTypeFixture.EdgeDepth)], ModelNames.ParameterTypes(MDefinition.Definition, ["System.Int32"]));
+        Assert.Equal([OversizedTypeNameTestsSupport.Name(OversizedSubstitutionFixture.ParameterDepth)], ModelNames.ParameterTypes(MDefinition.Definition, ["System.Int32"]));
+
+    /// <summary>
+    /// The premise, in numbers: the composition this fixture builds is reachable under the char bound. P (T'_5 over
+    /// <c>!0</c>) and the argument T_5 are each within <c>MaxChars</c>, while their composition (T_11's shape) renders past
+    /// the 65,536-char substitution budget; the whole-substituted control (T_5's shape) renders well under it.
+    /// </summary>
+    [Fact]
+    public void Premise_TheComposedRendering_IsPastTheSubstitutionBudget_WhileEachPartIsWithinTheCharsBound()
+    {
+        const int budget = 65_536;
+        var composedDepth = OversizedSubstitutionFixture.ParameterDepth + OversizedSubstitutionFixture.ArgumentDepth + 1;
+
+        Assert.True(OversizedTypeFixture.TkChars(OversizedSubstitutionFixture.ArgumentDepth) <= CCIProvider.TypeSize.MaxChars);
+        Assert.Equal(102_387, OversizedTypeNameTestsSupport.Name(composedDepth).Length);
+        Assert.True(OversizedTypeNameTestsSupport.Name(composedDepth).Length > budget);
+        Assert.True(OversizedTypeNameTestsSupport.Name(OversizedSubstitutionFixture.ParameterDepth).Length < budget);
+    }
 
     /// <summary>The definition itself (no substitution) renders positionally, within the bound, with no marker.</summary>
     [Fact]
     public void Definition_RendersPositionally_WithNoMarker()
     {
-        Assert.Equal("Big.Own`1.M(" + OversizedTypeNameTestsSupport.Name(OversizedTypeFixture.EdgeDepth, "!0") + ")", MDefinition.NodeId);
+        Assert.Equal("Big.Own`1.M(" + OversizedTypeNameTestsSupport.Name(OversizedSubstitutionFixture.ParameterDepth, "!0") + ")", MDefinition.NodeId);
         Assert.False(CanonicalName.HasOversized(MDefinition.NodeId));
     }
 
@@ -99,8 +117,9 @@ public sealed class OversizedSubstitutionTests : IClassFixture<OversizedSubstitu
     }
 
     /// <summary>
-    /// The premise, read from CCI's own call-site references: <c>Own&lt;T_10&gt;</c> is exactly 4,096 parts (not oversized),
-    /// and CCI's specialized parameter of the call through it is past the bound; through <c>Own&lt;int&gt;</c> it is within it.
+    /// The premise, read from CCI's own call-site references: <c>Own&lt;T_5&gt;</c> is 2,687 chars (not oversized), and CCI's
+    /// specialized parameter of the call through it is past the bound; through <c>Own&lt;int&gt;</c> it is T_5's shape,
+    /// within it.
     /// </summary>
     [Fact]
     public void Premise_BothInstantiationsAreWithinTheBound_ButOnlyTheComposedParameterIsPastIt()
@@ -108,16 +127,50 @@ public sealed class OversizedSubstitutionTests : IClassFixture<OversizedSubstitu
         var caller = Assert.Single(fixture.Layers.CciAssembly.Methods, m => m.Name.Value == "Caller");
         var calls = AssemblyAnalyzer.TryReadBody(caller).Body!.Operations
             .Where(o => o.OperationCode == Microsoft.Cci.OperationCode.Call).Select(o => (Microsoft.Cci.IMethodReference)o.Value).ToArray();
-        Assert.Equal(2, calls.Length);
-        var (onT10, onInt) = (calls[0], calls[1]);
+        Assert.Equal(3, calls.Length);
+        var (onT5, onInt) = (calls[0], calls[1]);
 
-        Assert.Equal(4096L, CCIProvider.TypeSize.Parts(onT10.ContainingType));
-        Assert.False(CCIProvider.TypeSize.IsOversized(onT10.ContainingType));
-        Assert.True(CCIProvider.TypeSize.IsOversized(Assert.Single(onT10.Parameters).Type));
-        Assert.Equal(4095L, CCIProvider.TypeSize.Parts(Assert.Single(onInt.Parameters).Type));
+        Assert.Equal(8 + "type:Big.Own`1".Length + OversizedTypeFixture.TkChars(OversizedSubstitutionFixture.ArgumentDepth), CCIProvider.TypeSize.Chars(onT5.ContainingType));
+        Assert.False(CCIProvider.TypeSize.IsOversized(onT5.ContainingType));
+        Assert.True(CCIProvider.TypeSize.IsOversized(Assert.Single(onT5.Parameters).Type));
+        Assert.Equal(OversizedTypeFixture.TkChars(OversizedSubstitutionFixture.ParameterDepth), CCIProvider.TypeSize.Chars(Assert.Single(onInt.Parameters).Type));
+        Assert.False(CCIProvider.TypeSize.IsOversized(Assert.Single(onInt.Parameters).Type));
     }
 
-    /// <summary>Cross-layer parity (ADR 0025) on this assembly too, including the two calls through instantiations.</summary>
+    /// <summary>
+    /// A composition the char bound newly separates from the substitution budget: <c>MWide</c>'s T'_6 over <c>!0</c> (3,177
+    /// chars) through <c>Own&lt;int&gt;</c> is T_6's shape, 5,353 chars, past <c>MaxChars</c> as CCIProvider specializes the
+    /// call's parameter, though substituting the definition renders only 3,187 chars, well within the 65,536-char budget.
+    /// The call-site parameter is the marker on both layers, so it cannot match the definition substituted whole: the call
+    /// does not join <c>MWide</c> but fails closed, to an External marker node with Unresolved and OversizedType at the
+    /// site (never a silent edge, never clean). Under the parts bound alone (255 parts) it joined; this pins the trade-off
+    /// of the ruling (names-chars-and-lift-cancellation.md), and should change only with it.
+    /// </summary>
+    [Fact]
+    public void CallWhoseSpecializedParameterIsPastTheCharsBound_ButWithinTheBudget_FailsClosed()
+    {
+        var offset = fixture.CallOffsets["WideOwnInt"];
+        var wide = Assert.Single(fixture.Index.Methods, m => m.Definition.Name == "MWide");
+        var caller = Assert.Single(fixture.Layers.CciAssembly.Methods, m => m.Name.Value == "Caller");
+        var specialized = AssemblyAnalyzer.TryReadBody(caller).Body!.Operations
+            .Where(o => o.OperationCode == Microsoft.Cci.OperationCode.Call).Select(o => (Microsoft.Cci.IMethodReference)o.Value).Last();
+        var parameter = Assert.Single(specialized.Parameters).Type;
+
+        Assert.Equal(OversizedTypeFixture.TkChars(OversizedSubstitutionFixture.ParameterDepth + 1), CCIProvider.TypeSize.Chars(parameter));
+        Assert.True(CCIProvider.TypeSize.Parts(parameter) <= CCIProvider.TypeSize.MaxParts);
+        Assert.True(CCIProvider.TypeSize.IsOversized(parameter));
+        Assert.Equal([OversizedTypeNameTestsSupport.Name(OversizedSubstitutionFixture.ParameterDepth + 1)], ModelNames.ParameterTypes(wide.Definition, ["System.Int32"]));
+
+        var edge = Assert.Single(fixture.Graph.Successors(Caller), e => e.Offset == offset);
+        Assert.NotEqual(wide.NodeId, edge.To);
+        Assert.Equal("Big.Own`1.MWide(" + CanonicalName.Oversized(CCIProvider.TypeSize.Parts(parameter), CCIProvider.TypeSize.Hash(parameter)) + ")", edge.To);
+        Assert.Equal(MethodNodeKind.External, fixture.Graph.Node(edge.To)?.Kind);
+        var atSite = fixture.Graph.Opacities.Where(o => o.Site == Caller && o.Offset == offset).Select(o => o.Kind).ToArray();
+        Assert.Contains(OpacityKind.Unresolved, atSite);
+        Assert.Contains(OpacityKind.OversizedType, atSite);
+    }
+
+    /// <summary>Cross-layer parity (ADR 0025) on this assembly too, including the three calls through instantiations.</summary>
     [Fact]
     public void CciAndModelLayers_ProduceIdenticalKeySets_ForTheSubstitutionFixture() =>
         CanonicalNameParity.AssertLayersAgree(fixture.Layers.CciLayer, fixture.Layers.ModelLayer);
@@ -147,9 +200,9 @@ internal static class OversizedTypeNameTestsSupport
 
 /// <summary>
 /// <c>OversizedSubstitution.dll</c> (<see cref="RawAssembly"/>): <c>Big.Pair`2</c>; <c>Big.Own`1&lt;X&gt;</c> with
-/// <c>static void M(P)</c>, P = T'_10 over <c>!0</c>; <c>Big.Holder</c> with two <c>Merged(T_11)</c> differing only by return
-/// type, and <c>Caller</c>, which calls <c>M</c> through MemberRefs on the TypeSpecs <c>Own&lt;T_10&gt;</c> and
-/// <c>Own&lt;int&gt;</c> (the ordinary encoding of a call on a generic instance). Metadata only; nothing runs.
+/// <c>static void M(P)</c>, P = T'_5 over <c>!0</c>; <c>Big.Holder</c> with two <c>Merged(T_11)</c> differing only by return
+/// type, <c>static void MWide(T'_6 over !0)</c>, and <c>Caller</c>, which calls <c>M</c> through MemberRefs on the TypeSpecs <c>Own&lt;T_5&gt;</c> and
+/// <c>Own&lt;int&gt;</c> (the ordinary encoding of a call on a generic instance), and <c>MWide</c> through <c>Own&lt;int&gt;</c>. Metadata only; nothing runs.
 /// </summary>
 public sealed class OversizedSubstitutionFixture : IDisposable
 {
@@ -186,7 +239,7 @@ public sealed class OversizedSubstitutionFixture : IDisposable
 
     public MethodGraph Graph { get; }
 
-    /// <summary>The offset of <c>Caller</c>'s calls: <c>OwnT10</c> and <c>OwnInt</c>.</summary>
+    /// <summary>The offset of <c>Caller</c>'s calls: <c>OwnT5</c>, <c>OwnInt</c> and <c>WideOwnInt</c>.</summary>
     public IReadOnlyDictionary<string, uint> CallOffsets { get; }
     #endregion
 
@@ -205,9 +258,9 @@ public sealed class OversizedSubstitutionFixture : IDisposable
         raw.GenericParameter(pair, "A", 0);
         raw.GenericParameter(pair, "B", 1);
 
-        // T_0..T_11 over int32, and Q_0..Q_9 over !0.
+        // T_0..T_11 over int32, and Q_0..Q_5 over !0 (M's P = Pair<Q_4,Q_4> is T'_5; MWide's Pair<Q_5,Q_5> is T'_6).
         var t = Chain(raw, pair, OversizedTypeFixture.OversizedDepth, e => e.Int32());
-        var q = Chain(raw, pair, OversizedTypeFixture.EdgeDepth - 1, e => e.GenericTypeParameter(0));
+        var q = Chain(raw, pair, ParameterDepth, e => e.GenericTypeParameter(0));
         void PairOf(SignatureTypeEncoder e, TypeSpecificationHandle a)
         {
             var arguments = e.GenericInstantiation(pair, 2, isValueType: false);
@@ -218,13 +271,15 @@ public sealed class OversizedSubstitutionFixture : IDisposable
 
         var own = raw.Type("Big", "Own`1", raw.Object);
         raw.GenericParameter(own, "X", 0);
-        var mSignature = RawAssembly.MethodSig(false, r => r.Void(), p => PairOf(p, q[^1]));
-        raw.Static("M", mSignature, Ret);
+        BlobBuilder Over(int level) => RawAssembly.MethodSig(false, r => r.Void(), p => PairOf(p, q[level]));
+        raw.Static("M", Over(ParameterDepth - 1), Ret);
+        raw.Static("MWide", Over(ParameterDepth), Ret);
 
-        var ownT10 = raw.TypeSpec(e => SsaTypeNameDagFixture.ClassOf(e.GenericInstantiation(own, 1, isValueType: false).AddArgument(), t[OversizedTypeFixture.EdgeDepth]));
+        var ownT5 = raw.TypeSpec(e => SsaTypeNameDagFixture.ClassOf(e.GenericInstantiation(own, 1, isValueType: false).AddArgument(), t[ArgumentDepth]));
         var ownInt = raw.TypeSpec(e => e.GenericInstantiation(own, 1, isValueType: false).AddArgument().Int32());
-        var mOnT10 = raw.MemberRef(ownT10, "M", RawAssembly.MethodSig(false, r => r.Void(), p => PairOf(p, q[^1])));
-        var mOnInt = raw.MemberRef(ownInt, "M", RawAssembly.MethodSig(false, r => r.Void(), p => PairOf(p, q[^1])));
+        var mOnT5 = raw.MemberRef(ownT5, "M", Over(ParameterDepth - 1));
+        var mOnInt = raw.MemberRef(ownInt, "M", Over(ParameterDepth - 1));
+        var mWideOnInt = raw.MemberRef(ownInt, "MWide", Over(ParameterDepth));
 
         raw.Type("Big", "Holder", raw.Object, TypeAttributes.Public | TypeAttributes.Class | TypeAttributes.Abstract | TypeAttributes.Sealed);
         raw.Static("Merged", RawAssembly.MethodSig(false, r => r.Void(), p => PairOf(p, t[OversizedTypeFixture.EdgeDepth])), Ret);
@@ -236,7 +291,7 @@ public sealed class OversizedSubstitutionFixture : IDisposable
         var at = new Dictionary<string, uint>();
         raw.Static("Caller", RawAssembly.MethodSig(false, r => r.Void()), il =>
         {
-            foreach (var (name, target) in new[] { ("OwnT10", mOnT10), ("OwnInt", mOnInt) })
+            foreach (var (name, target) in new[] { ("OwnT5", mOnT5), ("OwnInt", mOnInt), ("WideOwnInt", mWideOnInt) })
             {
                 il.OpCode(ILOpCode.Ldnull);
                 at[name] = (uint)il.Offset;
@@ -274,6 +329,12 @@ public sealed class OversizedSubstitutionFixture : IDisposable
     #endregion
 
     #region Fields
+    /// <summary>P is T'_5 over <c>!0</c>: the largest level within <c>TypeSize.MaxChars</c> over <c>int</c> too, so the control substitutes whole.</summary>
+    public const int ParameterDepth = 5;
+
+    /// <summary>Own's argument, T_5: within <c>MaxChars</c>, and long enough that P[!0 := T_5] passes the substitution budget.</summary>
+    public const int ArgumentDepth = 5;
+
     private readonly SsaTempDirectory temp = new();
     #endregion
 }

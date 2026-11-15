@@ -22,7 +22,7 @@ using Model.Types;
 /// <list type="bullet">
 /// <item><description>By-ref-ness is read from <see cref="PointerType.IsManaged"/> (our fork), never from the parameter
 /// kind, which is <c>Out</c> for a non-by-ref <c>[Out] T*</c>.</description></item>
-/// <item><description>A generic instance past <c>CCIProvider.TypeSize.MaxParts</c> is not built (<see cref="BasicType.Oversized"/>)
+/// <item><description>A generic instance past <c>CCIProvider.TypeSize.MaxParts</c> or <c>MaxChars</c> is not built (<see cref="BasicType.Oversized"/>)
 /// and renders as <see cref="CanonicalName.Oversized"/>, as CciNames renders the same measure.</description></item>
 /// <item><description>A type's <c>GenericParameterCount</c> is already cumulative over its nesting chain, so
 /// arity is read from the innermost type only and never summed. Its <c>GenericArguments</c> are cumulative only

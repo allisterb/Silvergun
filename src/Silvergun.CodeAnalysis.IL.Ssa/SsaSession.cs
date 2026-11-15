@@ -194,13 +194,13 @@ public sealed class SsaSession : IDisposable
             var body = ILImporter.ParseCode(definition, offsets, cancellation);
             stage = SsaFailureKind.Verify;
             cancellation.ThrowIfCancellationRequested();
-            IRVerifier.Verify(body);
+            IRVerifier.Verify(body, cancellation);
             stage = SsaFailureKind.Ssa;
             cancellation.ThrowIfCancellationRequested();
-            PassRunner.Run(new SsaPromotion(), new MethodTransformContext(CompilationOf(definition.Module), body));
+            PassRunner.Run(new SsaPromotion(cancellation), new MethodTransformContext(CompilationOf(definition.Module), body));
             stage = SsaFailureKind.VerifyAfterSsa;
             cancellation.ThrowIfCancellationRequested();
-            IRVerifier.Verify(body);
+            IRVerifier.Verify(body, cancellation);
             // Verify and promotion load lazily; a cancellation the adapter swallowed there may have truncated what they read.
             cancellation.ThrowIfCancellationRequested();
             return reads.Count > 0

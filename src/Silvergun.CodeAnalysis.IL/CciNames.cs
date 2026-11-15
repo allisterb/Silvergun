@@ -174,8 +174,8 @@ public static class CciNames
             // reference that survives the cases above is an IBasicType on the Model side and takes its named
             // branch, not its default. Do not collapse this to <unknown> to "match" ModelNames.
             // Measured before it is walked: a TypeSpec DAG's tree doubles per level (CCIProvider.TypeSize).
-            IGenericTypeInstanceReference instance when TypeSize.Parts(instance) is var parts && parts > TypeSize.MaxParts =>
-                CanonicalName.Oversized(parts, TypeSize.Hash(instance)),
+            IGenericTypeInstanceReference instance when TypeSize.IsOversized(instance) =>
+                CanonicalName.Oversized(TypeSize.Parts(instance), TypeSize.Hash(instance)),
             _ => CanonicalName.GenericInstance(CanonicalName.NodeId(Of(type)), GenericArguments(type, depth)),
         };
 

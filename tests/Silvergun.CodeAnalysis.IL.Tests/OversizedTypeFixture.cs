@@ -16,7 +16,9 @@ using Cci = Microsoft.Cci;
 /// <summary>
 /// A hostile TypeSpec DAG (T_k = <c>Big.Pair&lt;T_k-1,T_k-1&gt;</c>, 2^(k+2)-1 parts as a tree) written row by row
 /// (<see cref="RawAssembly"/>), with an oversized instance (more than <c>CCIProvider.TypeSize.MaxParts</c>) in several
-/// signature positions, and <c>Big.Holder.Caller</c> calling each method once. Read both ways
+/// signature positions; <c>Big.Box&lt;leaf&gt;</c> over non-generic leaves whose names set its <c>TypeSize.Chars</c> at,
+/// one past, and far past <c>MaxChars</c> with 2 parts (names-chars-and-lift-cancellation.md); and
+/// <c>Big.Holder.Caller</c> calling each method once. Read both ways
 /// (<see cref="CanonicalNameLayersFixture"/>) and as a <see cref="MethodGraph"/>. Metadata only; nothing runs.
 /// docs/agent/tasks/graph-names-hostile-types.md.
 /// <para>
@@ -103,6 +105,13 @@ public sealed class OversizedTypeFixture : IDisposable
         raw.GenericParameter(inner2, "T", 0);
         raw.GenericParameter(inner2, "U", 1);
 
+        // Non-generic leaves whose name length sets Box<leaf>'s TypeSize.Chars exactly (see BoxChars): parts stay at 2.
+        TypeDefinitionHandle Leaf(string name) => raw.Type("Big", name, raw.Object);
+        var charEdge = Leaf(CharEdgeName);
+        var charJustOver = Leaf(CharJustOverName);
+        var longA = Leaf(LongNameA);
+        var longB = Leaf(LongNameB);
+
         var t = Chain(raw, pair, Depth, e => e.Int32());
         var u = Chain(raw, pair, OversizedDepth, e => e.String());
 
@@ -114,6 +123,8 @@ public sealed class OversizedTypeFixture : IDisposable
         }
         void Of(SignatureTypeEncoder e, TypeDefinitionHandle generic, TypeSpecificationHandle argument) =>
             SsaTypeNameDagFixture.ClassOf(e.GenericInstantiation(generic, 1, isValueType: false).AddArgument(), argument);
+        void BoxOf(SignatureTypeEncoder e, TypeDefinitionHandle leaf) =>
+            e.GenericInstantiation(box, 1, isValueType: false).AddArgument().Type(leaf, isValueType: false);
 
         void Inner2Of(SignatureTypeEncoder e, TypeSpecificationHandle argument)
         {
@@ -140,6 +151,10 @@ public sealed class OversizedTypeFixture : IDisposable
             SsaTypeNameDagFixture.ClassOf(arguments.AddArgument(), t10);
             arguments.AddArgument().Int32();
         });
+        specs[Token.BoxCharEdge] = raw.TypeSpec(e => BoxOf(e, charEdge));
+        specs[Token.BoxCharJustOver] = raw.TypeSpec(e => BoxOf(e, charJustOver));
+        specs[Token.BoxLongA] = raw.TypeSpec(e => BoxOf(e, longA));
+        specs[Token.BoxLongB] = raw.TypeSpec(e => BoxOf(e, longB));
 
         raw.Type("Big", "Holder", raw.Object, TypeAttributes.Public | TypeAttributes.Class | TypeAttributes.Abstract | TypeAttributes.Sealed);
         BlobBuilder Takes(Action<SignatureTypeEncoder> parameter) => RawAssembly.MethodSig(false, r => r.Void(), parameter);
@@ -168,8 +183,16 @@ public sealed class OversizedTypeFixture : IDisposable
             }), Ret)),
             // delegate*<T_11, void>: a FNPTR signature whose one parameter is the oversized instance.
             ("TakeFnPtr", raw.Static("TakeFnPtr", Takes(p => p.FunctionPointer().Parameters(1, r => r.Void(), ps => PairOf(ps.AddParameter().Type(), t10, t10))), Ret)),
-            ("TakeEdge", raw.Static("TakeEdge", Takes(p => PairOf(p, t[EdgeDepth - 1], t[EdgeDepth - 1])), Ret)),
+            // T_5, the largest level within TypeSize.MaxChars, written inline.
+            ("TakeEdge", raw.Static("TakeEdge", Takes(p => PairOf(p, t[CharEdgeDepth - 1], t[CharEdgeDepth - 1])), Ret)),
+            // Box<T_10>: at MaxParts exactly, but past MaxChars.
             ("TakeBoxEdge", raw.Static("TakeBoxEdge", Takes(p => Of(p, box, t10)), Ret)),
+            // Box<leaf>: 2 parts, at MaxChars exactly and one past it.
+            ("TakeCharEdge", raw.Static("TakeCharEdge", Takes(p => BoxOf(p, charEdge)), Ret)),
+            ("TakeCharJustOver", raw.Static("TakeCharJustOver", Takes(p => BoxOf(p, charJustOver)), Ret)),
+            // Two overloads differing only in a type cut by chars alone.
+            ("OverLongA", raw.Static("OverLong", Takes(p => BoxOf(p, longA)), Ret)),
+            ("OverLongB", raw.Static("OverLong", Takes(p => BoxOf(p, longB)), Ret)),
         };
 
         raw.Static("Tokens", RawAssembly.MethodSig(false, r => r.Void()), il =>
@@ -230,15 +253,45 @@ public sealed class OversizedTypeFixture : IDisposable
     /// <summary>The deepest level written (T_20: about 4M parts as a tree).</summary>
     public const int Depth = 20;
 
-    /// <summary>The largest level within the bound: T_10, 4,095 parts.</summary>
+    /// <summary>The largest level within <c>TypeSize.MaxParts</c>: T_10, 4,095 parts (past <c>MaxChars</c>: 85,993 chars).</summary>
     public const int EdgeDepth = 10;
 
-    /// <summary>The first level past it: T_11, 8,191 parts.</summary>
+    /// <summary>The first level past <c>MaxParts</c>: T_11, 8,191 parts.</summary>
     public const int OversizedDepth = 11;
 
-    /// <summary>Every method <c>Caller</c> calls, in call order (<c>OverT</c>/<c>OverU</c> are both named <c>Over</c>).</summary>
+    /// <summary>The largest level within <c>TypeSize.MaxChars</c>: T_5, 2,665 chars (<see cref="TkChars"/>).</summary>
+    public const int CharEdgeDepth = 5;
+
+    /// <summary>
+    /// <c>TypeSize.Chars</c> of <c>Box&lt;Big.leaf&gt;</c> for a non-generic leaf named <paramref name="leafName"/>: "instance" (8),
+    /// "type:Big.Box`1" (14), "type:Big." + name + "`0".
+    /// </summary>
+    public static long BoxChars(string leafName) => 8 + 14 + ("type:Big.".Length + leafName.Length + 2);
+
+    /// <summary>
+    /// <c>TypeSize.Chars</c> of T_k: "instance" (8) + "type:Big.Pair`2" (15) + 2 T_k-1, over "type:System.Int32`0" (19)
+    /// leaves; so 84·2^k - 23.
+    /// </summary>
+    public static long TkChars(int k) => 84L * (1L << k) - 23;
+
+    /// <summary>A leaf name putting <c>Box&lt;leaf&gt;</c> at <c>MaxChars</c> exactly (4,096).</summary>
+    public static readonly string CharEdgeName = new('E', 4096 - 33);
+
+    /// <summary>One char longer: <c>Box&lt;leaf&gt;</c> is 4,097 chars, still 2 parts.</summary>
+    public static readonly string CharJustOverName = new('J', 4096 - 32);
+
+    /// <summary>Two ~5,000-char leaf names, so <c>Box&lt;leaf&gt;</c> is far past <c>MaxChars</c> at 2 parts.</summary>
+    public static readonly string LongNameA = new('A', 5000);
+
+    public static readonly string LongNameB = new('B', 5000);
+
+    /// <summary>
+    /// Every method <c>Caller</c> calls, in call order (<c>OverT</c>/<c>OverU</c> are both named <c>Over</c>, and
+    /// <c>OverLongA</c>/<c>OverLongB</c> both <c>OverLong</c>).
+    /// </summary>
     public static readonly string[] Calls =
-        ["TakeOversized", "TakeArray", "TakeByRef", "TakeBox", "TakeNested", "TakeNestedOwn", "OverT", "OverU", "TakeJustOver", "TakeFnPtr", "TakeEdge", "TakeBoxEdge"];
+        ["TakeOversized", "TakeArray", "TakeByRef", "TakeBox", "TakeNested", "TakeNestedOwn", "OverT", "OverU", "TakeJustOver", "TakeFnPtr",
+         "TakeEdge", "TakeBoxEdge", "TakeCharEdge", "TakeCharJustOver", "OverLongA", "OverLongB"];
 
     private readonly SsaTempDirectory temp = new();
     #endregion
@@ -255,14 +308,21 @@ public sealed class OversizedTypeFixture : IDisposable
         PairT11T10,
         /// <summary><c>Box&lt;T_11&gt;</c>: 8,192 parts.</summary>
         BoxT11,
-        /// <summary><c>Box&lt;T_10&gt;</c>: exactly 4,096 parts, the bound itself.</summary>
+        /// <summary><c>Box&lt;T_10&gt;</c>: exactly 4,096 parts, the parts bound itself (past the chars bound).</summary>
         BoxT10,
         /// <summary><c>Outer&lt;T_11&gt;.Inner</c>.</summary>
         InnerT11,
         /// <summary><c>Outer&lt;T_11&gt;.Inner2&lt;int32&gt;</c>.</summary>
         Inner2T11,
-        /// <summary><c>Pair&lt;T_10,int32&gt;</c>: 4,097 parts, one past the bound.</summary>
+        /// <summary><c>Pair&lt;T_10,int32&gt;</c>: 4,097 parts, one past the parts bound.</summary>
         PairT10Int,
+        /// <summary><c>Box&lt;Big.E…&gt;</c>: 2 parts, exactly 4,096 chars, the chars bound itself.</summary>
+        BoxCharEdge,
+        /// <summary><c>Box&lt;Big.J…&gt;</c>: 2 parts, 4,097 chars, one past the chars bound.</summary>
+        BoxCharJustOver,
+        /// <summary><c>Box&lt;Big.A…&gt;</c>, <c>Box&lt;Big.B…&gt;</c>: 2 parts, 5,033 chars each.</summary>
+        BoxLongA,
+        BoxLongB,
     }
     #endregion
 }

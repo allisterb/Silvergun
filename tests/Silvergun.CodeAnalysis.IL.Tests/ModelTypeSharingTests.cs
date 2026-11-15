@@ -23,6 +23,8 @@ using ModelTypes = Model.Types;
 /// CCIProvider's <c>TypeExtractor</c> builds one Model <see cref="ModelTypes.BasicType"/> per CCI generic-instance object
 /// (our fork). CCI caches a TypeSpec row's decoded type per (owner, row), so the TypeSpec DAG T_k = <c>Big.Pair&lt;T_k-1,T_k-1&gt;</c>
 /// stays a DAG in the Model (about k+1 instances) instead of a 2^k tree per reference. Names and equality are unchanged.
+/// Under the char bound (names-chars-and-lift-cancellation.md) the Model builds T_k whole up to T_5 (2,665 chars) and T_6
+/// (5,353 chars, 255 parts) is the first oversized level, so sharing is observed at T_0..T_5.
 /// </summary>
 public sealed class ModelTypeSharingTests : IClassFixture<ModelTypeSharingFixture>
 {
@@ -33,11 +35,11 @@ public sealed class ModelTypeSharingTests : IClassFixture<ModelTypeSharingFixtur
     #region Methods
     // ---- The Model is a DAG ---------------------------------------------------------------------------------------------
 
-    /// <summary>At every level of T_k, both generic arguments are one object: T_k-1's.</summary>
+    /// <summary>At every level of T_k, both generic arguments are one object: T_k-1's (up to T_5, the largest level built).</summary>
     [Theory]
     [InlineData(1)]
-    [InlineData(5)]
-    [InlineData(10)]
+    [InlineData(3)]
+    [InlineData(ModelTypeSharingFixture.EdgeDepth)]
     public void Tk_BothArgumentsAreTheSameObject_AtEveryLevel(int k)
     {
         var level = Tokens(fixture.First)[k];
@@ -57,7 +59,7 @@ public sealed class ModelTypeSharingTests : IClassFixture<ModelTypeSharingFixtur
     [Theory]
     [InlineData(0)]
     [InlineData(3)]
-    [InlineData(10)]
+    [InlineData(ModelTypeSharingFixture.EdgeDepth)]
     public void Tk_ReachesKPlusOneDistinctInstances(int k)
     {
         var reachable = Reachable(Tokens(fixture.First)[k]);
@@ -85,7 +87,7 @@ public sealed class ModelTypeSharingTests : IClassFixture<ModelTypeSharingFixtur
     }
 
     /// <summary>
-    /// <c>Repeats</c> loads T_10 and T_11 <see cref="ModelTypeSharingFixture.Repeats"/> times each: CCI hands over one object per
+    /// <c>Repeats</c> loads T_5 and T_6 <see cref="ModelTypeSharingFixture.Repeats"/> times each: CCI hands over one object per
     /// row, and so does the Model, oversized instance included.
     /// </summary>
     [Fact]
@@ -106,8 +108,8 @@ public sealed class ModelTypeSharingTests : IClassFixture<ModelTypeSharingFixtur
     }
 
     /// <summary>
-    /// Bounded cost: the distinct BasicTypes reachable from all of <c>Repeats</c>'s 200 tokens are as many as from one T_10 and
-    /// one T_11 alone (11 instances + leaf, + the oversized T_11), so they do not grow with the reference count.
+    /// Bounded cost: the distinct BasicTypes reachable from all of <c>Repeats</c>'s 200 tokens are as many as from one T_5 and
+    /// one T_6 alone (6 instances + leaf, + the oversized T_6), so they do not grow with the reference count.
     /// </summary>
     [Fact]
     public void RepeatedTokens_DoNotGrowTheNumberOfDistinctTypes()
@@ -125,8 +127,8 @@ public sealed class ModelTypeSharingTests : IClassFixture<ModelTypeSharingFixtur
     }
 
     /// <summary>
-    /// Two parameters of one signature that name the same TypeSpec row (<c>class T_10</c> twice) are one Model object, as they
-    /// are one CCI object; the same for the oversized T_11.
+    /// Two parameters of one signature that name the same TypeSpec row (<c>class T_5</c> twice) are one Model object, as they
+    /// are one CCI object; the same for the oversized T_6.
     /// </summary>
     [Theory]
     [InlineData("TakeTwice")]
@@ -148,7 +150,7 @@ public sealed class ModelTypeSharingTests : IClassFixture<ModelTypeSharingFixtur
     [InlineData(0)]
     [InlineData(1)]
     [InlineData(3)]
-    [InlineData(10)]
+    [InlineData(ModelTypeSharingFixture.EdgeDepth)]
     public void SharedArgumentType_RendersBothArgumentsWhole(int k)
     {
         var name = ModelNames.TypeName(Tokens(fixture.First)[k]);
@@ -166,38 +168,43 @@ public sealed class ModelTypeSharingTests : IClassFixture<ModelTypeSharingFixtur
 
     /// <summary>
     /// Node ids of methods over the shared DAG: within the bound the parameters render whole (both of <c>TakeTwice</c>'s, and
-    /// the inline <c>Pair&lt;T_9,T_9&gt;</c>); past it, the marker carrying T_11's measured parts and hash.
+    /// the inline <c>Pair&lt;T_4,T_4&gt;</c>); past it, the marker carrying T_6's measured parts and hash. T_6 is within
+    /// <c>MaxParts</c> (255), cut by chars alone.
     /// </summary>
     [Fact]
     public void NodeIds_OfMethodsOverTheSharedDag_AreUnchanged()
     {
-        var t10 = OversizedTypeNameTestsSupport.Name(ModelTypeSharingFixture.EdgeDepth);
-        var t11 = CciTokens("Tokens")[ModelTypeSharingFixture.OversizedDepth];
-        var marker = CanonicalName.Oversized(TypeSize.Parts(t11), TypeSize.Hash(t11));
-        Assert.Equal(8191L, TypeSize.Parts(t11));
+        var edge = OversizedTypeNameTestsSupport.Name(ModelTypeSharingFixture.EdgeDepth);
+        var oversized = CciTokens("Tokens")[ModelTypeSharingFixture.OversizedDepth];
+        var marker = CanonicalName.Oversized(TypeSize.Parts(oversized), TypeSize.Hash(oversized));
+        Assert.Equal(255L, TypeSize.Parts(oversized));
+        Assert.Equal(5353L, TypeSize.Chars(oversized));
 
-        Assert.Equal($"Big.Holder.TakeTwice({t10},{t10})", NodeId("TakeTwice"));
-        Assert.Equal($"Big.Holder.TakeInline({t10})", NodeId("TakeInline"));
+        Assert.Equal($"Big.Holder.TakeTwice({edge},{edge})", NodeId("TakeTwice"));
+        Assert.Equal($"Big.Holder.TakeInline({edge})", NodeId("TakeInline"));
         Assert.Equal($"Big.Holder.TakeOversizedTwice({marker},{marker})", NodeId("TakeOversizedTwice"));
     }
 
-    /// <summary>The oversized T_11 token renders the marker too: memoising it did not give it arguments.</summary>
-    [Fact]
-    public void OversizedToken_RendersTheMarker_WithNoArguments()
+    /// <summary>The oversized T_6 token, and T_11 past both bounds, render the marker too: memoising them did not give them arguments.</summary>
+    [Theory]
+    [InlineData(ModelTypeSharingFixture.OversizedDepth)]
+    [InlineData(ModelTypeSharingFixture.Depth)]
+    public void OversizedToken_RendersTheMarker_WithNoArguments(int k)
     {
-        var t11 = Assert.IsType<ModelTypes.BasicType>(Tokens(fixture.First)[ModelTypeSharingFixture.OversizedDepth]);
-        var cci = CciTokens("Tokens")[ModelTypeSharingFixture.OversizedDepth];
+        var model = Assert.IsType<ModelTypes.BasicType>(Tokens(fixture.First)[k]);
+        var cci = CciTokens("Tokens")[k];
 
-        Assert.Empty(t11.GenericArguments);
-        Assert.Equal(CanonicalName.Oversized(TypeSize.Parts(cci), TypeSize.Hash(cci)), ModelNames.TypeName(t11));
+        Assert.Empty(model.GenericArguments);
+        Assert.Equal(CanonicalName.Oversized(TypeSize.Parts(cci), TypeSize.Hash(cci)), ModelNames.TypeName(model));
     }
 
     // ---- BasicType.Equals -----------------------------------------------------------------------------------------------
 
-    /// <summary>An instance equals itself: with arguments (T_0, T_10) and oversized (T_11).</summary>
+    /// <summary>An instance equals itself: with arguments (T_0, T_5) and oversized (T_6, T_11).</summary>
     [Theory]
     [InlineData(0)]
-    [InlineData(10)]
+    [InlineData(5)]
+    [InlineData(6)]
     [InlineData(11)]
     public void Equals_AnInstance_EqualsItself(int k)
     {
@@ -214,7 +221,8 @@ public sealed class ModelTypeSharingTests : IClassFixture<ModelTypeSharingFixtur
     [Theory]
     [InlineData(0)]
     [InlineData(3)]
-    [InlineData(10)]
+    [InlineData(5)]
+    [InlineData(6)]
     [InlineData(11)]
     public void Equals_TkFromTwoIndependentLoads_AreDistinctButEqual(int k)
     {
@@ -230,7 +238,8 @@ public sealed class ModelTypeSharingTests : IClassFixture<ModelTypeSharingFixtur
     /// <summary>Different levels are not equal, shared objects or not (same load, and across loads).</summary>
     [Theory]
     [InlineData(0, 1)]
-    [InlineData(9, 10)]
+    [InlineData(4, 5)]
+    [InlineData(5, 6)]
     [InlineData(10, 11)]
     public void Equals_DifferentLevels_AreNotEqual(int j, int k)
     {
@@ -300,7 +309,7 @@ public sealed class ModelTypeSharingTests : IClassFixture<ModelTypeSharingFixtur
     private static ModelTypes.IType[] Tokens(AssemblyDisassembler assembly)
     {
         var tokens = TokenInstructions(assembly, "Tokens").Select(i => Assert.IsAssignableFrom<ModelTypes.IType>(i.Token)).ToArray();
-        Assert.Equal(ModelTypeSharingFixture.OversizedDepth + 1, tokens.Length);
+        Assert.Equal(ModelTypeSharingFixture.Depth + 1, tokens.Length);
         return tokens;
     }
 
@@ -321,9 +330,9 @@ public sealed class ModelTypeSharingTests : IClassFixture<ModelTypeSharingFixtur
 
 /// <summary>
 /// <c>ModelTypeSharing.dll</c> (<see cref="RawAssembly"/>): <c>Big.Pair`2</c>, the TypeSpec chain T_0..T_11 over <c>int32</c>,
-/// and <c>Big.Holder</c> with <c>Tokens</c> (one <c>ldtoken</c> per level, in order), <c>Repeats</c> (T_10 then T_11,
-/// <see cref="Repeats"/> times each), <c>Once</c> (T_10 and T_11 once), <c>TakeTwice(class T_10, class T_10)</c>,
-/// <c>TakeOversizedTwice(class T_11, class T_11)</c> and <c>TakeInline(Pair&lt;class T_9, class T_9&gt;)</c>. Loaded twice
+/// and <c>Big.Holder</c> with <c>Tokens</c> (one <c>ldtoken</c> per level, in order), <c>Repeats</c> (T_5 then T_6,
+/// <see cref="Repeats"/> times each), <c>Once</c> (T_5 and T_6 once), <c>TakeTwice(class T_5, class T_5)</c>,
+/// <c>TakeOversizedTwice(class T_6, class T_6)</c> and <c>TakeInline(Pair&lt;class T_4, class T_4&gt;)</c>. Loaded twice
 /// through CCIProvider (two independent hosts) and once through raw CCI. Metadata only; nothing runs.
 /// </summary>
 public sealed class ModelTypeSharingFixture : IDisposable
@@ -383,7 +392,7 @@ public sealed class ModelTypeSharingFixture : IDisposable
                 arguments.AddArgument().Int32();
             }),
         };
-        for (var k = 1; k <= OversizedDepth; k++)
+        for (var k = 1; k <= Depth; k++)
         {
             var previous = t[^1];
             t.Add(raw.TypeSpec(s => PairOf(s, previous)));
@@ -433,13 +442,16 @@ public sealed class ModelTypeSharingFixture : IDisposable
     #endregion
 
     #region Fields
-    /// <summary>The largest level within <c>TypeSize.MaxParts</c>: T_10, 4,095 parts.</summary>
-    public const int EdgeDepth = 10;
+    /// <summary>The largest level within the bound (<c>TypeSize.MaxChars</c>): T_5, 2,665 chars.</summary>
+    public const int EdgeDepth = 5;
 
-    /// <summary>The first level past it, and the deepest written: T_11, 8,191 parts.</summary>
-    public const int OversizedDepth = 11;
+    /// <summary>The first level past it: T_6, 5,353 chars, 255 parts (within <c>MaxParts</c>).</summary>
+    public const int OversizedDepth = 6;
 
-    /// <summary>How many times <c>Repeats</c> loads each of T_10 and T_11.</summary>
+    /// <summary>The deepest level written: T_11, 8,191 parts, past both bounds.</summary>
+    public const int Depth = 11;
+
+    /// <summary>How many times <c>Repeats</c> loads each of T_5 and T_6.</summary>
     public const int Repeats = 100;
 
     private readonly SsaTempDirectory temp = new();
