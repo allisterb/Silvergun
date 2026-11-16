@@ -99,6 +99,8 @@ public static class Program
             return AssertionProbe.Run();
         if (args is [PdbProbe.Verb, var assemblyPath, var mode, var localName])
             return PdbProbe.Run(assemblyPath, mode, localName);
+        if (args is [ObfuscationProbe.Verb, var scanPath])
+            return ObfuscationProbe.Run(scanPath);
         if (args is [SsaLiftProbe.Verb, ..])
             return SsaLiftProbe.Run(args);
 

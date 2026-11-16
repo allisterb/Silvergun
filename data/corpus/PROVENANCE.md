@@ -229,3 +229,31 @@ measurement dispatch — see "Explicitly NOT in this task" in the spec).
   managed-code finding; that is itself valid data for the downstream measurement, not a defect in this
   script — packages were not hand-filtered post-search to avoid such outcomes, per the spec's explicit
   instruction not to hand-pick toward a cleaner-looking corpus).
+
+## Expansion, 2026-11-16: `benign-top-ext.manifest` (C100+) and `benign-suspect.manifest` (C-suspect)
+
+Rules and the suspect list with per-category hypotheses were written down before any fetch in
+`corpus-expansion-draft.md`. Same script, endpoints, User-Agent, 1 s spacing and hard stops as above.
+Licence: each package keeps its own (see its .nuspec); only ids and versions are in the repository. No
+`.nupkg` was downloaded. Both files were codepoint-scanned: ASCII only, one comma per data line.
+
+- **Endpoints** (service index re-fetched 2026-11-16, the August cache having been cleared):
+  `https://azuresearch-usnc.nuget.org/query` and `https://api.nuget.org/v3-flatcontainer/`.
+- **`-Manifest suspect`**, 2026-11-16T14:18:09Z: 73 requests (index, boundary check, 71 version lookups),
+  0 cache hits. 68 of 71 ids resolved. Not found on nuget.org (dropped, not replaced): `LicenseSpring`,
+  `SmartAssembly.Attributes`, `Medallion.Shell`.
+- **`-Manifest top-ext`**, first run 2026-11-16T14:19:54Z: 100 requests (4 search pages of `take=100`,
+  `q=` empty, then version lookups). Its family key (id up to the second dot) did not match the draft's
+  own example (`AWSSDK` as one family) and admitted 4 each of SQLitePCLRaw, OpenTelemetry and MongoDB.
+  The key was corrected to the id's first part (first two for `Microsoft.*`/`System.*`) and the script
+  re-run at **2026-11-16T14:22:45Z**: 4 new requests, 102 cache hits. That run produced the shipped
+  file: 100 ids from ranks 98-223. 19 skipped: 2 reference packs, 8 SDK/workload manifests, 9 by the family
+  cap (named in the run log: e.g. `OpenTelemetry.Exporter.OpenTelemetryProtocol`, `Google.Api.Gax`,
+  `MongoDB.Libmongocrypt`, `SQLitePCLRaw.provider.e_sqlite3`, four `Microsoft.AspNetCore`/`Extensions`/
+  `Testing` ids). Ranks 1-97 of today's list are all already in benign-top, c-build or benign-adversarial.
+- **Sample limit:** ranking is client-side over 400 hits of an empty-query search (C100 used 1000). A
+  heavily downloaded package that the search's own order puts below 400 would be missed.
+- **Overlap, kept on purpose:** `EntityFramework`, `SkiaSharp`, `SQLitePCLRaw.bundle_e_sqlite3`,
+  `System.Management` are in both new manifests. Top-ext is defined by rank, and removing capability-heavy
+  popular packages from it would bias it clean. Deduplicate by id when two corpora are reported together.
+- Total new nuget.org requests for the expansion: **177**. No 429, no 403, no 202/challenge.

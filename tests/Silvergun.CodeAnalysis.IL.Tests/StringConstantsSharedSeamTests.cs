@@ -88,16 +88,14 @@ public sealed class StringConstantsSharedSeamTests : IClassFixture<UnreadableMet
         Assert.True(AssemblyAnalyzer.TryReadBody(patchedLoop).IsUnreadable,
             "Ground truth: the fixture's patched method must actually be unreadable, or this test is vacuous.");
 
-        var obfuscation = new ObfuscationAnalysis(fixture.Patched);
-
         var seamException = Record.Exception(() => ScanMethodConstants.Invoke(null, [patchedLoop]));
-        var obfuscationException = Record.Exception(() => ScanMethod.Invoke(obfuscation, [patchedLoop]));
+        var obfuscationException = Record.Exception(() => ScanMethod.Invoke(null, ScanArguments(patchedLoop)));
 
         Assert.Null(seamException);
         Assert.Null(obfuscationException);
 
         var constants = (IEnumerable<AssemblyAnalyzer.StringConstant>)ScanMethodConstants.Invoke(null, [patchedLoop])!;
-        var findings = (IEnumerable<ObfuscationFinding>)ScanMethod.Invoke(obfuscation, [patchedLoop])!;
+        var findings = (IEnumerable<ObfuscationFinding>)ScanMethod.Invoke(null, ScanArguments(patchedLoop))!;
 
         Assert.Empty(constants);
         Assert.Empty(findings);
@@ -110,7 +108,6 @@ public sealed class StringConstantsSharedSeamTests : IClassFixture<UnreadableMet
     [Fact]
     public void SharedSeamAndObfuscationWalk_AgreeAcrossEveryCandidateMethod_NeitherThrowsNorLosesTheAssembly()
     {
-        var obfuscation = new ObfuscationAnalysis(fixture.Patched);
         var candidates = fixture.Patched.Methods.ToArray();
         Assert.True(candidates.Length > 1, "Sanity: the fixture must expose more than just the corrupted method.");
 
@@ -121,7 +118,7 @@ public sealed class StringConstantsSharedSeamTests : IClassFixture<UnreadableMet
             var seamException = Record.Exception(() => ScanMethodConstants.Invoke(null, [method]));
             Assert.True(seamException is null, $"Shared-seam walk threw for {name}: {seamException}");
 
-            var obfuscationException = Record.Exception(() => ScanMethod.Invoke(obfuscation, [method]));
+            var obfuscationException = Record.Exception(() => ScanMethod.Invoke(null, ScanArguments(method)));
             Assert.True(obfuscationException is null, $"ObfuscationAnalysis walk threw for {name}: {obfuscationException}");
         }
     }
@@ -164,9 +161,17 @@ public sealed class StringConstantsSharedSeamTests : IClassFixture<UnreadableMet
     // Reflects the private per-method entry point ObfuscationAnalysis deliberately keeps as its own copy
     // (see the class doc comment).
     private static readonly MethodInfo ScanMethod =
-        typeof(ObfuscationAnalysis).GetMethod("ScanMethod", BindingFlags.NonPublic | BindingFlags.Instance)
+        typeof(ObfuscationAnalysis).GetMethod("ScanMethod", BindingFlags.NonPublic | BindingFlags.Static)
             ?? throw new InvalidOperationException(
                 "ObfuscationAnalysis.ScanMethod not found by reflection — its shape changed; update this test.");
+
+    // ScanMethod(method, facts): a fresh private ModuleFacts per call, so one walk's records never leak into the next.
+    private static readonly Type ModuleFacts =
+        typeof(ObfuscationAnalysis).GetNestedType("ModuleFacts", BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException(
+                "ObfuscationAnalysis.ModuleFacts not found by reflection — its shape changed; update this test.");
+
+    private static object[] ScanArguments(IMethodDefinition method) => [method, Activator.CreateInstance(ModuleFacts, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, [string.Empty], null)!];
     #endregion
 
     private readonly UnreadableMethodBodyFixture fixture;

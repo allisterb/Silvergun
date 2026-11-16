@@ -111,8 +111,11 @@ internal static class AssemblyReportRenderer
     private static IRenderable ObfuscationWidget(bool rich, ObfuscationReport? obfuscation)
     {
         var findings = obfuscation?.Findings;
+        var truncated = obfuscation is { Truncated: true }
+            ? new Markup($"[yellow]{Esc(AlertGlyph(rich))} obfuscation analysis TRUNCATED {Dash(rich)} a blob or fold budget was spent; these findings are a FLOOR, not a total[/]")
+            : null;
         if (findings is null || findings.Count == 0)
-            return new Markup("[green](none)[/]");
+            return truncated ?? new Markup("[green](none)[/]");
 
         var table = new Table().Border(TableBorderFor(rich)).Expand();
         table.AddColumn("[bold]Kind[/]");
@@ -124,12 +127,12 @@ internal static class AssemblyReportRenderer
         foreach (var f in findings)
             table.AddRow(
                 $"[orange1]{Esc(f.Kind.ToString())}[/]",
-                Esc(f.DetectedAs),
+                Esc(ObfuscationDetected(f)),
                 Esc($"{f.CallerType}.{f.CallerMethod}"),
                 f.EncodedLength.ToString(),
                 f.Entropy.ToString("F2"));
 
-        return table;
+        return truncated is null ? table : new Rows(table, truncated);
     }
 
     // Indicator (network / sensitive-target) findings — selective by design (ADR from indicator-prevalence
@@ -191,6 +194,8 @@ internal static class AssemblyReportRenderer
     {
         var findings = report.Capabilities.Findings;
         var obfuscationCount = report.Obfuscation?.Findings.Count ?? 0;
+        // Images are listed but do not set attention (hidden-payloads-1 §7).
+        var attentionObfuscation = report.Obfuscation?.Findings.Count(IsAttentionObfuscation) ?? 0;
 
         if (findings.Count == 0)
             console.MarkupLine("[grey]Capabilities:[/] [green]none[/]");
@@ -201,9 +206,12 @@ internal static class AssemblyReportRenderer
             console.MarkupLine($"[grey]Capabilities:[/] {string.Join($"  [grey]{Bullet(rich)}[/]  ", groups)}");
         }
 
-        console.MarkupLine(obfuscationCount == 0
+        console.MarkupLine((obfuscationCount == 0
             ? "[grey]Obfuscation:[/] [green]none[/]"
-            : $"[grey]Obfuscation:[/] [orange1]{obfuscationCount} finding(s)[/]");
+            : attentionObfuscation == 0
+                ? $"[grey]Obfuscation:[/] [grey]{obfuscationCount} embedded image(s) only[/]"
+                : $"[grey]Obfuscation:[/] [orange1]{obfuscationCount} finding(s)[/]")
+            + (report.Obfuscation is { Truncated: true } ? " [yellow](truncated - floor, not a total)[/]" : string.Empty));
 
         // The seven discriminating categories (the same split IndicatorsWidget renders as detail rows,
         // IsDiscriminatingIndicatorCategory) set "attention" below — ARCHITECT DECISION 2026-08-03: a
@@ -225,7 +233,7 @@ internal static class AssemblyReportRenderer
         var assessment = CompletenessAssessment.ForAssembly(report);
         CompletenessFooter.WriteCoverage(console, assessment);
 
-        var attention = findings.Count > 0 || obfuscationCount > 0 || discriminatingIndicatorCount > 0;
+        var attention = findings.Count > 0 || attentionObfuscation > 0 || discriminatingIndicatorCount > 0;
         CompletenessFooter.WriteHeadline(
             console, rich, attention, assessment,
             "no sensitive-API, obfuscation, or discriminating-indicator findings.");

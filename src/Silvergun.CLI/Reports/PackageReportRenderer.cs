@@ -489,7 +489,7 @@ internal static class PackageReportRenderer
                         capNode.AddNode(Esc($"{f.CallerType}.{f.CallerMethod}  ->  {f.CalledApi}"));
                 }
 
-            AppendObfuscation(node, result.Obfuscation);
+            AppendObfuscation(rich, node, result.Obfuscation);
         }
 
         return root;
@@ -506,15 +506,19 @@ internal static class PackageReportRenderer
                $"refs={m.References.Count}({resolved} resolved)[/]";
     }
 
-    private static void AppendObfuscation(TreeNode node, ObfuscationReport? obfuscation)
+    private static void AppendObfuscation(bool rich, TreeNode node, ObfuscationReport? obfuscation)
     {
         var findings = obfuscation?.Findings;
+        if (obfuscation is { Truncated: true })
+            node.AddNode($"[yellow]obfuscation: TRUNCATED (a blob or fold budget was spent) {Dash(rich)} these findings are a FLOOR, not a total[/]");
         if (findings is null || findings.Count == 0)
             return;
 
-        var obf = node.AddNode($"[orange1]obfuscation: {findings.Count} finding(s)[/]");
+        var obf = node.AddNode(findings.Any(IsAttentionObfuscation)
+            ? $"[orange1]obfuscation: {findings.Count} finding(s)[/]"
+            : $"[grey]obfuscation: {findings.Count} embedded image(s)[/]");
         foreach (var f in findings)
-            obf.AddNode(Esc($"{f.Kind} {f.DetectedAs}  {f.CallerType}.{f.CallerMethod}"));
+            obf.AddNode(Esc($"{f.Kind} {ObfuscationDetected(f)}  {f.CallerType}.{f.CallerMethod}"));
     }
 
     // Footer: total findings, per-capability counts, script findings by severity, the IL coverage line, and the
@@ -565,10 +569,18 @@ internal static class PackageReportRenderer
                 _ => "[grey]Script findings:[/] [green]none[/]",
             });
 
-        var hasObfuscation = report.Assemblies.Any(a => (a.Obfuscation?.Findings.Count ?? 0) > 0);
-        console.MarkupLine(hasObfuscation
+        // Images are listed but do not set attention (hidden-payloads-1 §7).
+        var anyObfuscation = report.Assemblies.Any(a => (a.Obfuscation?.Findings.Count ?? 0) > 0);
+        var hasObfuscation = report.Assemblies.Any(a => a.Obfuscation?.Findings.Any(IsAttentionObfuscation) ?? false);
+        var obfuscationTruncated = report.Assemblies.Where(a => a.Obfuscation is { Truncated: true }).Select(a => a.Assembly.RelativePath).ToList();
+        console.MarkupLine((hasObfuscation
             ? $"[grey]Obfuscation:[/] [orange1]present[/]"
-            : "[grey]Obfuscation:[/] [green]none[/]");
+            : anyObfuscation
+                ? "[grey]Obfuscation:[/] [grey]embedded images only[/]"
+                : "[grey]Obfuscation:[/] [green]none[/]")
+            + (obfuscationTruncated.Count > 0
+                ? $" [yellow](TRUNCATED for {Esc(string.Join(", ", obfuscationTruncated))} {Dash(rich)} a floor, not a total)[/]"
+                : string.Empty));
 
         // Packaging anomalies mirror their section (ADR 0013's count summary). Deliberately NOT folded into the
         // "attention" predicate below: ADR 0031 decision 3 keeps this class of finding purely informational until its

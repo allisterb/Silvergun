@@ -49,6 +49,21 @@ public sealed class BehaviourRecallTests : IClassFixture<BehaviourRuns>
         Assert.Equal(row.Measured.Render(), live.Render());
     }
 
+    // hidden-payloads-1 closed the four hidden-payload misses and the PNG mislabel: the pinned rows must keep naming the
+    // obfuscation signal, so regenerating the table cannot quietly turn them back into a miss.
+    [Theory]
+    [InlineData("BF10/Malicious", "Obfuscation:EncodedText/UTF-16LE text")]
+    [InlineData("BF12b/Malicious", "Obfuscation:EncodedExecutable/Windows PE")]
+    [InlineData("BF12c/Malicious", "Obfuscation:EncodedExecutable/Windows PE")]
+    [InlineData("BF12d/Malicious", "Obfuscation:EncodedExecutable/Windows PE")]
+    [InlineData("BF12/Twin", "Obfuscation:EncodedImage/PNG")]
+    public void HiddenPayloadRows_PinTheirObfuscationSignal(string key, string signal)
+    {
+        var pinned = BehaviourGroundTruth.Row(key).Measured.Signals.Select(s => s.ToString());
+
+        Assert.Contains(signal, pinned);
+    }
+
     [Fact]
     public void Table_Has48Rows_29Malicious_19Twins_AndEveryFamilyKeepsItsCount()
     {

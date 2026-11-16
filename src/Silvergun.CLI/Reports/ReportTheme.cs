@@ -137,6 +137,25 @@ internal static class ReportTheme
             IndicatorCategory.CallbackDomain or IndicatorCategory.DynamicDns or IndicatorCategory.CredentialPath;
 
     /// <summary>
+    /// Whether an obfuscation finding sets the "attention" headline: every kind except <see cref="HiddenContentKind.EncodedImage"/>,
+    /// which is listed but is ordinary embedded data (<c>docs/agent/tasks/hidden-payloads-1.md</c> §7). Obfuscation never gates.
+    /// </summary>
+    internal static bool IsAttentionObfuscation(ObfuscationFinding finding) => finding.Kind != HiddenContentKind.EncodedImage;
+
+    /// <summary>An obfuscation finding's "Detected as" text, with its source when that is not a whole constant.</summary>
+    internal static string ObfuscationDetected(ObfuscationFinding finding) =>
+        finding.Source == HiddenContentSource.Constant ? finding.DetectedAs : $"{finding.DetectedAs} ({SourceText(finding.Source)})";
+
+    private static string SourceText(HiddenContentSource source) => source switch
+    {
+        HiddenContentSource.Substring => "inside a constant",
+        HiddenContentSource.Folded => "concatenated constants",
+        HiddenContentSource.FieldData => "field data",
+        HiddenContentSource.Resource => "embedded resource",
+        _ => source.ToString(),
+    };
+
+    /// <summary>
     /// Per-<see cref="IndicatorCategory"/> finding-count grid over EVERY category, including a count of zero — a
     /// category present at zero is information, so it is never omitted. Counts aggregated finding rows (already
     /// deduplicated per (Category, Value, CallerType, CallerMethod) by <see cref="IndicatorAnalysis"/>), not raw

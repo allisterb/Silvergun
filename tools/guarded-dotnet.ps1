@@ -40,6 +40,8 @@ param(
     [string]$AppArgs = '',
     # Build configuration (-c); empty for the project's default (Debug).
     [ValidateSet('', 'Debug', 'Release')][string]$Configuration = '',
+    # Target framework (-f) for a multi-targeted project; empty for none.
+    [string]$Framework = '',
     [string]$LogDir = (Join-Path ([IO.Path]::GetTempPath()) 'silvergun-guarded-logs')
 )
 
@@ -62,6 +64,7 @@ $arguments = switch ($Verb) {
     default { @($Verb, $Project, '-p:UseSharedCompilation=false', '-nodeReuse:false', '-m:1') }
 }
 if ($Configuration) { $arguments += @('-c', $Configuration) }
+if ($Framework) { $arguments += @('-f', $Framework) }
 if ($Filter) { $arguments += @('--filter', $Filter) }
 if ($AppArgs) { $arguments += @('--') + ($AppArgs -split '\s+' | Where-Object { $_ }) }
 # Windows command-line quoting (CommandLineToArgvW rules): backslashes are literal except before a quote.

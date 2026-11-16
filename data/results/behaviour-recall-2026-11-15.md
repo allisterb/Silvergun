@@ -192,7 +192,26 @@ reach Network. BF12b–d stay missed: folding does not follow static fields, and
 
 Folding moved no benign constant-sink count. Pins are updated in `BehaviourMeasured.cs` (8 rows, additions only).
 
-## 9. Pinned
+## 9. Update, 2026-11-16: hidden payloads 1
+
+`docs/agent/tasks/hidden-payloads-1.md` extended the obfuscation scan to base64 runs inside longer constants, IL-level
+folding of `string.Concat` over once-stored static string fields, RVA field data and embedded resources, and named
+decoded text and images. Pinned changes, additions only:
+
+| Row | New observation |
+|---|---|
+| BF10 malicious | Obfuscation `EncodedText` "UTF-16LE text" (the `-Enc` run, Substring) |
+| BF12b malicious | Obfuscation `EncodedExecutable` "Windows PE" (Folded) |
+| BF12c malicious | Obfuscation `EncodedExecutable` "Windows PE" (FieldData, `Dropper..cctor`) |
+| BF12d malicious | Obfuscation `EncodedExecutable` "Windows PE" (Resource `payload.bin`) |
+| BF12 twin | `HighEntropyBlob` became `EncodedImage` "PNG", which no longer sets the attention headline |
+
+The named tier is now 28 of 29 malicious fixtures (25 after §8, plus BF12b–d; BF10 was already named by its value
+signals and gains a second, independent one). BF15 remains the one miss: its native entry point never reaches the
+network. No twin gained an observation. The `--strict` gate is unchanged (obfuscation never gates): 7 of 29, twins 0 of
+19. Benign base rates: `hidden-payloads-benign-top-2026-11-16.md` and `hidden-payloads-c-build-2026-11-16.md`.
+
+## 10. Pinned
 
 Every observation in this document is pinned row by row in `tests/Silvergun.CLI.Tests/Behaviour/BehaviourMeasured.cs`.
 Any detection change, including an improvement, turns that suite red until the pin and this file are updated together.

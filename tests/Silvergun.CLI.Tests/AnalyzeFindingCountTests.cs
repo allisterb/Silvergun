@@ -186,10 +186,12 @@ public sealed class AnalyzeFindingCountTests
     /// The measured set for <c>Silvergun.CodeAnalysis.IL.dll</c>, ordered ordinally. Nine of these predate
     /// capability-map phase 2; <c>System.IO.StreamReader..ctor</c> is the one it added.
     /// <para>
-    /// The two <c>System.IO.File.OpenRead</c> calls (12 findings, re-measured 2026-11-05) are the library's own metadata
-    /// side readers, each opening the assembly file it is about to read: <c>TypeForwarders.Read</c> (added in
+    /// Two of the three <c>System.IO.File.OpenRead</c> calls (12 findings, re-measured 2026-11-05) are the library's own
+    /// metadata side readers, each opening the assembly file it is about to read: <c>TypeForwarders.Read</c> (added in
     /// <c>f528fe8</c>, CHA begin) and <c>ModuleMetadata.Read</c> (<c>994a097</c>, A2 S3), both classified by
     /// <c>capability System.IO.File FileSystem</c>. The pin had not been updated since <c>4e092e0</c>, before either.
+    /// The third (13 findings, re-measured 2026-11-16) is <c>ObfuscationAnalysis</c> reading each mapped field's FieldRVA
+    /// row (hidden-payloads-1, review round 2 W-a).
     /// </para>
     /// <para>
     /// <c>System.Security.Cryptography.SHA256.HashData</c> (13 findings, re-measured 2026-11-06) is reachability R2b S1's
@@ -208,7 +210,7 @@ public sealed class AnalyzeFindingCountTests
     /// <c>UntrustedText</c> (still in this library), and the S4.4 review moved <c>UntrustedText</c> to
     /// <c>Silvergun.Runtime</c>, so that the YARA worker's escaper no longer loads this library (ADR 0033 decision 5).
     /// <c>SHA256.HashData(MemoryMarshal.AsBytes(..))</c> is now <c>UntrustedText.Hash</c> there; this library calls neither
-    /// any more. The other 12 are unchanged.
+    /// any more. The other 12 were unchanged then; with the third OpenRead the set is 13.
     /// </para>
     /// </summary>
     private static readonly string[] MeasuredIlLibraryFindings =
@@ -219,6 +221,9 @@ public sealed class AnalyzeFindingCountTests
         "FileSystem Call System.IO.File.Exists",
         "FileSystem Call System.IO.File.Exists",
         "FileSystem Call System.IO.File.OpenRead",
+        "FileSystem Call System.IO.File.OpenRead",
+        // hidden-payloads-1 review round 2 (W-a): ObfuscationAnalysis opens the assembly file to read each mapped field's
+        // FieldRVA row with System.Reflection.Metadata. One new, intended File.OpenRead call site; nothing else moved.
         "FileSystem Call System.IO.File.OpenRead",
         "FileSystem Call System.IO.FileInfo.get_Directory",
         "FileSystem Call System.IO.FileSystemInfo.get_FullName",

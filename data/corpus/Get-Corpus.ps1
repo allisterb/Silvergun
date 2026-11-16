@@ -12,6 +12,11 @@
       -Manifest top          ~100 top-downloaded, general-purpose packages (the SCALE corpus).
       -Manifest adversarial  ~40-60 packages chosen BECAUSE they should legitimately trip one of the
                               indicator categories ADR-0026 holds back (the FALSIFICATION corpus).
+      -Manifest top-ext      ~100 further top-downloaded packages not in any other manifest, with
+                              no-managed-code stubs skipped and at most 3 ids per family (C100+).
+      -Manifest suspect      a FIXED id list of benign packages chosen because they should look like
+                              something (embedded PEs, obfuscation, native loaders, downloaders, hooking,
+                              scripting hosts). No search; versions only. See corpus-expansion-draft.md.
 
     API usage - the sanctioned path only:
       * Resolve resource URLs from the service index (https://api.nuget.org/v3/index.json) by @type.
@@ -53,7 +58,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('top', 'adversarial')]
+    [ValidateSet('top', 'adversarial', 'top-ext', 'suspect')]
     [string]$Manifest,
 
     [string]$OutDir = '',
@@ -499,6 +504,158 @@ function Build-AdversarialManifest {
 }
 
 # ---------------------------------------------------------------------------------------------------
+# C100+ (top-ext) and C-suspect builders. Rules fixed in corpus-expansion-draft.md before any fetch.
+# ---------------------------------------------------------------------------------------------------
+
+function Get-ManifestIds {
+    param([Parameter(Mandatory)][string]$Path)
+
+    $ids = @{}
+    foreach ($line in [System.IO.File]::ReadAllLines($Path)) {
+        $t = $line.Trim()
+        if ($t.Length -eq 0 -or $t.StartsWith('#')) { continue }
+        $ids[$t.Split(',')[0].ToLowerInvariant()] = $true
+    }
+    return $ids
+}
+
+# No managed implementation to scan: native runtime stubs, SDK/workload manifests, reference packs.
+function Get-NoManagedCodeReason {
+    param([Parameter(Mandatory)][string]$Id)
+
+    if ($Id -match '^(?i)runtime\.') { return 'runtime.* stub' }
+    if ($Id -match '(?i)\.runtime\.native\.') { return '*.runtime.native.* stub' }
+    if ($Id -match '(?i)\.Manifest-') { return 'SDK manifest' }
+    if ($Id -match '^(?i)Microsoft\.NET\.Workload\.') { return 'workload package' }
+    if ($Id -match '(?i)\.Ref$') { return 'reference pack' }
+    return $null
+}
+
+function Get-FamilyKey {
+    param([Parameter(Mandatory)][string]$Id)
+
+    # Vendor prefix (AWSSDK, OpenTelemetry, SQLitePCLRaw); Microsoft.* and System.* by their second part.
+    $parts = $Id.ToLowerInvariant().Split('.')
+    if ($parts.Length -ge 2 -and ($parts[0] -eq 'microsoft' -or $parts[0] -eq 'system')) { return "$($parts[0]).$($parts[1])" }
+    return $parts[0]
+}
+
+function Build-TopExtManifest {
+    param([hashtable]$Ctx)
+
+    $targetCount = 100
+    if ($Ctx.Take -gt 0) { $targetCount = $Ctx.Take }
+    $familyCap = 3
+
+    $existing = @{}
+    foreach ($name in @('benign-top.manifest', 'c-build.manifest', 'benign-adversarial.manifest')) {
+        foreach ($k in (Get-ManifestIds -Path (Join-Path $Ctx.OutDir $name)).Keys) { $existing[$k] = $name }
+    }
+
+    Write-Host "Building TOP-EXT manifest: target $targetCount packages, family cap $familyCap, excluding $($existing.Count) id(s) already in other manifests."
+
+    $candidates = @{}
+    $pageSize = 100
+    $pages = 4
+    for ($p = 0; $p -lt $pages; $p++) {
+        $skip = $p * $pageSize
+        Write-Host "  search page $($p + 1)/$pages (skip=$skip, take=$pageSize, q='')"
+        $hits = Search-NuGetPackages -SearchBaseUrl $Ctx.SearchUrl -Query '' -Take $pageSize -Skip $skip `
+            -CacheDir $Ctx.CacheDir -DelaySeconds $Ctx.DelaySeconds -Stats $Ctx.Stats -DryRun:$Ctx.DryRun
+        foreach ($hit in $hits) { Add-OrUpdateCandidate -Candidates $candidates -Hit $hit }
+        if ($Ctx.DryRun -and $hits.Count -eq 0) { break }
+    }
+
+    $ranked = Get-RankedCandidates -Candidates $candidates
+    Write-Host "  $($ranked.Count) distinct candidate id(s) collected across $pages page(s)."
+
+    $selected = New-Object System.Collections.Generic.List[object]
+    $families = @{}
+    $rank = 0
+    foreach ($c in $ranked) {
+        $rank++
+        if ($selected.Count -ge $targetCount) { break }
+        $key = $c.Id.ToLowerInvariant()
+        if ($existing.ContainsKey($key)) { continue }
+
+        $reason = Get-NoManagedCodeReason -Id $c.Id
+        if ($null -ne $reason) {
+            $Ctx.Stats.Skipped.Add("top-ext: rank $rank $($c.Id) - $reason")
+            continue
+        }
+        $family = Get-FamilyKey -Id $c.Id
+        if ($families.ContainsKey($family) -and $families[$family] -ge $familyCap) {
+            $Ctx.Stats.Skipped.Add("top-ext: rank $rank $($c.Id) - family cap ($family)")
+            continue
+        }
+
+        $versions = Get-PackageVersions -PackageBaseUrl $Ctx.PackageBaseUrl -Id $c.Id `
+            -CacheDir $Ctx.CacheDir -DelaySeconds $Ctx.DelaySeconds -Stats $Ctx.Stats -DryRun:$Ctx.DryRun
+        $best = Select-HighestStableVersion -Versions $versions
+        if ($null -eq $best) {
+            $Ctx.Stats.Skipped.Add("top-ext: rank $rank $($c.Id) - no stable version on PackageBaseAddress")
+            continue
+        }
+        $families[$family] = 1 + $(if ($families.ContainsKey($family)) { $families[$family] } else { 0 })
+        $selected.Add([pscustomobject]@{ Id = $c.Id; Version = $best; TotalDownloads = $c.TotalDownloads })
+        Write-Host "   rank ${rank}: $($c.Id),$best (totalDownloads=$($c.TotalDownloads))"
+    }
+
+    Write-Host "  selected $($selected.Count) package(s); last rank examined $rank."
+    return $selected
+}
+
+# Fixed list, recorded with its hypotheses in corpus-expansion-draft.md before any fetch.
+$script:SuspectCategories = [ordered]@{
+    'A. Commercial obfuscated or protected' = @('Aspose.Words', 'Aspose.Cells', 'Aspose.PDF', 'Syncfusion.Licensing',
+        'Syncfusion.Pdf.Net.Core', 'Syncfusion.XlsIO.Net.Core', 'Spire.PDF', 'FreeSpire.PDF', 'IronPdf', 'DevExpress.Xpo',
+        'Devart.Data.MySql', 'EO.Pdf')
+    'B. Licensing and protection SDKs' = @('Standard.Licensing', 'Portable.Licensing', 'Cryptolens.Licensing',
+        'LicenseSpring', 'SmartAssembly.Attributes', 'Obfuscar')
+    'C. Embedded or merged assemblies' = @('Costura.Fody', 'Fody', 'ILMerge', 'ILRepack', 'ILRepack.Lib.MSBuild.Task',
+        'NuGet.CommandLine', 'squirrel.windows', 'Clowd.Squirrel', 'Velopack')
+    'D. Native loaders and wrappers' = @('SkiaSharp', 'SQLitePCLRaw.bundle_e_sqlite3', 'LibGit2Sharp',
+        'Magick.NET-Q16-AnyCPU', 'OpenCvSharp4', 'Microsoft.ML.OnnxRuntime', 'Microsoft.Web.WebView2',
+        'Microsoft.ClearScript', 'Tesseract')
+    'E. Downloaders and process launchers' = @('Microsoft.Playwright', 'PuppeteerSharp', 'Selenium.WebDriver',
+        'Selenium.WebDriver.ChromeDriver', 'WebDriverManager', 'Autoupdater.NET.Official',
+        'NetSparkleUpdater.SparkleUpdater', 'CliWrap', 'Medallion.Shell', 'SimpleExec')
+    'F. Install-time and tool packages' = @('EntityFramework', 'xunit.runner.console', 'NUnit.ConsoleRunner',
+        'GitVersion.Tool', 'Nerdbank.GitVersioning', 'dotnet-ef', 'Cake.Tool', 'dotnet-script')
+    'G. Runtime patching, hooking and PE tooling' = @('Lib.Harmony', 'MonoMod.RuntimeDetour', 'Reloaded.Hooks',
+        'EasyHook', 'Iced', 'PeNet', 'AsmResolver.PE', 'dnlib')
+    'H. Scripting and dynamic-code hosts' = @('Microsoft.CodeAnalysis.CSharp.Scripting', 'Jint', 'IronPython', 'NLua',
+        'Microsoft.PowerShell.SDK')
+    'I. System management' = @('System.Management', 'TaskScheduler', 'Topshelf', 'Vanara.PInvoke.Kernel32')
+}
+
+function Build-SuspectManifest {
+    param([hashtable]$Ctx)
+
+    Write-Host "Building SUSPECT manifest: fixed id list, $($script:SuspectCategories.Count) categories, no search."
+
+    $selected = New-Object System.Collections.Generic.List[object]
+    foreach ($catName in $script:SuspectCategories.Keys) {
+        Write-Host "-- $catName --"
+        foreach ($id in $script:SuspectCategories[$catName]) {
+            $versions = Get-PackageVersions -PackageBaseUrl $Ctx.PackageBaseUrl -Id $id `
+                -CacheDir $Ctx.CacheDir -DelaySeconds $Ctx.DelaySeconds -Stats $Ctx.Stats -DryRun:$Ctx.DryRun
+            $best = Select-HighestStableVersion -Versions $versions
+            if ($null -eq $best) {
+                $Ctx.Stats.Skipped.Add("suspect/$catName`: $id - not found or no stable version")
+                Write-Host "   $id - not resolved"
+                continue
+            }
+            $selected.Add([pscustomobject]@{ Id = $id; Version = $best; TotalDownloads = 0 })
+            Write-Host "   $id,$best"
+        }
+    }
+
+    Write-Host "  selected $($selected.Count) package(s)."
+    return $selected
+}
+
+# ---------------------------------------------------------------------------------------------------
 # Manifest writer - format must match CorpusManifest.Load exactly: 'id,version', blank/'#' lines
 # ignored, no inline comments on a data line (Parse() requires exactly one comma).
 # ---------------------------------------------------------------------------------------------------
@@ -612,9 +769,54 @@ $ctx = @{
     Stats          = $stats
     Take           = $Take
     DryRun         = [bool]$DryRun
+    OutDir         = $OutDir
 }
 
-if ($Manifest -eq 'top') {
+if ($Manifest -eq 'top-ext' -or $Manifest -eq 'suspect') {
+    if ($Manifest -eq 'top-ext') {
+        $entries = Build-TopExtManifest -Ctx $ctx
+        $file = 'benign-top-ext.manifest'
+        $header = @'
+# Benign corpus (C100+) - further top-downloaded NuGet packages, pinned (id,version).
+#
+# Generated by data/corpus/Get-Corpus.ps1 -Manifest top-ext from the documented nuget.org v3 API. Rule
+# (fixed before the fetch, see corpus-expansion-draft.md): ranks from 4 search pages by totalDownloads;
+# ids already in benign-top, c-build or benign-adversarial skipped; runtime/native stubs, SDK/workload
+# manifests and reference packs skipped; at most 3 ids per family (the id's first part, or first two for
+# Microsoft.* and System.*; corrected after the first run, see PROVENANCE.md). Each id is
+# pinned to its highest stable version. Skips and the run's date/request count: PROVENANCE.md.
+# Benign by assumption, not by proof (ADR-0021). benign-top.manifest stays the frozen baseline.
+#
+# Format: id,version - one per line, sorted ordinally by id.
+'@
+    }
+    else {
+        $entries = Build-SuspectManifest -Ctx $ctx
+        $file = 'benign-suspect.manifest'
+        $header = @'
+# Benign corpus (C-suspect) - benign packages chosen BECAUSE they should look like something:
+# obfuscation, embedded executables/archives, native loaders, downloaders and process launchers,
+# install-time tools, runtime patching, scripting hosts, system management. Pinned (id,version).
+#
+# Generated by data/corpus/Get-Corpus.ps1 -Manifest suspect from a FIXED id list (no search); versions
+# from nuget.org PackageBaseAddress. Categories and hypotheses, recorded before the fetch:
+# corpus-expansion-draft.md. Unresolved ids and the run's date/request count: PROVENANCE.md.
+# A finding here is expected and is reported by name: the point is the base rate of benign capability.
+# Benign by assumption, not by proof (ADR-0021).
+#
+# Format: id,version - one per line, sorted ordinally by id.
+'@
+    }
+    if ($DryRun) {
+        Write-Host "DRY RUN: would write $($entries.Count) entries to $(Join-Path $OutDir $file) (not written)."
+    }
+    else {
+        $list = New-Object System.Collections.Generic.List[object]
+        foreach ($e in $entries) { $list.Add($e) }
+        Write-Manifest -Path (Join-Path $OutDir $file) -Header $header -Entries $list
+    }
+}
+elseif ($Manifest -eq 'top') {
     $entries = Build-TopManifest -Ctx $ctx
     if ($DryRun) {
         Write-Host "DRY RUN: would write $($entries.Count) entries to $(Join-Path $OutDir 'benign-top.manifest') (not written)."

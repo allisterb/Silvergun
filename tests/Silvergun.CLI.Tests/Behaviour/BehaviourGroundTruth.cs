@@ -81,7 +81,8 @@ public static class BehaviourGroundTruth
         Mal("BF09", Runtime, "TH15104 execution", Verdict.Passes, "Indicator `RawCodeHost`; Capability DynamicCodeLoading");
         Twin("BF09", Runtime, "TH15104 execution", "twin: DynamicCodeLoading yes, RawCodeHost no");
 
-        Mal("BF10", Runtime, "TH16111-TH16121 (constant-argument seam)", Verdict.Passes, "SsaSite `Process.Start(\"powershell\", \"-NoP -W Hidden -Enc …\")`; Obfuscation `?` on the `-Enc` base64");
+        Mal("BF10", Runtime, "TH16111-TH16121 (constant-argument seam)", Verdict.Passes, "SsaSite `Process.Start(\"powershell\", \"-NoP -W Hidden -Enc …\")`; Obfuscation `?` on the `-Enc` base64",
+            "The `?` resolved by hidden-payloads-1: Obfuscation EncodedText `UTF-16LE text` (Substring) on the `-Enc` base64.");
         Twin("BF10", Runtime, "TH16111-TH16121 (constant-argument seam)", "twin: SsaSite `Process.Start(\"git\", \"--version\")`");
 
         Mal("BF11", Runtime, "autostart", Verdict.Passes, "Indicator `AutorunRegistry`; SsaSite with the Run-key path");
@@ -91,7 +92,7 @@ public static class BehaviourGroundTruth
         Mal("BF12a", Runtime, Bf12Ttp, Verdict.Passes, "Obfuscation (hidden PE)");
         foreach (var id in new[] { "BF12b", "BF12c", "BF12d" })
             Mal(id, Runtime, Bf12Ttp, Verdict.Passes, "**none** (the three known evasions)",
-                "Predicted miss, kept on purpose: the payload is not one ldstr. Lever: scan split constants, RVA data and managed resources for MZ/PE (seam-mapping 5.2).");
+                "Predicted miss (the payload is not one ldstr), closed by hidden-payloads-1: Obfuscation EncodedExecutable from folded constants (BF12b), RVA field data (BF12c) and a managed resource (BF12d).");
         Twin("BF12", Runtime, Bf12Ttp, "no (the PNG decodes as an image)");
 
         Mal("BF13", Runtime, "reflection-hidden capability", Verdict.Passes, "Capability ReflectionInvocation; SsaSite reflection target `System.IO.File::ReadAllBytes`; Indicator `ReflectionTypeName`");

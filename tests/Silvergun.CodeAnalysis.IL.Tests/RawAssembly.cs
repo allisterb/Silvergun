@@ -177,14 +177,15 @@ internal sealed class RawAssembly
     }
 
     /// <summary>Writes <c>&lt;Name&gt;.dll</c> into <paramref name="directory"/> and returns its path.</summary>
-    public string Save(string directory, Action<MetadataBuilder>? addRows = null)
+    public string Save(string directory, Action<MetadataBuilder>? addRows = null, BlobBuilder? managedResources = null)
     {
         addRows?.Invoke(Metadata);
         var image = new ManagedPEBuilder(
             new PEHeaderBuilder(imageCharacteristics: Characteristics.ExecutableImage | Characteristics.Dll),
             new MetadataRootBuilder(Metadata),
             ilStream,
-            mappedFieldData: mappedData);
+            mappedFieldData: mappedData,
+            managedResources: managedResources);
         var blob = new BlobBuilder();
         image.Serialize(blob);
         var path = Path.Combine(directory, Name + ".dll");
