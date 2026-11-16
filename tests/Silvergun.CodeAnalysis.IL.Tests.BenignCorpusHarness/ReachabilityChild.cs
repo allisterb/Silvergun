@@ -320,8 +320,8 @@ public static class ReachabilityChild
 
     public const string RootRole = "(root)";
 
-    /// <summary>The most profiles <see cref="Reachability"/> keeps per class (its private <c>MaxProfiles</c>; pinned by a test).</summary>
-    public const int MaxProfiles = 64;
+    /// <summary>The most profiles <see cref="Reachability"/> keeps per class (<see cref="Reachability.MaxProfilesPerClass"/>; pinned by a test).</summary>
+    public const int MaxProfiles = Reachability.MaxProfilesPerClass;
 
     /// <summary>The stderr line that names the child's extraction directory: <c>EXTRACTION\t&lt;dir&gt;</c>.</summary>
     public const string ExtractionMarker = "EXTRACTION";

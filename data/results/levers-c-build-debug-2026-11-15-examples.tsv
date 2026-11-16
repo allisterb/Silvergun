@@ -1,0 +1,2 @@
+package	folder	signal	caller	callee	call
+NSwag.MSBuild 14.7.1	tools/Win	SecretEnvironmentName	Microsoft.Extensions.Configuration.UserSecrets.PathHelper.InternalGetSecretsPathFromSecretsId(System.String,System.Boolean)	System.Environment.GetEnvironmentVariable(System.String)	System.Environment.GetEnvironmentVariable("DOTNET_USER_SECRETS_FALLBACK_DIR")

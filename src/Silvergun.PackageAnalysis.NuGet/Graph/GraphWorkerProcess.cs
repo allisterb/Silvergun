@@ -270,10 +270,12 @@ internal static class GraphWorkerProcess
     {
         if (new[] { site.Site.NodeId, site.Site.Callee, site.Site.CalleeKey }.Any(n => n.Length > MaxSiteNameChars))
             return "a site's names are over their bound";
+        if (site.Import is { } import && (import.Length > MaxSiteNameChars || UntrustedText.Escape(import) != import))
+            return "a site's import name is over its bound or not escaped";
         if (site.Status != SsaSiteStatus.Analyzed)
             return site.Reason is null || (site.Status == SsaSiteStatus.MethodUnknown) != (site.FailureKind is not null)
                     || site.Reason.Length > MaxReasonTextChars
-                    || site.Receiver is not null || site.Target is not null || site.Arguments.Count > 0 || site.ArgumentCount != 0 || site.Merged
+                    || site.Receiver is not null || site.Target is not null || site.Import is not null || site.Arguments.Count > 0 || site.ArgumentCount != 0 || site.Merged
                 ? $"a {site.Status} site carries values, or lacks its reason or failure kind"
                 : null;
         if (site.Reason is not null || site.FailureKind is not null || site.ArgumentCount < 0 || site.Arguments.Count != Math.Min(site.ArgumentCount, bounds.MaxArguments))

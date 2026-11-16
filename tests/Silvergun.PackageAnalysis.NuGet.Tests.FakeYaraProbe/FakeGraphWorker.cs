@@ -62,7 +62,9 @@ using Silvergun.PackageAnalysis.NuGet.Yara.Worker;
 /// <c>unknownnoreason</c> (MethodUnknown without its failure kind, or its reason), <c>unknownwithargs</c> (MethodUnknown
 /// keeping its values), <c>notrunsite</c> (a NotRun site with no budget flag), <c>longname</c> (a node id past its bound),
 /// <c>targetmember</c> (a Type target with a member), <c>candidatestotal</c> (more candidates than candidatesTotal).
-/// Folder contracts: <c>unknownneg</c> (a failure count of -9), <c>unknowndup</c> (one failure kind twice),
+/// Import contracts (recall-levers-1): <c>importok</c> (the first Analyzed site gets the entry name VirtualAlloc: valid),
+/// <c>importlong</c> (one past its bound), <c>importraw</c> (a raw control char), <c>importunknown</c> (an import left on a
+/// MethodUnknown site). Folder contracts: <c>unknownneg</c> (a failure count of -9), <c>unknowndup</c> (one failure kind twice),
 /// <c>lostanalyzed</c> (assembliesLost 1 with Analyzed sites), <c>unknowntimedout</c> (one TimedOut failure count),
 /// <c>sitetimedout</c> (the first site MethodUnknown with kind TimedOut and a reason). Valid controls: <c>unknownok</c> (the first site
 /// MethodUnknown with kind and reason), <c>notrunok</c> (the first site NotRun, methodBudget set). Every <c>null*</c>,
@@ -477,6 +479,11 @@ internal static class FakeGraphWorker
                 case "unknowntimedout": _ = Sites(); facts!["unknown"] = new JsonArray(Failure("TimedOut", 1)); break;
                 case "sitetimedout": Unanalyzed(First(), "MethodUnknown", "TimedOut", "fake: timed out"); break;
                 case "longname": First()["site"]!["nodeId"] = new string('n', Silvergun.CodeAnalysis.IL.Reachability.MaxNameChars + 49); break;
+                // recall-levers-1: an Analyzed site's P/Invoke entry name, valid (importok) or broken one way at a time.
+                case "importok": Analyzed()["import"] = "VirtualAlloc"; break;
+                case "importlong": Analyzed()["import"] = new string('I', Silvergun.CodeAnalysis.IL.Reachability.MaxNameChars + 49); break;
+                case "importraw": Analyzed()["import"] = "a" + (char)1 + "b"; break;
+                case "importunknown": First()["import"] = "VirtualAlloc"; Unanalyzed(First(), "MethodUnknown", "Import", "fake: did not import"); break;
                 case "targetmember": Analyzed()["target"] = Target(new JsonArray(), member: Dynamic()); break;
                 case "candidatestotal":
                     var target = Target(new JsonArray("Own.Type"));

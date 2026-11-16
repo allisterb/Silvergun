@@ -122,7 +122,7 @@ public static partial class SsaSinkFacts
                     if (Callee(site.EdgeKind, call) is not { } callee)
                         continue;
                     if (ClassificationKey(callee) == site.CalleeKey)
-                        state.Add(siteIndex[site], definition, Read(call, walker, bounds) with { Target = chains.Target(call, reflection.Target(site.CalleeKey)) });
+                        state.Add(siteIndex[site], definition, Read(call, walker, bounds) with { Target = chains.Target(call, reflection.Target(site.CalleeKey)), Import = ImportOf(callee) });
                     else
                         state.OtherCallee.Add(siteIndex[site]);
                 }
@@ -235,6 +235,19 @@ public static partial class SsaSinkFacts
         }
     }
 
+    // A P/Invoke callee's entry name, escaped and bounded; null for any other callee, or one that cannot be read.
+    private static string? ImportOf(MethodDesc method)
+    {
+        try
+        {
+            return method is MethodDef { ImportInfo.FunctionName: { } name } ? Reachability.BoundName(UntrustedText.Escape(name)) : null;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return null;
+        }
+    }
+
     // One instruction's receiver and arguments; a static call, newobj or ldftn has no receiver.
     private static Contribution Read(Instruction instruction, ValueWalker walker, SsaFactBounds bounds)
     {
@@ -279,7 +292,8 @@ public static partial class SsaSinkFacts
         // Charged in argument order: the receiver, the arguments, then the target.
         return new SsaSinkFact(bounded, SsaSiteStatus.Analyzed, receiver is null ? null : budget.Charge(receiver), [.. arguments.Select(budget.Charge)],
             count, contributions.Select(c => c.Definition).Distinct().Count() > 1, null, null,
-            targets.Length == 0 ? null : targetOf(targets.Aggregate((a, b) => Union(a, b, bounds.MaxAlternatives))));
+            targets.Length == 0 ? null : targetOf(targets.Aggregate((a, b) => Union(a, b, bounds.MaxAlternatives))),
+            contributions.Select(c => c.Value.Import).OfType<string>().Order(StringComparer.Ordinal).FirstOrDefault());
     }
 
     // Two values of one position, from two definitions or two phi inputs: constants union (sorted, up to the bound),
@@ -307,7 +321,7 @@ public static partial class SsaSinkFacts
 
     #region Child types
     // One instruction's values at a site, from one definition, and its reflection target's parts.
-    private sealed record Contribution(SsaValue? Receiver, IReadOnlyList<SsaValue> Arguments, int Count, TargetParts? Target = null);
+    private sealed record Contribution(SsaValue? Receiver, IReadOnlyList<SsaValue> Arguments, int Count, TargetParts? Target = null, string? Import = null);
 
     // What the definitions under one node id gave: the first failure, and per site (by index) each joined instruction's
     // values with the definition it came from.
@@ -378,9 +392,9 @@ public static partial class SsaSinkFacts
     }
 
     // Classifies one SSA value: constants and type tokens, the caller's arguments, and a cycle-safe, bounded walk of phi
-    // webs. Retyping casts and boxes are looked through; nothing is folded. Values (by reference), strings (by content)
-    // and types (by reference) are memoised per body, Reset between bodies, so a web or a long string used at many sites
-    // is read once.
+    // webs. Retyping casts and boxes are looked through; only string.Concat of string constants is folded (Folded).
+    // Values (by reference), strings (by content) and types (by reference) are memoised per body, Reset between bodies,
+    // so a web or a long string used at many sites is read once.
     private sealed class ValueWalker(SsaFactBounds bounds)
     {
         #region Properties
@@ -434,6 +448,8 @@ public static partial class SsaSinkFacts
             values.Clear();
             strings.Clear();
             types.Clear();
+            folded.Clear();
+            tooHigh.Clear();
             definitions.Clear();
         }
 
@@ -481,6 +497,7 @@ public static partial class SsaSinkFacts
             ConstNull => SsaValue.OfConstant(new SsaConstant(SsaConstantKind.Null, "null")),
             Argument argument => SsaValue.OfParameter(argument.Index),
             CallInst call when TypeToken(call) is { } type => OfType(type),
+            CallInst call when Folded(call, 0) is { } text => Constant(text),
             CallInst or NewObjInst or CilIntrinsic.CallIndirect => SsaValue.OfDynamic(SsaDynamicOrigin.CallResult),
             LoadInst load => SsaValue.OfDynamic(Strip(load.Address) switch
             {
@@ -526,6 +543,75 @@ public static partial class SsaSinkFacts
             }
         }
 
+        // CoreLib's string.Concat of 2-4 strings, each a string constant or such a Concat, as its raw text; null for any
+        // other call, a null or phi argument, a Concat nested more than MaxFoldDepth high, or past MaxTextChars × 4 raw
+        // chars. It fails closed: the value stays a call result. Order-independent: a fold is memoised with its height
+        // (1 + its highest Concat argument), and a walk cut by depth only records that the call is too high from that
+        // depth (tooHigh), so each call is entered at most once per depth and a site's value never depends on other sites.
+        private string? Folded(CallInst call, int depth) => Fold(call, depth).Text;
+
+        private (string? Text, bool Cut) Fold(CallInst call, int depth)
+        {
+            if (tooHigh.TryGetValue(call, out var from) && depth >= from)
+                return (null, true);
+            if (!folded.TryGetValue(call, out var known))
+            {
+                if (!IsConcat(call))
+                    folded[call] = known = (null, 0);
+                else if (depth >= MaxFoldDepth)
+                    return TooHigh(call, depth);
+                else
+                {
+                    var parts = new string?[call.NumArgs];
+                    var (length, height, whole) = (0L, 1, true);
+                    for (var i = 0; i < parts.Length && whole; i++)
+                    {
+                        string? part = null;
+                        switch (Strip(call.Args[i]))
+                        {
+                            case ConstString text:
+                                part = text.Value;
+                                break;
+                            case CallInst inner:
+                                var (innerText, cut) = Fold(inner, depth + 1);
+                                if (cut)
+                                    return TooHigh(call, depth);
+                                part = innerText;
+                                height = Math.Max(height, 1 + folded[inner].Height);
+                                break;
+                        }
+                        whole = part is not null && (length += part.Length) <= bounds.MaxTextChars * 4L;
+                        parts[i] = part;
+                    }
+                    folded[call] = known = (whole ? string.Concat(parts) : null, height);
+                }
+            }
+            return known.Text is not null && depth + known.Height > MaxFoldDepth ? TooHigh(call, depth) : (known.Text, false);
+        }
+
+        private (string? Text, bool Cut) TooHigh(CallInst call, int depth)
+        {
+            tooHigh[call] = Math.Min(depth, tooHigh.GetValueOrDefault(call, int.MaxValue));
+            return (null, true);
+        }
+
+        private static bool IsConcat(CallInst call)
+        {
+            try
+            {
+                return call.Method.Name == "Concat" && IsString(call.Method.DeclaringType)
+                    && call.NumArgs is >= 2 and <= 4 && call.Method.ParamSig.Count == call.NumArgs
+                    && call.Method.ParamSig.All(p => IsString(p.Type));
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                return false;
+            }
+        }
+
+        // CoreLib's string, which a signature names as a primitive and a member reference as a type definition.
+        private static bool IsString(TypeDesc type) => type == PrimType.String || type.IsCorelibType(typeof(string));
+
         // A retyping cast or a box stands for its operand.
         public static Value Strip(Value value)
         {
@@ -539,9 +625,14 @@ public static partial class SsaSinkFacts
         #region Fields
         private const int MaxStrip = 16;
 
+        // Nested Concats folded into one constant.
+        private const int MaxFoldDepth = 8;
+
         private readonly Dictionary<Value, SsaValue> values = new(ReferenceEqualityComparer.Instance);
         private readonly Dictionary<string, SsaConstant> strings = new(StringComparer.Ordinal);
         private readonly Dictionary<TypeDesc, SsaConstant> types = new(ReferenceEqualityComparer.Instance);
+        private readonly Dictionary<CallInst, (string? Text, int Height)> folded = new(ReferenceEqualityComparer.Instance);
+        private readonly Dictionary<CallInst, int> tooHigh = new(ReferenceEqualityComparer.Instance);
         private readonly Dictionary<SsaConstant, HashSet<TypeName>> definitions = [];
         #endregion
     }

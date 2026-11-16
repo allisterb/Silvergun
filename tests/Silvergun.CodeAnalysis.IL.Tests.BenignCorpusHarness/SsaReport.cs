@@ -338,14 +338,14 @@ public static class SsaReport
     private static string Tally(IEnumerable<string> values) =>
         string.Join(", ", values.GroupBy(v => v, StringComparer.Ordinal).OrderBy(g => g.Key, StringComparer.Ordinal).Select(g => $"{Clean(g.Key)} {g.Count().ToString("N0", CultureInfo.InvariantCulture)}"));
 
-    private static string Tsv(string[] header, IEnumerable<string[]> rows) =>
+    internal static string Tsv(string[] header, IEnumerable<string[]> rows) =>
         string.Join("\n", new[] { string.Join('\t', header) }.Concat(rows.Select(r => string.Join('\t', r.Select(Clean))))) + "\n";
 
-    private static string I(long value) => value.ToString(CultureInfo.InvariantCulture);
+    internal static string I(long value) => value.ToString(CultureInfo.InvariantCulture);
 
     // One printable line from package-controlled text: control, bidi and zero-width characters become '?', and it is bounded;
     // backticks and pipes too, so Markdown cells hold.
-    private static string Clean(string text)
+    internal static string Clean(string text)
     {
         var chars = text.Select(c => char.IsControl(c) || char.IsSurrogate(c) || c is '`' or '|' or (char)0x00AD or (char)0xFEFF
             or >= (char)0x200B and <= (char)0x200F or >= (char)0x202A and <= (char)0x202E or >= (char)0x2066 and <= (char)0x2069 ? '?' : c).ToArray();

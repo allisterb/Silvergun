@@ -270,6 +270,10 @@ public sealed class GraphWorkerSsaParentTests : IDisposable
         { "MethodUnknown without its reason", ["graph build", "ssa unknownnoreason"], "a MethodUnknown site carries values, or lacks its reason or failure kind" },
         { "MethodUnknown with arguments", ["graph build", "ssa unknownwithargs"], "a MethodUnknown site carries values, or lacks its reason or failure kind" },
         { "a site name past its bound", ["graph build", "ssa longname"], "a site's names are over their bound" },
+        // recall-levers-1: the entry name of a P/Invoke callee is bounded, escaped, and only on an Analyzed site.
+        { "an import name past its bound", ["graph build", "ssa importlong"], ImportProblem },
+        { "an unescaped control char in an import name", ["graph build", "ssa importraw"], ImportProblem },
+        { "an import name on a MethodUnknown site", ["graph build", "ssa importunknown"], "a MethodUnknown site carries values, or lacks its reason or failure kind" },
         { "a Constant with no constant", ["graph build", "ssa constempty"], MalformedValue },
         { "a OneOf of one constant", ["graph build", "ssa oneofone"], MalformedValue },
         { "a Dynamic without its origin", ["graph build", "ssa dynnoorigin"], MalformedValue },
@@ -290,6 +294,7 @@ public sealed class GraphWorkerSsaParentTests : IDisposable
         { "a record over 16 MiB", ["graph build", "outbig 16777217"], $"over {GraphWorkerProtocol.MaxRecordLineBytes} bytes" },
     };
 
+    private const string ImportProblem = "a site's import name is over its bound or not escaped";
     private const string FolderCounts = "its folder counts are inconsistent or over the request's bounds";
     private const string ArgumentCounts = "an Analyzed site carries a reason, or its argument counts are inconsistent";
     private const string MalformedValue = "a site holds a malformed value";
@@ -344,6 +349,24 @@ public sealed class GraphWorkerSsaParentTests : IDisposable
         if (outcome == SsaFolderOutcome.Analyzed)
             Assert.Equal((2, true), (report.Folders[0].Ssa!.Facts!.Sites.Count, report.Folders[0].Ssa!.Facts!.Truncated));
         Assert.Equal(SsaFolderOutcome.NotRun, report.Folders[1].Ssa!.Outcome);
+        Assert.Single(script.Pids);
+    }
+
+    /// <summary>
+    /// recall-levers-1: a valid entry name on an Analyzed site is accepted and reaches the parent's facts as sent (a record
+    /// without one reads null: the field is optional, as old workers wrote it).
+    /// </summary>
+    [Fact]
+    public void WorkerV2_AnImportNameOnAnAnalyzedSite_IsAccepted_AndKept()
+    {
+        using var script = new FakeGraphScript("ssa-import-ok").Otherwise("request", "ready", "graph build", "ssa importok", "build", "done");
+
+        var report = Analyze(script, Options(), stage.Mechanisms("lib/a"), stage.Small("lib/b"));
+
+        var ssa = report.Folders[0].Ssa!;
+        Assert.Equal(SsaFolderOutcome.Analyzed, ssa.Outcome);
+        Assert.Contains(ssa.Facts!.Sites, s => s is { Status: SsaSiteStatus.Analyzed, Import: "VirtualAlloc" });
+        Assert.Contains(ssa.Facts.Sites, s => s.Import is null);
         Assert.Single(script.Pids);
     }
     #endregion

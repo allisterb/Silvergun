@@ -240,7 +240,7 @@ public sealed class SsaSinkFactsFixture : IDisposable
         {
             i.Emit(OpCodes.Ldstr, "b");
             i.Emit(OpCodes.Ldstr, "c");
-            i.Emit(OpCodes.Call, Apis.Concat);
+            i.Emit(OpCodes.Call, Apis.ConcatObjects);   // not a string.Concat that folds (recall-levers-1 §3)
         }));
         Body(Static(sites, "PhiConstantOrParameter", typeof(void), typeof(bool), typeof(string)), il => IfElse(il, typeof(string), i => i.Emit(OpCodes.Ldstr, "a"), i => i.Emit(OpCodes.Ldarg_1)));
         Body(Static(sites, "PhiSameParameter", typeof(void), typeof(bool), typeof(string)), il => IfElse(il, typeof(string), i => i.Emit(OpCodes.Ldarg_1), i => i.Emit(OpCodes.Ldarg_1)));
@@ -663,6 +663,7 @@ public sealed class SsaSinkFactsFixture : IDisposable
         public static readonly MethodInfo CreateInstance = typeof(Activator).GetMethod(nameof(Activator.CreateInstance), [typeof(Type)])!;
         public static readonly MethodInfo GetTypeFromHandle = typeof(Type).GetMethod(nameof(Type.GetTypeFromHandle), [typeof(RuntimeTypeHandle)])!;
         public static readonly MethodInfo Concat = typeof(string).GetMethod(nameof(string.Concat), [typeof(string), typeof(string)])!;
+        public static readonly MethodInfo ConcatObjects = typeof(string).GetMethod(nameof(string.Concat), [typeof(object), typeof(object)])!;
         public static readonly MethodInfo IsNullOrEmpty = typeof(string).GetMethod(nameof(string.IsNullOrEmpty), [typeof(string)])!;
         public static readonly ConstructorInfo FileStreamOf = typeof(FileStream).GetConstructor([typeof(string), typeof(FileMode)])!;
     }

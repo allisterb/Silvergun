@@ -1,0 +1,27 @@
+<Project>
+
+  <PropertyGroup>
+    <!-- Behaviour fixtures (docs/agent/tasks/behaviour-fixtures-recall.md). Each project is ONE side (malicious or
+         benign twin) of ONE behaviour, compiled to one tiny assembly that is only ever READ by the analyzer, never
+         loaded or run. Every payload entry point starts with `if (!Arm.Armed) return;` (_Shared/Arm.cs, a non-const
+         static readonly bool, so the body survives compilation). Shipped shapes: Optimize on. No NuGet package
+         reference of any kind; host types come from the mechanism fixture's HostStubs project. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Optimize>true</Optimize>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Deterministic>true</Deterministic>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>false</IsTestProject>
+    <AssemblyName>Silvergun.Behaviour.$(MSBuildProjectName)</AssemblyName>
+    <RootNamespace>Behaviour</RootNamespace>
+    <NoWarn>$(NoWarn);CS0162;CS0414;CS0169;CS0649;CS8321;SYSLIB1054;CA1416;CA2255</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(MSBuildProjectName)' != '_All'">
+    <Compile Include="$(MSBuildThisFileDirectory)_Shared\Arm.cs" Link="Arm.cs" />
+  </ItemGroup>
+
+</Project>

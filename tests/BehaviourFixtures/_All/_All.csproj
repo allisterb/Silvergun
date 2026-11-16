@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Builds every behaviour fixture on its own (R5), before the CLI suite runs: dotnet build this project. -->
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BF*\BF*.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+</Project>

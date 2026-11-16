@@ -14,8 +14,9 @@ using static Silvergun.CLI.Reports.ReportTheme;
 /// <summary>
 /// The <c>scan-package --reachability --ssa</c> section (<c>docs/agent/tasks/ssa-facts-s5.md</c> §4): sink sites whose
 /// arguments or reflection targets SSA resolved, per folder, and what SSA did not analyse. SSA-derived and informational:
-/// nothing here is a trigger or moves the exit code. Every summary string was escaped when the summary was built; here it
-/// is only markup-escaped.
+/// nothing here moves the exit code. Value signals are tagged on their sites (<c>docs/agent/tasks/recall-levers-1.md</c>
+/// §2), a measured trigger with the alert glyph. Every summary string was escaped when the summary was built; here it is
+/// only markup-escaped.
 /// </summary>
 internal static class SsaSectionRenderer
 {
@@ -60,9 +61,12 @@ internal static class SsaSectionRenderer
     private static IEnumerable<string> FolderLines(bool rich, FolderSsaSummary ssa)
     {
         var sites = (ssa.Sites ?? []).OfType<SsaSiteSummary>().ToArray();
+        if ((ssa.Signals ?? []).OfType<SsaSignalCount>().ToArray() is { Length: > 0 } signals)
+            yield return "value signals: " + string.Join(", ", signals.Select(s => $"{Mark(rich, s.Kind)}{s.Signal} ({s.Sites} site(s))"));
         foreach (var site in sites.Take(MaxSitesPerFolder))
         {
-            yield return $"{site.Capability}  {Esc(site.Call)}  [grey]in {Esc(site.Caller)}{(site.Merged ? " (merged definitions)" : string.Empty)}[/]";
+            var tags = (site.Signals ?? []).Select(s => $"{Mark(rich, SsaSummary.KindOf(s))}[[{s}]] ");
+            yield return $"{string.Concat(tags)}{site.Capability}  {Esc(site.Call)}  [grey]in {Esc(site.Caller)}{(site.Merged ? " (merged definitions)" : string.Empty)}[/]";
             if (site.Target is { } target)
                 yield return $"    [grey]acts on {Esc(target.Text)}{Esc(Candidates(target))}{Esc(target.CandidatesGap is { } gap ? $"; the search has gaps: {gap}" : string.Empty)}[/]";
         }
@@ -74,6 +78,10 @@ internal static class SsaSectionRenderer
         foreach (var gap in Gaps(ssa))
             yield return $"[yellow]SSA incomplete: {Esc(gap)}[/]";
     }
+
+    // A trigger's alert glyph, as the reachability section marks one; nothing for information.
+    private static string Mark(bool rich, ReachStatementKind kind) =>
+        kind == ReachStatementKind.Trigger ? $"[red]{Esc(AlertGlyph(rich))}[/] " : string.Empty;
 
     private static string Candidates(SsaTargetSummary target) =>
         (target.CandidatesTotal, target.Candidates?.OfType<string>().ToArray() ?? []) switch

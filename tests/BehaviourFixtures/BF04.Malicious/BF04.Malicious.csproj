@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <!-- Host-contract stand-ins (Microsoft.Build.Framework.ITask, DiagnosticAnalyzer), referenced, not copied. -->
+    <ProjectReference Include="..\..\Silvergun.CodeAnalysis.IL.Tests.MechanismFixture.HostStubs\Silvergun.CodeAnalysis.IL.Tests.MechanismFixture.HostStubs.csproj" />
+  </ItemGroup>
+
+</Project>

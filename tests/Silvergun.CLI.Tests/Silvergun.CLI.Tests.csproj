@@ -42,6 +42,11 @@
          loaded. YaraWorkerVerbCliTests use it to pin that `__worker yara` loads no analysis code (ADR 0033 FINAL FORM
          decision 5). Referenced only so its dll lands in this output directory; nothing compiles against it. -->
     <ProjectReference Include="..\Silvergun.CLI.Tests.LoadedAssembliesHook\Silvergun.CLI.Tests.LoadedAssembliesHook.csproj" />
+    <!-- The 38 behaviour fixtures (docs/agent/tasks/behaviour-fixtures-recall.md): inert, never-executed assemblies, one per
+         package side, under tests/BehaviourFixtures/. Referenced (not merely built) so every dll lands in this project's
+         output directory, where the Behaviour tests copy it by file name into a .nupkg and read its IL. Located by file name,
+         nothing compiles against its types. (BF*\BF*.csproj, so the _All aggregator and _Shared are not matched.) -->
+    <ProjectReference Include="..\BehaviourFixtures\BF*\BF*.csproj" />
   </ItemGroup>
 
 </Project>

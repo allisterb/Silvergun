@@ -164,8 +164,14 @@ public sealed class SsaScanPackageCliTests : IClassFixture<SsaScanPackageCliTest
         Assert.Equal("Method \"Own.Target\" :: \"Run\"", target["Text"]!.GetValue<string>());
         Assert.True(target["CandidatesTotal"]!.GetValue<int>() >= 1, target.ToJsonString());
         Assert.Contains(target["Candidates"]!.AsArray(), c => c!.GetValue<string>().Contains("Own.Target", StringComparison.Ordinal) && c.GetValue<string>().Contains("Run", StringComparison.Ordinal));
-        // The resolved reflection target sorts first.
-        Assert.NotNull(Sites(lib).First()["Target"]);
+        // A site with a value signal sorts before every other (recall-levers-1 §2): Process.Start("cmd.exe") is a shell interpreter.
+        // Then the resolved reflection target sorts first.
+        var sites = Sites(lib);
+        Assert.Equal(["ShellInterpreter"], sites[0]["Signals"]!.AsArray().Select(s => s!.GetValue<string>()));
+        Assert.Equal("System.Diagnostics.Process.Start(\"cmd.exe\")", sites[0]["Call"]!.GetValue<string>());
+        Assert.NotNull(sites.First(s => s["Signals"] is null)["Target"]);
+        var count = Assert.Single(lib["Signals"]!.AsArray())!;
+        Assert.Equal(("ShellInterpreter", "Informational"), (count["Signal"]!.GetValue<string>(), count["Kind"]!.GetValue<string>()));
 
         var bad = Ssa(run, "lib/netstandard2.0");
         Assert.Equal("NotRun", bad["Outcome"]!.GetValue<string>());
@@ -197,7 +203,14 @@ public sealed class SsaScanPackageCliTests : IClassFixture<SsaScanPackageCliTest
         Assert.Contains(lines, l => l.Contains("Argument values (SSA-derived, informational; constants at sinks are common in benign packages)", StringComparison.Ordinal));
         Assert.Contains(lines, l => Regex.IsMatch(l, @"^\d+ site\(s\) with resolved values in 1 folder\(s\); 1 folder\(s\) SSA-incomplete$"));
         var cmd = Assert.Single(Sites(Ssa(json, "lib/net10.0")), s => s["Call"]!.GetValue<string>() == "System.Diagnostics.Process.Start(\"cmd.exe\")");
-        Assert.Contains($"  ProcessExecution  System.Diagnostics.Process.Start(\"cmd.exe\")  in {cmd["Caller"]!.GetValue<string>()}", lines);
+        // The shell-interpreter signal tags its site (an information signal: no alert glyph) and is counted on a line of its own.
+        // (The tag lengthens the line past the report's width, so it may wrap before its caller.)
+        Assert.Contains(lines, l => l.StartsWith("  [ShellInterpreter] ProcessExecution  System.Diagnostics.Process.Start(\"cmd.exe\")", StringComparison.Ordinal));
+        // The whole tagged line, caller included, is contiguous once the wrap's line breaks are removed (a wrap may drop its space).
+        Assert.Matches(
+            "\\[ShellInterpreter\\] ProcessExecution\\s+" + Regex.Escape("System.Diagnostics.Process.Start(\"cmd.exe\")") + "\\s*in\\s*" + Regex.Escape(cmd["Caller"]!.GetValue<string>()),
+            Flat(run.Output));
+        Assert.Contains("  value signals: ShellInterpreter (1 site(s))", lines);
         Assert.Contains(lines, l => l.StartsWith("      acts on Method \"Own.Target\" :: \"Run\" (", StringComparison.Ordinal));
         Assert.Contains(lines, l => l.StartsWith("  SSA incomplete: not analysed: NotRun: ", StringComparison.Ordinal));
         // The hostile line wraps at the report's width, so its escapes are looked for in the unwrapped text.

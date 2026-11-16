@@ -140,7 +140,7 @@ public sealed record SsaPresentation(
         2 + summary.Folders.Where(f => f.Ssa is { } s && (IsCopy(f) || Resolved(s) > 0 || s.Incomplete()))
             .Sum(f => 1 + (IsCopy(f) ? 1 : 0)
                 + f.Ssa!.Sites.Take(TerminalSites).Sum(s => s.Target is null ? 1 : 2) + (f.Ssa.Sites.Count > TerminalSites ? 1 : 0)
-                + (f.Ssa.SitesDropped > 0 ? 1 : 0) + Gaps(f.Ssa).Count());
+                + (f.Ssa.SitesDropped > 0 ? 1 : 0) + (f.Ssa.Signals is { Count: > 0 } ? 1 : 0) + Gaps(f.Ssa).Count());
 
     private static bool IsCopy(FolderReachSummary folder) => folder.SameAs is not null && folder.Ssa?.Outcome == SsaFolderOutcome.Analyzed;
 

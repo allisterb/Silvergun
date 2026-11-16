@@ -1,8 +1,10 @@
 namespace Silvergun.PackageAnalysis.NuGet.Graph;
 
 using System;
+using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
 using Silvergun.CodeAnalysis.IL;
@@ -34,16 +36,27 @@ public sealed record SsaTargetSummary(SsaTargetKind Kind, string Text, IReadOnly
 /// One sink site with a value SSA resolved: <paramref name="Call"/> is the callee's key with its arguments rendered
 /// (<c>System.Diagnostics.Process.Start("cmd.exe", _)</c>), <paramref name="Caller"/> and <paramref name="Callee"/> node
 /// ids, <paramref name="Offset"/> the call's IL offset in the caller. Every string is escaped and bounded.
+/// <paramref name="Signals"/>: the value classes the site shows (<see cref="SsaValueSignals"/>), null when none.
 /// </summary>
-public sealed record SsaSiteSummary(string Caller, string Callee, Capability Capability, uint Offset, string Call, SsaTargetSummary? Target, bool Merged);
+public sealed record SsaSiteSummary(string Caller, string Callee, Capability Capability, uint Offset, string Call, SsaTargetSummary? Target, bool Merged,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<SsaSignal>? Signals = null);
+
+/// <summary>
+/// How many of a folder's Analyzed sites show <paramref name="Signal"/> (listed or not), and whether it is presented as a
+/// trigger (<see cref="SsaSummary.KindOf"/>).
+/// </summary>
+public sealed record SsaSignalCount(SsaSignal Signal, ReachStatementKind Kind, int Sites);
 
 /// <summary>
 /// One folder's SSA facts as presented (ADR 0038: SSA-derived, informational): the outcome, the counts, and only the
 /// Analyzed sites with a constant argument or receiver or a constant reflection target (<see cref="Sites"/>), at most
 /// <see cref="SsaSummary.MaxSitesPerFolder"/>, <see cref="SitesDropped"/> counting the rest. A site that was not analysed
 /// is counted, never listed: it says nothing about its values. A copy of another folder lists no sites.
+/// <see cref="Signals"/>: per value signal shown, its site count, in enum order; null when none (which says nothing
+/// about a site that is not Analyzed or not constant). Sites with a signal are listed first, so the caps drop them last.
 /// </summary>
-public sealed record FolderSsaSummary(SsaFolderOutcome Outcome, string? Reason, SsaCounts? Counts, IReadOnlyList<SsaSiteSummary> Sites, int SitesDropped)
+public sealed record FolderSsaSummary(SsaFolderOutcome Outcome, string? Reason, SsaCounts? Counts, IReadOnlyList<SsaSiteSummary> Sites, int SitesDropped,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<SsaSignalCount>? Signals = null)
 {
     #region Methods
     /// <summary>
@@ -80,17 +93,23 @@ public static class SsaSummary
                 facts.Count(SsaSiteStatus.NotRun), facts.SitesTotal, facts.Truncated, facts.MethodsLifted, facts.Unknown,
                 facts.MethodBudget, facts.TimeBudget, facts.TextBudget, facts.AssembliesLost);
             SsaSinkFact[] resolved = copy ? [] : [.. facts.Sites.Where(Resolved)];
+            var signals = new Dictionary<SsaSinkFact, IReadOnlyList<SsaSignal>>(ReferenceEqualityComparer.Instance);
+            foreach (var site in resolved)
+                signals[site] = SsaValueSignals.Of(site);
+            var signalCounts = signals.Values.SelectMany(s => s).GroupBy(s => s).OrderBy(g => g.Key)
+                .Select(g => new SsaSignalCount(g.Key, KindOf(g.Key), g.Count())).ToArray();
             var sites = resolved
-                .OrderBy(s => TargetResolved(s.Target) ? 0 : 1)
+                .OrderBy(s => signals[s].Count > 0 ? 0 : 1)
+                .ThenBy(s => TargetResolved(s.Target) ? 0 : 1)
                 .ThenBy(s => s.Site.Capability)
                 .ThenBy(s => s.Site.NodeId, StringComparer.Ordinal)
                 .ThenBy(s => s.Site.Offset)
                 .ThenBy(s => s.Site.Callee, StringComparer.Ordinal)
                 .Take(MaxSitesPerFolder)
-                .Select(Site)
+                .Select(s => Site(s) with { Signals = signals[s].Count > 0 ? signals[s] : null })
                 .ToArray();
             var reason = ssa.Outcome == SsaFolderOutcome.Analyzed ? null : Name(ssa.Reason ?? "no reason was given");
-            return new(ssa.Outcome, reason, counts, sites, resolved.Length - sites.Length);
+            return new(ssa.Outcome, reason, counts, sites, resolved.Length - sites.Length, signalCounts.Length > 0 ? signalCounts : null);
         }
         catch (Exception ex)
         {
@@ -116,6 +135,12 @@ public static class SsaSummary
         }
         return capped;
     }
+
+    /// <summary>
+    /// How a value signal is presented, decided by the benign measurement in <c>docs/agent/tasks/recall-levers-1.md</c> §4,
+    /// never by a code tweak. Nothing gates either way.
+    /// </summary>
+    public static ReachStatementKind KindOf(SsaSignal signal) => triggerSignals.Contains(signal) ? ReachStatementKind.Trigger : ReachStatementKind.Informational;
 
     /// <summary>A value for display: see <c>ssa-facts-s5.md</c> §3. Not yet escaped or bounded.</summary>
     internal static string Value(SsaValue? value) => value switch
@@ -194,6 +219,9 @@ public static class SsaSummary
 
     /// <summary>Candidate names listed per target.</summary>
     public const int MaxCandidates = 8;
+
+    // The signals that passed recall-levers-1 §4's rule; none until it is measured.
+    private static readonly FrozenSet<SsaSignal> triggerSignals = FrozenSet<SsaSignal>.Empty;
 
     // UntrustedText's suffix, exactly, at the end of the text.
     private static readonly Regex cutSuffix = new(@"…\[\+\d+ chars, sha256:[0-9a-f]{8}\]\z", RegexOptions.CultureInvariant);

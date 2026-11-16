@@ -256,10 +256,10 @@ public sealed class SsaSinkFactsTests : IClassFixture<SsaSinkFactsFixture>
     public void Value_InstanceField_IsDynamicFieldLoad() =>
         AssertValues([Dynamic(SsaDynamicOrigin.FieldLoad)], Fact("InstanceField").Arguments);
 
-    // No folding: string.Concat of two constants is a call's result.
+    // recall-levers-1 §3: string.Concat(string, string) of two constants folds (SsaLeversTests has the rest of the shapes).
     [Fact]
-    public void Value_ConcatOfConstants_IsDynamicCallResult() =>
-        AssertValues([Dynamic(SsaDynamicOrigin.CallResult)], Fact("ConcatOfConstants").Arguments);
+    public void Value_ConcatOfConstants_IsFoldedConstant() =>
+        AssertValues([Str("ab")], Fact("ConcatOfConstants").Arguments);
 
     [Fact]
     public void Value_CalliResult_IsDynamicCallResult() =>

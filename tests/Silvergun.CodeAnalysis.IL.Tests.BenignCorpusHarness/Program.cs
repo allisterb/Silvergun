@@ -76,6 +76,8 @@ public static class Program
                 return RunWorkerParity(args);
             if (args.Contains(SsaFlag))
                 return RunSsa(args);
+            if (args.Contains(LeversFlag))
+                return RunLevers(args);
 
             var options = Parse(args);
             var manifest = CorpusManifest.Load(options.Manifest, options.Take);
@@ -293,6 +295,69 @@ public static class Program
         }
         Console.WriteLine("SSA every folder additive, repeatable and within bounds");
         return 0;
+    }
+
+    // --levers (recall-levers-1, L2): offline like --ssa, results cached per package in --results, batched by --max-packages and
+    // --max-seconds; the report is written by the invocation that finds every entry measured. One SSA-on worker pass per package.
+    private static int RunLevers(string[] args)
+    {
+        string? Value(string name)
+        {
+            var index = Array.IndexOf(args, name);
+            return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
+        }
+
+        if (Value("--results") is not { } results)
+        {
+            Console.Error.WriteLine("--levers needs --results <dir>; see --help.");
+            return 2;
+        }
+        var common = Parse(args);
+        if (Value("--take") is null)
+            common = common with { Take = 0 };
+        var maxPackages = Value("--max-packages") is { } max ? int.Parse(max, CultureInfo.InvariantCulture) : int.MaxValue;
+        var maxTime = Value("--max-seconds") is { } seconds ? TimeSpan.FromSeconds(double.Parse(seconds, CultureInfo.InvariantCulture)) : TimeSpan.MaxValue;
+
+        var cli = Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "Silvergun.CLI.exe" : "Silvergun.CLI");
+        if (!File.Exists(cli))
+        {
+            Console.Error.WriteLine($"--levers needs the graph worker beside the harness, and there is no {cli}.");
+            return 1;
+        }
+
+        var manifest = CorpusManifest.Load(common.Manifest, common.Take);
+        var identity = BuildIdentities.Current(RepositoryRoot(), AppContext.BaseDirectory).ToString();
+        Console.WriteLine($"manifest {manifest.Path}");
+        Console.WriteLine($"manifest-hash {manifest.Hash} ({manifest.Entries.Count} package(s))");
+        Console.WriteLine($"cache {DisplayPath(common.CacheRoot)} (read only)");
+        Console.WriteLine($"results {DisplayPath(Path.GetFullPath(results))}");
+        Console.WriteLine($"configuration {LeversMeasure.Configuration}; identity {identity}");
+
+        Silvergun.Runtime.Initialize("Silvergun", "CORPUS");
+        try
+        {
+            var (paths, pending, notCached, problems) = LeversMeasure.Run(manifest, common.CacheRoot, Path.GetFullPath(results), common.OutputDirectory,
+                DateOf(args), identity, maxPackages, maxTime, Console.Out);
+            foreach (var path in paths)
+                Console.WriteLine($"wrote {DisplayPath(path)}");
+            if (notCached > 0 || pending > 0)
+            {
+                Console.WriteLine(notCached > 0 ? $"NOT-COMPARABLE {notCached} manifest entr(ies) not cached; nothing was downloaded" : $"PENDING {pending} package(s) left; run again");
+                return notCached > 0 ? NotComparableExitCode : 0;
+            }
+            if (problems > 0)
+            {
+                Console.Error.WriteLine($"PROBLEMS {problems}; see the report.");
+                return ParityMismatchExitCode;
+            }
+            Console.WriteLine("LEVERS every package measured; counts and names are in the report");
+            return 0;
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("another build", StringComparison.Ordinal))
+        {
+            Console.Error.WriteLine($"FAILED {Redact(ex.Message)}");
+            return 1;
+        }
     }
 
     // --combine (reachability R2b S4): offline like --reachability, and it runs no child either: it reads four results
@@ -525,6 +590,8 @@ public static class Program
 
     private const string SsaFlag = "--ssa";
 
+    private const string LeversFlag = "--levers";
+
     /// <summary><c>--worker-parity</c> wrote its report, and some folder differs between the in-process pass and the worker.</summary>
     public const int ParityMismatchExitCode = 4;
 
@@ -602,6 +669,19 @@ public static class Program
           graphs not the child's, not repeatable, a join miss of an unexplained class, a bound or a default budget passed,
           a pass not finished, no SSA facts at all, the summary with SSA not the summary without it outside its Ssa
           objects, its Complete changed, its repeat different); 3 when an entry is not cached.
+
+          <harness> --levers --results <dir> [--max-packages <n>] [--max-seconds <s>] [--date <yyyy-MM-dd>] [common options]
+
+          Recall levers 1, L2 (docs/agent/tasks/recall-levers-1.md). OFFLINE, the same cache and manifest as --reachability
+          (--take defaults to 0). Per cached package: ONE PackageReachability.Analyze pass through the Silvergun.CLI worker
+          beside the harness with SSA on, then ReachabilitySummary.From. Per package: each co-reach cell (class x
+          EnvironmentProbe|FileSystem + Network x Direct|Deferred: fired, roots, floor), each value signal (sites, floor), the
+          listed signal sites, and the --ssa constant-sinks table. Each result is cached as <results>/<Id>.<Version>.levers.json
+          and reused (results of another build are refused); --max-packages and --max-seconds batch the run. Once every entry
+          has a result, writes levers-<manifest>-<configuration>-<date>.md and its -cells, -signals, -examples, -packages and
+          -constant-sinks TSVs into --out. The -constant-sinks.tsv is --ssa's format and rule: diff it against a committed one to
+          see what folding moved. Counts and names only, no verdict. Exit 4 after writing them when a package has no report; 3
+          when an entry is not cached.
 
           <harness> r3-measure <nupkg> <out-dir> [--timeout <seconds>]
 

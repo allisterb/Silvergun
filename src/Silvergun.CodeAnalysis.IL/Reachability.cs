@@ -92,6 +92,9 @@ public static class Reachability
     /// <summary>The chars of a name a report keeps whole (<see cref="BoundName"/>).</summary>
     public const int MaxNameChars = 1024;
 
+    /// <summary>The profiles a report keeps per root class; past it <see cref="ReachabilityReport.ProfilesTruncated"/>.</summary>
+    public const int MaxProfilesPerClass = 64;
+
     // The single root classes, strongest first (ADR 0037 decision 4, amendment a1).
     private static readonly RootClass[] classes =
     [
@@ -107,7 +110,6 @@ public static class Reachability
     private static readonly HashSet<OpacityKind> unseenKinds =
         [OpacityKind.IndirectCall, OpacityKind.Unresolved, OpacityKind.Ambiguous, OpacityKind.BodyUnreadable, OpacityKind.OversizedType];
 
-    private const int MaxProfiles = 64;
     private const int MaxExamples = 3;
     #endregion
 
@@ -221,8 +223,8 @@ public static class Reachability
                     .Select(g => (g.Key.Mask, g.Key.Direct, Count: g.Count(), Example: g.Min(m => m.Root)))
                     .OrderByDescending(g => g.Count).ThenBy(g => g.Mask).ThenBy(g => g.Direct).ThenBy(g => g.Example)
                     .ToArray();
-                profilesTruncated |= grouped.Length > MaxProfiles;
-                profiles.AddRange(grouped.Take(MaxProfiles).Select(g => new ReachProfile(cls,
+                profilesTruncated |= grouped.Length > MaxProfilesPerClass;
+                profiles.AddRange(grouped.Take(MaxProfilesPerClass).Select(g => new ReachProfile(cls,
                     Capabilities(g.Mask), (g.Mask & (1 << unseenSink)) != 0, Capabilities(g.Direct), (g.Direct & (1 << unseenSink)) != 0,
                     g.Count, Bound(nodes[g.Example].NodeId))));
 

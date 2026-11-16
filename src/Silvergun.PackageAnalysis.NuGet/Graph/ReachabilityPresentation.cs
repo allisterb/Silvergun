@@ -27,6 +27,10 @@ internal static class ReachabilityPresentation
     {
         Capability.ProcessExecution, Capability.Registry, Capability.Network, Capability.NativeInterop, Capability.FileSystem,
     }.ToFrozenSet();
+
+    /// <summary>The capabilities a co-reach statement pairs with Network, in statement order.</summary>
+    public static IReadOnlyList<Capability> CollectionCapabilities { get; } =
+        ImmutableArray.Create(Capability.EnvironmentProbe, Capability.FileSystem);
     #endregion
 
     #region Methods
@@ -55,6 +59,19 @@ internal static class ReachabilityPresentation
     public static string Text(RootClass cls, string sink, bool direct) =>
         $"{subjects[cls]} {(direct ? "directly reaches" : "creates a delegate that reaches")} {sink}";
 
+    /// <summary>
+    /// Whether a co-reach statement (<paramref name="cls"/> reaching <paramref name="collection"/> and Network together) is
+    /// a trigger: only the cells that passed <c>docs/agent/tasks/recall-levers-1.md</c> §4's rule are.
+    /// </summary>
+    public static ReachStatementKind CoReachKindOf(RootClass cls, Capability collection, bool direct) =>
+        coReachTriggers.Contains((cls, collection, direct)) ? ReachStatementKind.Trigger : ReachStatementKind.Informational;
+
+    /// <summary>A co-reach statement's wording.</summary>
+    public static string CoReachText(RootClass cls, Capability collection, bool direct) =>
+        direct
+            ? $"{subjects[cls]} directly reaches both {collected[collection]} and the network"
+            : $"{subjects[cls]} reaches both {collected[collection]} and the network, at least one only through a delegate it creates";
+
     /// <summary>What an unseen reach ended in, from its example's opacity kind and whether its last hop is own code.</summary>
     public static string Unseen(OpacityKind? kind, bool ownSink) => kind switch
     {
@@ -69,6 +86,16 @@ internal static class ReachabilityPresentation
     #endregion
 
     #region Fields
+    // The co-reach (class, collection, Direct) cells that passed recall-levers-1 §4; none until it is measured.
+    private static readonly FrozenSet<(RootClass Class, Capability Collection, bool Direct)> coReachTriggers =
+        FrozenSet<(RootClass, Capability, bool)>.Empty;
+
+    private static readonly Dictionary<Capability, string> collected = new()
+    {
+        [Capability.EnvironmentProbe] = "environment reads",
+        [Capability.FileSystem] = "the file system",
+    };
+
     // The (class, Direct) cells that passed E1 and E2 in R2b, each with the folder roles it triggers in (null: any).
     private static readonly Dictionary<(RootClass Class, bool Direct), IReadOnlySet<PackageItemRole>?> triggers = new()
     {

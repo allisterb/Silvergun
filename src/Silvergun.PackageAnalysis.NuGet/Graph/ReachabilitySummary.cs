@@ -42,8 +42,11 @@ public sealed record ReachExample(ReachEvidence Evidence, IReadOnlyList<string> 
 /// <paramref name="Roots"/> roots of <paramref name="Class"/> reach <paramref name="Capability"/> (null: code the graph
 /// cannot see), directly or, when not <paramref name="Direct"/>, only through a delegate or method handle they create.
 /// <paramref name="Example"/> is null when the report kept no example with this label. A reach is possible, not proven.
+/// A co-reach statement sets <paramref name="With"/>: each of its roots reaches both <paramref name="Capability"/> and
+/// <paramref name="With"/>, and its example is the ordinal-least such root alone, at ChaOnly (profiles keep no path).
 /// </summary>
-public sealed record ReachStatement(ReachStatementKind Kind, RootClass Class, Capability? Capability, bool Direct, int Roots, string Text, ReachExample? Example);
+public sealed record ReachStatement(ReachStatementKind Kind, RootClass Class, Capability? Capability, bool Direct, int Roots, string Text, ReachExample? Example,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Capability? With = null);
 
 /// <summary>A presented class's verdict in one folder, with every reason it is <see cref="RootClassVerdict.Unknown"/>.</summary>
 public sealed record ReachClassVerdict(RootClass Class, int Roots, RootClassVerdict Verdict, IReadOnlyList<string> Reasons);
@@ -167,14 +170,16 @@ public sealed record ReachabilitySummary(IReadOnlyList<FolderReachSummary> Folde
                 .SelectMany(r => new[] { (Direct: true, Roots: r.Direct), (Direct: false, Roots: r.Roots - r.Direct) }
                     .Where(l => l.Roots > 0)
                     .Select(l => Statement(r, l.Direct, l.Roots, triggerRole)))
+                .Concat(CoReach(report))
                 .OrderBy(s => s.Kind)
                 .ThenBy(s => classOrder[s.Class])
+                .ThenBy(s => s.With is null ? 0 : 1)
                 .ThenBy(s => s.Capability is { } c ? (int)c : int.MaxValue)
                 .ThenBy(s => !s.Direct)
                 .ToArray();
-            var notes = divergent
-                ? [.. LoadTimeNotes(report), Name($"listed in full because its folder role changes which statements are triggers; same files as {folder.SameAs}")]
-                : LoadTimeNotes(report);
+            IReadOnlyList<string> notes = divergent
+                ? [.. LoadTimeNotes(report), .. CoReachNotes(report), Name($"listed in full because its folder role changes which statements are triggers; same files as {folder.SameAs}")]
+                : [.. LoadTimeNotes(report), .. CoReachNotes(report)];
             return (new(Name(folder.Folder), role, folder.Outcome, null, null, classes, notes, statements), complete);
         }
         catch (Exception ex)
@@ -206,6 +211,30 @@ public sealed record ReachabilitySummary(IReadOnlyList<FolderReachSummary> Folde
             ReachabilityPresentation.Text(reach.Class, sink, direct),
             labelled.Length > 0 ? Example(labelled[0], reach.Capability is null) : null);
     }
+
+    // Per presented class, collection capability and label, one statement when any profile reaches the pair together:
+    // Direct when the profile's Direct set holds both, deferred when only its ChaOnly set does.
+    private static IEnumerable<ReachStatement> CoReach(ReachabilityReport report) =>
+        from profile in report.Profiles
+        where classOrder.ContainsKey(profile.Class)
+        from collection in ReachabilityPresentation.CollectionCapabilities
+        where profile.Capabilities.Contains(collection) && profile.Capabilities.Contains(Capability.Network)
+        let direct = profile.DirectCapabilities.Contains(collection) && profile.DirectCapabilities.Contains(Capability.Network)
+        group profile by (profile.Class, Collection: collection, Direct: direct) into cell
+        let root = cell.Select(p => p.ExampleRoot).Min(StringComparer.Ordinal)!
+        select new ReachStatement(
+            ReachabilityPresentation.CoReachKindOf(cell.Key.Class, cell.Key.Collection, cell.Key.Direct), cell.Key.Class, cell.Key.Collection, cell.Key.Direct,
+            cell.Sum(p => p.Roots), ReachabilityPresentation.CoReachText(cell.Key.Class, cell.Key.Collection, cell.Key.Direct),
+            new ReachExample(ReachEvidence.ChaOnly, [Name(root)], 0, null), Capability.Network);
+
+    // A presented class whose profiles were cut: its co-reach statements may be missing, never absent.
+    private static IEnumerable<string> CoReachNotes(ReachabilityReport report) =>
+        report.ProfilesTruncated
+            ? report.Profiles.Where(p => classOrder.ContainsKey(p.Class)).GroupBy(p => p.Class)
+                .Where(g => g.Count() >= Reachability.MaxProfilesPerClass)
+                .OrderBy(g => classOrder[g.Key])
+                .Select(g => $"{g.Key}: more capability sets than the report keeps, so statements that two capabilities are reached together may be missing")
+            : [];
 
     // The path's first MaxHops - 2 hops and its last two. The report's own path keeps more of both ends, so this is the
     // real path's first and last hops, and HiddenHops counts the rest of its whole length.

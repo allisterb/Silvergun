@@ -35,7 +35,7 @@ public enum SsaConstantKind
 /// <summary>Where a <see cref="SsaValueKind.Dynamic"/> value came from.</summary>
 public enum SsaDynamicOrigin
 {
-    /// <summary>A call's or <c>newobj</c>'s result (constants are not folded, so <c>string.Concat</c> lands here).</summary>
+    /// <summary>A call's or <c>newobj</c>'s result (only <c>string.Concat</c> of 2–4 strings, each a constant or such a Concat, folds to a constant).</summary>
     CallResult,
     /// <summary>A field's value, static or instance.</summary>
     FieldLoad,
@@ -103,6 +103,8 @@ public sealed record SsaValue(SsaValueKind Kind, IReadOnlyList<SsaConstant> Cons
 /// are empty and <see cref="Reason"/> says why (with <see cref="FailureKind"/> for MethodUnknown). <see cref="Merged"/>:
 /// more than one definition under the node id contributed, and their values are unioned. <see cref="Target"/>: what a
 /// reflection sink's call acts on, for an Analyzed call site whose callee the reflection map lists; otherwise null.
+/// <see cref="Import"/>: an Analyzed site's callee's P/Invoke entry name (escaped, bounded; ordinal-least when merged
+/// definitions differ), so a renamed <c>EntryPoint=</c> is still seen; otherwise null.
 /// </summary>
 public sealed record SsaSinkFact(
     SinkSite Site,
@@ -113,7 +115,8 @@ public sealed record SsaSinkFact(
     bool Merged,
     SsaFailureKind? FailureKind,
     string? Reason,
-    SsaReflectionTarget? Target = null);
+    SsaReflectionTarget? Target = null,
+    string? Import = null);
 
 /// <summary>
 /// One call site of a lifted body (<see cref="SsaSinkFacts.CallSites"/>): its IL offset, the edge kind its opcode makes, and
