@@ -68,6 +68,7 @@ public sealed class PackageScanner : Runtime
             // The graph pass (R3, opt-in) runs last, after YARA, so the minutes it can take never widen the window in
             // which YARA's inventory goes stale (ADR 0034). It needs the extracted files, so the package is still open.
             var reachabilitySummary = reachability is null ? null : SummarizeReachability(package, reachability);
+            var (nativeStatus, nativeReason) = NativeBinaryScanOutcome(package.NativeBinaryUnreadFiles);
 
             var report = new PackageCapabilityReport(
                 package.Identity,
@@ -79,10 +80,13 @@ public sealed class PackageScanner : Runtime
                 YaraScanStatus: yaraStatus,
                 PackagingAnomalies: packagingAnomalies,
                 ScriptScanStatus: scriptStatus,
-                Reachability: reachabilitySummary)
+                Reachability: reachabilitySummary,
+                NativeBinaries: package.NativeBinaries,
+                NativeBinaryScanStatus: nativeStatus)
             {
                 YaraUnavailableReason = yaraUnavailableReason,
                 ScriptScanUnavailableReason = scriptUnavailableReason,
+                NativeBinaryScanUnavailableReason = nativeReason,
             };
             return Result.Success(report);
         }
@@ -147,6 +151,12 @@ public sealed class PackageScanner : Runtime
             null,
             null);
     }
+
+    // The native-binary pass's status and reason from NuGetPackage's unread files (escaped there): Completed iff none.
+    internal static (NativeBinaryScanStatus Status, string? Reason) NativeBinaryScanOutcome(IReadOnlyList<string> unread) =>
+        unread.Count == 0
+            ? (NativeBinaryScanStatus.Completed, null)
+            : (NativeBinaryScanStatus.Unavailable, $"{unread.Count} file(s) could not be read for a native header: {string.Join(", ", unread)}");
 
     // The graph pass's summary. Both steps never throw, but a failure here must not sink the scan or read clean: it is an
     // Incomplete summary whose one folder carries the reason (ReachabilitySummary.Failed, which From's own failure uses).

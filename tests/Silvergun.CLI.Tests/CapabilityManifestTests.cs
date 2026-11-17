@@ -623,6 +623,9 @@ public sealed class CapabilityManifestTests
         // Additive per ADR 0030/0035: the script content pass's coverage status, always written (its companion
         // ScriptScanUnavailableReason is omitted when null, so a Completed or NotRun report never carries it).
         "ScriptScanStatus",
+        // Additive per native-binaries-1: native PE/ELF/Mach-O files by header, and that pass's status (always written;
+        // NativeBinaryScanUnavailableReason is omitted when null).
+        "NativeBinaries", "NativeBinaryScanStatus",
     ];
 
     private static readonly string CliExe = ApphostPath.Resolve(AppContext.BaseDirectory, "Silvergun.CLI");

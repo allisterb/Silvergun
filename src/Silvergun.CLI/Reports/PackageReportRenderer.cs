@@ -53,6 +53,12 @@ internal static class PackageReportRenderer
         console.Write(PackagingAnomaliesWidget(rich, report.PackagingAnomalies));
         console.WriteLine();
 
+        // Native binaries (native-binaries-1): code the CIL analysis cannot see, named by header. Facts, not findings:
+        // nothing here sets "attention" or gates --strict.
+        console.Write(Section(rich, "Native binaries"));
+        console.Write(NativeBinariesWidget(rich, report));
+        console.WriteLine();
+
         // Malware-signature (YARA) hits are the highest-signal section (named-family IOCs, ADR 0016) — render it
         // prominently. Rendered consistently with Script findings (a green "(none)" when clean) EXCEPT that an
         // Unavailable scan (backend never selected, or selected but failed to initialize/scan — the libyara.NET
@@ -304,6 +310,54 @@ internal static class PackageReportRenderer
                 Esc(a.Detail));
         return table;
     }
+
+    // Native binaries: Unavailable is a yellow "not verified" note (with its reason) above whatever was found; NotRun is
+    // grey; Completed and empty is "(none)". Paths arrive escaped at the DTO and still pass through Esc for markup.
+    private static IRenderable NativeBinariesWidget(bool rich, PackageCapabilityReport report)
+    {
+        var binaries = report.NativeBinaries;
+        if (NativeBinariesNotRecorded(report))
+            return new Markup("[grey](not recorded in this report)[/]");
+        IRenderable[] note = report.NativeBinaryScanStatus == NativeBinaryScanStatus.Unavailable
+            ? [
+                new Markup($"[yellow]{Esc(AlertGlyph(rich))} native binary scan did NOT complete {Dash(rich)} the list may be missing files[/]"),
+                .. report.NativeBinaryScanUnavailableReason is { Length: > 0 } reason ? [new Markup($"[grey]Reason: {Esc(reason)}[/]")] : Array.Empty<IRenderable>(),
+              ]
+            : [];
+        if (binaries.Count == 0)
+            return note.Length > 0 ? new Rows(note)
+                : new Markup(report.NativeBinaryScanStatus == NativeBinaryScanStatus.NotRun ? "[grey](not run)[/]" : "[green](none)[/]");
+
+        var table = new Table().Border(TableBorderFor(rich)).Expand();
+        table.AddColumn("[bold]Kind[/]");
+        table.AddColumn("[bold]Format[/]");
+        table.AddColumn("[bold]Arch[/]");
+        table.AddColumn("[bold]Role[/]");
+        table.AddColumn("[bold]Size[/]");
+        table.AddColumn("[bold]Path[/]");
+        foreach (var b in binaries)
+            table.AddRow(
+                b.Kind == NativeBinaryKind.Executable ? $"[orange1]{b.Kind}[/]" : b.Kind.ToString(),
+                b.Code switch
+                {
+                    NativeBinaryCode.MixedMode => $"{b.Format} (mixed-mode)",
+                    NativeBinaryCode.ReadyToRun => $"{b.Format} (ReadyToRun)",
+                    NativeBinaryCode.ILOnly => $"{b.Format} (IL-only, not analysed)",
+                    _ => b.Format.ToString(),
+                },
+                Esc(b.Architecture ?? "-"),
+                b.Role.ToString(),
+                b.Size.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                Esc(b.RelativePath));
+        return new Rows([.. note, table]);
+    }
+
+    // A report that predates the field: Unavailable by the legacy default, with no binaries and no reason. A real
+    // Unavailable (PackageScanner) always carries a reason, so this is "never checked", not "check failed".
+    private static bool NativeBinariesNotRecorded(PackageCapabilityReport report) =>
+        report.NativeBinaryScanStatus == NativeBinaryScanStatus.Unavailable
+        && report.NativeBinaries.Count == 0
+        && report.NativeBinaryScanUnavailableReason is null;
 
     // Known-vulnerability (OSV.dev) findings for the package and its declared dependencies (ADR 0017): the OSV/GHSA id
     // (red — a concrete, actionable IOC) plus CVE aliases, the attributed PackageId@Version (marked [dependency] for a
@@ -588,6 +642,16 @@ internal static class PackageReportRenderer
         console.MarkupLine(report.PackagingAnomalies.Count > 0
             ? $"[grey]Packaging anomalies:[/] [orange1]{report.PackagingAnomalies.Count} finding(s)[/]"
             : "[grey]Packaging anomalies:[/] [green]none[/]");
+
+        // Native binaries: a count line only, never part of "attention" (facts layer; base rate not yet measured).
+        var nativeExecutables = report.NativeBinaries.Count(b => b.Kind == NativeBinaryKind.Executable);
+        var nativeMalformed = report.NativeBinaries.Count(b => b.Kind == NativeBinaryKind.Malformed);
+        console.MarkupLine(NativeBinariesNotRecorded(report) ? "[grey]Native binaries:[/] [grey]not recorded[/]"
+            : report.NativeBinaryScanStatus == NativeBinaryScanStatus.NotRun && report.NativeBinaries.Count == 0 ? "[grey]Native binaries:[/] [grey]not run[/]"
+            : $"[grey]Native binaries:[/] {report.NativeBinaries.Count}"
+              + (nativeExecutables > 0 ? $" [orange1]({nativeExecutables} executable(s))[/]" : string.Empty)
+              + (nativeMalformed > 0 ? $" [grey]({nativeMalformed} malformed)[/]" : string.Empty)
+              + (report.NativeBinaryScanStatus == NativeBinaryScanStatus.Unavailable ? $" [yellow](scan INCOMPLETE {Dash(rich)} may be missing files)[/]" : string.Empty));
 
         // Findings from an incomplete scan (Unavailable, ADR 0032) are real and counted, but marked: the other files
         // were not verified, so the count is a floor.

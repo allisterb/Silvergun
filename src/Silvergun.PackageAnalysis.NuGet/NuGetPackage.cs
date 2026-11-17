@@ -35,7 +35,9 @@ public sealed class NuGetPackage : Runtime, IDisposable
         string contentRoot,
         IReadOnlyList<string> declaredEntryNames,
         IReadOnlyList<(string Declared, string Reported)> uninventoried,
-        IReadOnlyList<string> yaraInventory)
+        IReadOnlyList<string> yaraInventory,
+        IReadOnlyList<NativeBinary> nativeBinaries,
+        IReadOnlyList<string> nativeBinaryUnreadFiles)
     {
         Identity = identity;
         Assemblies = assemblies;
@@ -47,6 +49,8 @@ public sealed class NuGetPackage : Runtime, IDisposable
         UninventoriedDeclaredEntries = uninventoried;
         UninventoriedEntryNames = uninventoried.Select(x => x.Reported).ToArray();
         YaraInventory = yaraInventory;
+        NativeBinaries = nativeBinaries;
+        NativeBinaryUnreadFiles = nativeBinaryUnreadFiles;
     }
     #endregion
 
@@ -141,6 +145,17 @@ public sealed class NuGetPackage : Runtime, IDisposable
     /// They stay raw because they are opened.</para>
     /// </summary>
     internal IReadOnlyList<string> YaraInventory { get; }
+
+    /// <summary>
+    /// Every contained file whose header is PE, ELF or Mach-O, whatever its name, except IL-only PEs the CIL inventory
+    /// takes (<see cref="NativeBinaryCode"/>): read straight after extraction. Includes native and ReadyToRun
+    /// <c>.dll</c>/<c>.exe</c> that are also in <see cref="Assemblies"/>, and extensionless executables that are not.
+    /// </summary>
+    public IReadOnlyList<NativeBinary> NativeBinaries { get; }
+
+    /// <summary>Contained files whose header could not be read for <see cref="NativeBinaries"/>: escaped path and the
+    /// exception type. Non-empty means that list may be missing entries.</summary>
+    public IReadOnlyList<string> NativeBinaryUnreadFiles { get; }
     #endregion
 
     #region Methods
@@ -246,6 +261,9 @@ public sealed class NuGetPackage : Runtime, IDisposable
                 .Select(x => new PackageScript(YaraPathSafety.Escape(x.rel), x.full, RoleOf(x.rel)))
                 .ToArray();
 
+            // Native binaries by header, over every contained file (not just .dll/.exe): read now, while the tree is fresh.
+            var (nativeBinaries, nativeUnread) = InventoryNativeBinaries(files);
+
             // Manifest for content scanning only — the top-level *.nuspec, already validated by the same
             // containment gate as every other file. Kept out of the script inventory (ADR 0012). It must be the entry
             // NuGet read the identity from, by NAME (ADR 0035 S5 review W-1): NuGet unescapes entry names, so a root entry
@@ -263,11 +281,12 @@ public sealed class NuGetPackage : Runtime, IDisposable
 
             // identity.Id is nuspec content, i.e. attacker-authored: escaped like every other package-supplied
             // string that reaches a log line (ADR 0031 decision 4).
-            Info("Opened package {0}: {1} assemblies, {2} scripts, {3} declared entr(ies) NOT inventoried.",
-                YaraPathSafety.Escape(identity.Id), assemblies.Length, scripts.Length, uninventoried.Count);
+            Info("Opened package {0}: {1} assemblies, {2} scripts, {3} native binar(ies), {4} declared entr(ies) NOT inventoried.",
+                YaraPathSafety.Escape(identity.Id), assemblies.Length, scripts.Length, nativeBinaries.Count, uninventoried.Count);
             op.Complete();
             return Result.Success(new NuGetPackage(
-                identity, assemblies, scripts, nuspecPath, extractionDir, contentRoot, declaredEntryNames, uninventoried, yaraInventory));
+                identity, assemblies, scripts, nuspecPath, extractionDir, contentRoot, declaredEntryNames, uninventoried, yaraInventory,
+                nativeBinaries, nativeUnread));
         }
         catch (Exception ex)
         {
@@ -630,6 +649,37 @@ public sealed class NuGetPackage : Runtime, IDisposable
         var sha = Convert.ToHexStringLower(SHA256.HashData(fs));
         return new PackageAssembly(
             YaraPathSafety.Escape(relativePath), fullPath, TargetFrameworkOf(relativePath, role), role, sha);
+    }
+
+    // Native binaries among the contained files (NativeBinaryDetector), escaped and hashed at the DTO boundary like
+    // MakeAssembly's. A file that cannot be read is recorded rather than failing Open: unlike an assembly, ANY file is
+    // probed here, so one locked or vanished file must not sink the package.
+    private static (IReadOnlyList<NativeBinary> Found, IReadOnlyList<string> Unread) InventoryNativeBinaries(
+        IEnumerable<(string full, string rel)> files)
+    {
+        var found = new List<NativeBinary>();
+        var unread = new List<string>();
+        foreach (var (full, rel) in files)
+        {
+            try
+            {
+                using var fs = File.OpenRead(full);
+                // An IL-only PE is dropped only when the CIL inventory takes it (IsAssembly): under any other name
+                // nothing else would analyse or name it.
+                if (NativeBinaryDetector.Detect(fs) is not { } h || (h.Code == NativeBinaryCode.ILOnly && IsAssembly(rel)))
+                    continue;
+                fs.Position = 0;
+                found.Add(new NativeBinary(YaraPathSafety.Escape(rel), h.Format, h.Kind, h.Architecture, h.Code,
+                    RoleOf(rel), fs.Length, Convert.ToHexStringLower(SHA256.HashData(fs))));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                unread.Add($"{YaraPathSafety.Escape(rel)} ({ex.GetType().Name})");
+            }
+        }
+        if (unread.Count > 0)
+            Warn("Native binary scan INCOMPLETE: {0} file(s) could not be read: {1}", unread.Count, string.Join(", ", unread.Take(5)));
+        return (found, unread);
     }
 
     // THE kind test, and there is deliberately only one: it decides what the inventory gate picks up off disk (and so

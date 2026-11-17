@@ -135,7 +135,11 @@ public sealed record PackageCapabilityReport(
     ScriptScanStatus ScriptScanStatus = ScriptScanStatus.Unavailable,
     // additive (R3, docs/agent/tasks/reachability-r3.md); the graph pass's bounded summary, set only under
     // PackageScanner.Scan(runReachability: true). Informational: gates nothing. Written to JSON only when set.
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ReachabilitySummary? Reachability = null)
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ReachabilitySummary? Reachability = null,
+    // additive (native-binaries-1); native PE/ELF/Mach-O files by header. Facts only: gates nothing. Old JSON ⇒ empty
+    // list with status Unavailable, so a pre-field report never reads as "no native code".
+    IReadOnlyList<NativeBinary>? NativeBinaries = null,
+    NativeBinaryScanStatus NativeBinaryScanStatus = NativeBinaryScanStatus.Unavailable)
 {
     #region Properties
     /// <summary>
@@ -174,6 +178,22 @@ public sealed record PackageCapabilityReport(
     /// old JSON that predates this field deserializes to empty, not <c>null</c>.
     /// </summary>
     public IReadOnlyList<PackagingAnomaly> PackagingAnomalies { get; init; } = PackagingAnomalies ?? Array.Empty<PackagingAnomaly>();
+
+    /// <summary>Native binaries shipped in the package (see <see cref="NativeBinary"/>); read with
+    /// <see cref="NativeBinaryScanStatus"/>. Normalized to empty when absent.</summary>
+    public IReadOnlyList<NativeBinary> NativeBinaries { get; init; } = NativeBinaries ?? Array.Empty<NativeBinary>();
+
+    /// <summary>
+    /// Why <see cref="NativeBinaryScanStatus"/> is Unavailable (which files could not be read), else <c>null</c>. Written
+    /// to JSON only when set; escaped and cut by <c>WorkerProtocol.Safe</c> on every assignment, like
+    /// <see cref="YaraUnavailableReason"/>.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? NativeBinaryScanUnavailableReason
+    {
+        get => _nativeBinaryScanUnavailableReason;
+        init => _nativeBinaryScanUnavailableReason = value is null ? null : Yara.Worker.WorkerProtocol.Safe(value, MaxNativeBinaryScanUnavailableReasonChars);
+    }
 
     /// <summary>
     /// Additive: why YARA did not complete, for a CI log to show (e.g. the YARA-X DLL is missing). Set by
@@ -233,6 +253,9 @@ public sealed record PackageCapabilityReport(
     /// <summary>The most chars <see cref="ScriptScanUnavailableReason"/> holds — the same bound as YARA's.</summary>
     public const int MaxScriptScanUnavailableReasonChars = MaxYaraUnavailableReasonChars;
 
+    /// <summary>The most chars <see cref="NativeBinaryScanUnavailableReason"/> holds — the same bound as YARA's.</summary>
+    public const int MaxNativeBinaryScanUnavailableReasonChars = MaxYaraUnavailableReasonChars;
+
     private static readonly JsonSerializerOptions jsonOptions = new()
     {
         WriteIndented = true,
@@ -241,5 +264,6 @@ public sealed record PackageCapabilityReport(
 
     private readonly string? _yaraUnavailableReason;
     private readonly string? _scriptScanUnavailableReason;
+    private readonly string? _nativeBinaryScanUnavailableReason;
     #endregion
 }

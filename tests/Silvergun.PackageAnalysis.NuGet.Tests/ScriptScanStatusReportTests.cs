@@ -428,6 +428,8 @@ public sealed class ScriptScanStatusReportTests : IClassFixture<PackageFixture>
             Array.Empty<string>(),
             Array.Empty<(string, string)>(),
             Array.Empty<string>(),
+            Array.Empty<NativeBinary>(),            // NativeBinaries (native-binaries-1)
+            Array.Empty<string>(),                  // NativeBinaryUnreadFiles
         ]);
         Assert.Null(package.NuspecPath);            // precondition
         var scanScripts = typeof(PackageScanner).GetMethod("ScanScripts", BindingFlags.NonPublic | BindingFlags.Static)!;
