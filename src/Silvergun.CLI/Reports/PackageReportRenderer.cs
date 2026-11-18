@@ -337,7 +337,7 @@ internal static class PackageReportRenderer
         table.AddColumn("[bold]Path[/]");
         foreach (var b in binaries)
             table.AddRow(
-                b.Kind == NativeBinaryKind.Executable ? $"[orange1]{b.Kind}[/]" : b.Kind.ToString(),
+                (b.Kind == NativeBinaryKind.Executable ? $"[orange1]{b.Kind}[/]" : b.Kind.ToString()) + HostLabel(b),
                 b.Code switch
                 {
                     NativeBinaryCode.MixedMode => $"{b.Format} (mixed-mode)",
@@ -351,6 +351,18 @@ internal static class PackageReportRenderer
                 Esc(b.RelativePath));
         return new Rows([.. note, table]);
     }
+
+    // The .NET host marker (DotNetHost), as a suffix on the Kind cell. A bundle is orange: managed code packed inside a
+    // native file, unseen by the CIL analysis. The marker is forgeable, so an apphost label is grey context, not a pass.
+    private static string HostLabel(NativeBinary b) => b.DotNetHost switch
+    {
+        DotNetHost.AppHost => " [grey](.NET apphost)[/]",
+        DotNetHost.SingleFileBundle => b.BundledFiles is { } n
+            ? $" [orange1](.NET single-file bundle, {n} file(s) not analysed)[/]"
+            : " [orange1](.NET single-file bundle, not analysed)[/]",
+        DotNetHost.HostTemplate => " [grey](.NET host template)[/]",
+        _ => string.Empty,
+    };
 
     // A report that predates the field: Unavailable by the legacy default, with no binaries and no reason. A real
     // Unavailable (PackageScanner) always carries a reason, so this is "never checked", not "check failed".
@@ -646,10 +658,14 @@ internal static class PackageReportRenderer
         // Native binaries: a count line only, never part of "attention" (facts layer; base rate not yet measured).
         var nativeExecutables = report.NativeBinaries.Count(b => b.Kind == NativeBinaryKind.Executable);
         var nativeMalformed = report.NativeBinaries.Count(b => b.Kind == NativeBinaryKind.Malformed);
+        var appHosts = report.NativeBinaries.Count(b => b.DotNetHost == DotNetHost.AppHost);
+        var bundles = report.NativeBinaries.Count(b => b.DotNetHost == DotNetHost.SingleFileBundle);
         console.MarkupLine(NativeBinariesNotRecorded(report) ? "[grey]Native binaries:[/] [grey]not recorded[/]"
             : report.NativeBinaryScanStatus == NativeBinaryScanStatus.NotRun && report.NativeBinaries.Count == 0 ? "[grey]Native binaries:[/] [grey]not run[/]"
             : $"[grey]Native binaries:[/] {report.NativeBinaries.Count}"
               + (nativeExecutables > 0 ? $" [orange1]({nativeExecutables} executable(s))[/]" : string.Empty)
+              + (appHosts > 0 ? $" [grey]({appHosts} .NET apphost(s))[/]" : string.Empty)
+              + (bundles > 0 ? $" [orange1]({bundles} .NET single-file bundle(s))[/]" : string.Empty)
               + (nativeMalformed > 0 ? $" [grey]({nativeMalformed} malformed)[/]" : string.Empty)
               + (report.NativeBinaryScanStatus == NativeBinaryScanStatus.Unavailable ? $" [yellow](scan INCOMPLETE {Dash(rich)} may be missing files)[/]" : string.Empty));
 

@@ -1,11 +1,13 @@
 namespace Silvergun.PackageAnalysis.NuGet;
 
 using System;
+using System.Buffers;
 using System.Buffers.Binary;
 using System.IO;
 using System.Linq;
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
+using System.Security.Cryptography;
 
 /// <summary>Container format of a <see cref="NativeBinary"/>, identified by its header bytes, never by its name.</summary>
 public enum NativeBinaryFormat { PE, Elf, MachO, MachOUniversal }
@@ -26,6 +28,18 @@ public enum NativeBinaryKind { Executable, SharedLibrary, Other, Malformed }
 /// left to the CIL inventory (imports/entry point are not checked).
 /// </summary>
 public enum NativeBinaryCode { Native, MixedMode, ReadyToRun, ILOnly }
+
+/// <summary>
+/// The .NET host marker in a <see cref="NativeBinary"/>: the host's fixed 32-byte bundle signature (present once in
+/// every SDK apphost template measured, 3.1-10.0) and the 8-byte bundle-header offset before it.
+/// <see cref="AppHost"/>: offset 0, a launcher that starts a managed app beside it. <see cref="SingleFileBundle"/>: a
+/// non-zero offset, so managed assemblies are packed INSIDE this native file, where the CIL analysis does not see them.
+/// <see cref="HostTemplate"/>: the unpatched app-path placeholder is still present (an SDK template or singlefilehost
+/// shipped as a file). Set only on <see cref="NativeBinaryCode.Native"/> binaries: managed files can hold the signature
+/// as data (Microsoft.NET.HostModel.dll). Attacker-forgeable bytes: a fact for triage, never grounds to suppress
+/// anything. Old JSON reads <see cref="None"/>, which there means "not checked", not "no marker".
+/// </summary>
+public enum DotNetHost { None, AppHost, SingleFileBundle, HostTemplate }
 
 /// <summary>
 /// Whether <see cref="PackageCapabilityReport.NativeBinaries"/> is the whole answer. Old JSON predates the field and
@@ -57,7 +71,9 @@ public sealed record NativeBinary(
     NativeBinaryCode Code,          // Native, or for a PE with a CLR header: MixedMode / ReadyToRun / ILOnly
     PackageItemRole Role,
     long Size,
-    string Sha256);                 // lowercase hex
+    string Sha256,                  // lowercase hex
+    DotNetHost DotNetHost = DotNetHost.None,   // additive; old JSON => None
+    int? BundledFiles = null);      // SingleFileBundle only: the bundle header's file count, null if unreadable
 
 /// <summary>A parsed native header; see <see cref="NativeBinaryDetector.Detect"/>.</summary>
 internal readonly record struct NativeBinaryHeader(NativeBinaryFormat Format, NativeBinaryKind Kind, string? Architecture, NativeBinaryCode Code);
@@ -236,7 +252,7 @@ internal static class NativeBinaryDetector
     };
 
     // Up to `count` bytes at `offset`; shorter (possibly empty) at end of stream.
-    private static byte[] ReadAt(Stream stream, long offset, int count)
+    internal static byte[] ReadAt(Stream stream, long offset, int count)
     {
         if (offset >= stream.Length || count <= 0)
             return [];
@@ -261,5 +277,80 @@ internal static class NativeBinaryDetector
     private const int ElfPhdrSize32 = 32, ElfPhdrSize64 = 56;
     private const int MaxProgramHeaders = 512, MaxFatSlices = 32;
     private static readonly byte[] elfMagic = [0x7F, (byte)'E', (byte)'L', (byte)'F'];
+    #endregion
+}
+
+/// <summary>
+/// One pass over a detected binary: its SHA-256 and its <see cref="DotNetHost"/> marker. The marker can sit megabytes
+/// in (a singlefilehost-based bundle at ~7 MB), so it is searched over the whole file in the read the hash needs anyway.
+/// </summary>
+internal static class DotNetHostScanner
+{
+    #region Methods
+    /// <summary>Hashes <paramref name="stream"/> from the start and classifies its .NET host marker. Throws only on I/O failure.</summary>
+    internal static (string Sha256, DotNetHost Host, int? BundledFiles) HashAndScan(Stream stream)
+    {
+        stream.Position = 0;
+        using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = ArrayPool<byte>.Shared.Rent(BufferSize + Overlap);
+        var (carry, origin, signatureAt, placeholder) = (0, 0L, -1L, false);
+        try
+        {
+            int read;
+            while ((read = stream.Read(buffer, carry, BufferSize)) > 0)
+            {
+                sha.AppendData(buffer, carry, read);
+                var window = buffer.AsSpan(0, carry + read);
+                if (signatureAt < 0 && window.IndexOf(bundleSignature) is var at and >= 0)
+                    signatureAt = origin + at;
+                if (!placeholder)
+                    placeholder = window.IndexOf(appPathPlaceholder) >= 0;
+
+                // Keep a tail so a marker straddling two reads is still found.
+                carry = Math.Min(Overlap, window.Length);
+                window[^carry..].CopyTo(buffer);
+                origin += window.Length - carry;
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+
+        var hash = Convert.ToHexStringLower(sha.GetHashAndReset());
+        var headerOffset = signatureAt >= 8 ? BinaryPrimitives.ReadInt64LittleEndian(NativeBinaryDetector.ReadAt(stream, signatureAt - 8, 8)) : 0;
+        return signatureAt < 0 ? (hash, placeholder ? DotNetHost.HostTemplate : DotNetHost.None, null)
+            : headerOffset == 0 ? (hash, placeholder ? DotNetHost.HostTemplate : DotNetHost.AppHost, null)
+            : (hash, DotNetHost.SingleFileBundle, BundledFileCount(stream, signatureAt, headerOffset));
+    }
+
+    // The bundle header starts (major u32, minor u32, file count i32); null unless it is there and plausible. The bundler
+    // appends it after the host, so a header at or before the signature is not a real one.
+    private static int? BundledFileCount(Stream stream, long signatureAt, long headerOffset)
+    {
+        if (headerOffset <= signatureAt || headerOffset > stream.Length - 12)
+            return null;
+        var header = NativeBinaryDetector.ReadAt(stream, headerOffset, 12);
+        var major = BinaryPrimitives.ReadUInt32LittleEndian(header);
+        var count = BinaryPrimitives.ReadInt32LittleEndian(header.AsSpan(8));
+        return major is >= 1 and <= MaxBundleMajor && count is >= 0 and <= MaxBundledFiles ? count : null;
+    }
+    #endregion
+
+    #region Fields
+    private const int BufferSize = 1 << 20, Overlap = 63;   // Overlap: the longest marker (64) minus one
+    private const uint MaxBundleMajor = 64;
+    private const int MaxBundledFiles = 1_000_000;
+
+    // The host's bundle signature constant (dotnet/runtime HostModel). Measured 2026-11-18: once in each SDK apphost
+    // template 3.1.100-10.0.101, and in every apphost/bundle in the corpus. It is NOT the SHA-256 of ".net core bundle".
+    private static readonly byte[] bundleSignature =
+    [
+        0x8b, 0x12, 0x02, 0xb9, 0x6a, 0x61, 0x20, 0x38, 0x72, 0x7b, 0x93, 0x02, 0x14, 0xd7, 0xa0, 0x32,
+        0x13, 0xf5, 0xb9, 0xe6, 0xef, 0xae, 0x33, 0x18, 0xee, 0x3b, 0x2d, 0xce, 0x24, 0xb3, 0x6a, 0xae,
+    ];
+
+    // The apphost's unpatched app-path slot: SHA-256("foobar") as hex, overwritten with the app's dll name when patched.
+    private static readonly byte[] appPathPlaceholder = "c3ab8ff13720e8ad9047dd39466b3c8974e592c2fa383d4a3960714caef0c4f2"u8.ToArray();
     #endregion
 }

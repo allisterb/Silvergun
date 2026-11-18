@@ -668,9 +668,12 @@ public sealed class NuGetPackage : Runtime, IDisposable
                 // nothing else would analyse or name it.
                 if (NativeBinaryDetector.Detect(fs) is not { } h || (h.Code == NativeBinaryCode.ILOnly && IsAssembly(rel)))
                     continue;
-                fs.Position = 0;
+                // A real apphost/bundle is a native image with no CLR header; managed files that merely hold the
+                // signature as data (Microsoft.NET.HostModel.dll, R2R in SDK 8+) are not hosts.
+                var (sha, host, bundled) = DotNetHostScanner.HashAndScan(fs);
+                var native = h.Code == NativeBinaryCode.Native;
                 found.Add(new NativeBinary(YaraPathSafety.Escape(rel), h.Format, h.Kind, h.Architecture, h.Code,
-                    RoleOf(rel), fs.Length, Convert.ToHexStringLower(SHA256.HashData(fs))));
+                    RoleOf(rel), fs.Length, sha, native ? host : DotNetHost.None, native ? bundled : null));
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
