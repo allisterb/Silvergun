@@ -353,13 +353,15 @@ internal static class PackageReportRenderer
     }
 
     // The .NET host marker (DotNetHost), as a suffix on the Kind cell. A bundle is orange: managed code packed inside a
-    // native file, unseen by the CIL analysis. The marker is forgeable, so an apphost label is grey context, not a pass.
+    // native file. A top-level bundle with a readable header is unpacked (its entries appear as "host!/entry", any that
+    // failed as skipped assemblies); a nested one ("!/" in its path) or one whose header failed is not, and is a skipped
+    // row. The marker is forgeable, so an apphost label is grey context, not a pass.
     private static string HostLabel(NativeBinary b) => b.DotNetHost switch
     {
         DotNetHost.AppHost => " [grey](.NET apphost)[/]",
-        DotNetHost.SingleFileBundle => b.BundledFiles is { } n
-            ? $" [orange1](.NET single-file bundle, {n} file(s) not analysed)[/]"
-            : " [orange1](.NET single-file bundle, not analysed)[/]",
+        DotNetHost.SingleFileBundle => b.BundledFiles is { } n && !b.RelativePath.Contains("!/", StringComparison.Ordinal)
+            ? $" [orange1](.NET single-file bundle, {n} file(s), unpacked)[/]"
+            : " [orange1](.NET single-file bundle, NOT unpacked)[/]",
         DotNetHost.HostTemplate => " [grey](.NET host template)[/]",
         _ => string.Empty,
     };

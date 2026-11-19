@@ -470,11 +470,14 @@ public sealed class NativeBinaryPackageTests : IClassFixture<PackageFixture>
         return scan.Value;
     }
 
+    // The first two of InventoryNativeBinaries' results (native-binaries-3 added the bundle hosts, covered in
+    // BundleUnpackPackageTests).
     private static (IReadOnlyList<NativeBinary> Found, IReadOnlyList<string> Unread) Inventory((string full, string rel)[] files)
     {
         var method = typeof(NuGetPackage).GetMethod("InventoryNativeBinaries", BindingFlags.NonPublic | BindingFlags.Static);
         Assert.NotNull(method);
-        return ((IReadOnlyList<NativeBinary>, IReadOnlyList<string>))method.Invoke(null, [files])!;
+        var (found, unread, _) = ((IReadOnlyList<NativeBinary>, IReadOnlyList<string>, IReadOnlyList<BundleHost>))method.Invoke(null, [files])!;
+        return (found, unread);
     }
 
     private string MixedPackage(TempTree tree)

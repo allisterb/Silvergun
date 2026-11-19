@@ -37,7 +37,8 @@ public sealed class NuGetPackage : Runtime, IDisposable
         IReadOnlyList<(string Declared, string Reported)> uninventoried,
         IReadOnlyList<string> yaraInventory,
         IReadOnlyList<NativeBinary> nativeBinaries,
-        IReadOnlyList<string> nativeBinaryUnreadFiles)
+        IReadOnlyList<string> nativeBinaryUnreadFiles,
+        IReadOnlyList<UnextractedBundleRow> unextractedBundleEntries)
     {
         Identity = identity;
         Assemblies = assemblies;
@@ -51,6 +52,7 @@ public sealed class NuGetPackage : Runtime, IDisposable
         YaraInventory = yaraInventory;
         NativeBinaries = nativeBinaries;
         NativeBinaryUnreadFiles = nativeBinaryUnreadFiles;
+        UnextractedBundleEntries = unextractedBundleEntries;
     }
     #endregion
 
@@ -156,6 +158,13 @@ public sealed class NuGetPackage : Runtime, IDisposable
     /// <summary>Contained files whose header could not be read for <see cref="NativeBinaries"/>: escaped path and the
     /// exception type. Non-empty means that list may be missing entries.</summary>
     public IReadOnlyList<string> NativeBinaryUnreadFiles { get; }
+
+    /// <summary>
+    /// Single-file bundle entries (or whole bundles) that were NOT extracted, so their content was never analysed.
+    /// <see cref="PackageScanner"/> reports each as a skipped assembly, so the package cannot read complete. Paths are
+    /// escaped (<c>host!/entry</c>).
+    /// </summary>
+    internal IReadOnlyList<UnextractedBundleRow> UnextractedBundleEntries { get; }
     #endregion
 
     #region Methods
@@ -262,7 +271,14 @@ public sealed class NuGetPackage : Runtime, IDisposable
                 .ToArray();
 
             // Native binaries by header, over every contained file (not just .dll/.exe): read now, while the tree is fresh.
-            var (nativeBinaries, nativeUnread) = InventoryNativeBinaries(files);
+            var (topNativeBinaries, nativeUnread, bundleHosts) = InventoryNativeBinaries(files);
+
+            // Single-file bundles (native-binaries-3): their managed entries join the CIL inventory, their native entries
+            // the native list, and every entry that could not be extracted becomes a reported coverage gap.
+            var bundles = UnpackBundles(bundleHosts, BundleRootOf(extractionDir),
+                assemblies.Select(a => a.RelativePath).Concat(topNativeBinaries.Select(b => b.RelativePath)));
+            assemblies = [.. assemblies, .. bundles.Assemblies];
+            IReadOnlyList<NativeBinary> nativeBinaries = [.. topNativeBinaries, .. bundles.NativeBinaries];
 
             // Manifest for content scanning only — the top-level *.nuspec, already validated by the same
             // containment gate as every other file. Kept out of the script inventory (ADR 0012). It must be the entry
@@ -286,22 +302,28 @@ public sealed class NuGetPackage : Runtime, IDisposable
             op.Complete();
             return Result.Success(new NuGetPackage(
                 identity, assemblies, scripts, nuspecPath, extractionDir, contentRoot, declaredEntryNames, uninventoried, yaraInventory,
-                nativeBinaries, nativeUnread));
+                nativeBinaries, nativeUnread, bundles.Unextracted));
         }
         catch (Exception ex)
         {
             TryDeleteDir(extractionDir);
+            TryDeleteDir(BundleRootOf(extractionDir));
             return Result.FailureWithError<NuGetPackage>($"Failed to open NuGet package {nupkgPath}.", ex);
         }
     }
 
-    /// <summary>Deletes the extraction directory. Idempotent; IO failures are swallowed and warned.</summary>
+    /// <summary>Deletes the extraction directory and the bundle unpack root. Idempotent; IO failures are swallowed and warned.</summary>
     public void Dispose()
     {
         if (disposed) return;
         disposed = true;
         TryDeleteDir(ExtractionDir);
+        TryDeleteDir(BundleRootOf(ExtractionDir));
     }
+
+    // Where single-file bundles unpack: a SIBLING of the extraction directory, so no walk of ExtractionDir (the yara CLI
+    // backend's `yara -r`, any inventory) ever sees unpacked files, and no package entry name can collide with them.
+    private static string BundleRootOf(string extractionDir) => extractionDir + "-bundles";
 
     private static PackageIdentityInfo ReadIdentity(NuspecReader nuspec)
     {
@@ -654,11 +676,11 @@ public sealed class NuGetPackage : Runtime, IDisposable
     // Native binaries among the contained files (NativeBinaryDetector), escaped and hashed at the DTO boundary like
     // MakeAssembly's. A file that cannot be read is recorded rather than failing Open: unlike an assembly, ANY file is
     // probed here, so one locked or vanished file must not sink the package.
-    private static (IReadOnlyList<NativeBinary> Found, IReadOnlyList<string> Unread) InventoryNativeBinaries(
+    // Also returns the single-file bundles found (header offset known and plausible), for UnpackBundles.
+    private static (IReadOnlyList<NativeBinary> Found, IReadOnlyList<string> Unread, IReadOnlyList<BundleHost> Bundles) InventoryNativeBinaries(
         IEnumerable<(string full, string rel)> files)
     {
-        var found = new List<NativeBinary>();
-        var unread = new List<string>();
+        var (found, unread, bundles) = (new List<NativeBinary>(), new List<string>(), new List<BundleHost>());
         foreach (var (full, rel) in files)
         {
             try
@@ -668,12 +690,12 @@ public sealed class NuGetPackage : Runtime, IDisposable
                 // nothing else would analyse or name it.
                 if (NativeBinaryDetector.Detect(fs) is not { } h || (h.Code == NativeBinaryCode.ILOnly && IsAssembly(rel)))
                     continue;
-                // A real apphost/bundle is a native image with no CLR header; managed files that merely hold the
-                // signature as data (Microsoft.NET.HostModel.dll, R2R in SDK 8+) are not hosts.
-                var (sha, host, bundled) = DotNetHostScanner.HashAndScan(fs);
-                var native = h.Code == NativeBinaryCode.Native;
-                found.Add(new NativeBinary(YaraPathSafety.Escape(rel), h.Format, h.Kind, h.Architecture, h.Code,
-                    RoleOf(rel), fs.Length, sha, native ? host : DotNetHost.None, native ? bundled : null));
+                var (binary, headerOffset) = MakeNativeBinary(fs, h, YaraPathSafety.Escape(rel), RoleOf(rel));
+                found.Add(binary);
+                // Every native bundle, including one whose header failed its checks (offset -1): UnpackBundles reports
+                // that one as a gap rather than letting a labelled, unanalysed bundle read complete.
+                if (binary.DotNetHost == DotNetHost.SingleFileBundle)
+                    bundles.Add(new(full, binary.RelativePath, binary.Role, headerOffset));
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -682,7 +704,88 @@ public sealed class NuGetPackage : Runtime, IDisposable
         }
         if (unread.Count > 0)
             Warn("Native binary scan INCOMPLETE: {0} file(s) could not be read: {1}", unread.Count, string.Join(", ", unread.Take(5)));
-        return (found, unread);
+        return (found, unread, bundles);
+    }
+
+    // `path` if no reported path has it yet, else the first free "path#index", "path#index-2", ... Every result is
+    // recorded, so a manifest name that is itself shaped like a suffixed path cannot collide with one.
+    private static string Unique(string path, int index, HashSet<string> reported)
+    {
+        if (reported.Add(path))
+            return path;
+        for (var k = 1; ; k++)
+            if ($"{path}#{index}{(k == 1 ? string.Empty : $"-{k}")}" is var candidate && reported.Add(candidate))
+                return candidate;
+    }
+
+    // The DTO for a detected binary and, for an unpackable bundle, its header offset (else -1). A real apphost/bundle is a
+    // native image with no CLR header; managed files that merely hold the signature as data (Microsoft.NET.HostModel.dll,
+    // R2R in SDK 8+) are not hosts.
+    private static (NativeBinary Binary, long BundleHeaderOffset) MakeNativeBinary(Stream fs, NativeBinaryHeader h, string reported, PackageItemRole role)
+    {
+        var scan = DotNetHostScanner.Scan(fs);
+        var native = h.Code == NativeBinaryCode.Native;
+        return (new NativeBinary(reported, h.Format, h.Kind, h.Architecture, h.Code, role, fs.Length, scan.Sha256,
+                native ? scan.Host : DotNetHost.None, native ? scan.BundledFiles : null),
+            native ? scan.BundleHeaderOffset : -1);
+    }
+
+    // Unpacks each single-file bundle under bundleRoot/<n> (a sibling of ExtractionDir, see BundleRootOf) and classifies
+    // every extracted entry by CONTENT, never by the manifest's type byte or name: readable metadata (IL-only, R2R, mixed)
+    // => an assembly for the CIL analysis; native code, R2R or mixed => a native binary. Reported paths are "host!/entry",
+    // both halves escaped, made unique against every other reported path (Unique: "#<index>" on a clash) because
+    // consumers key on them; role is the host's. Coverage gaps, each a skipped result downstream: every entry not
+    // extracted, a bundle whose header failed its checks, a bundle nested in a bundle (labelled, not unpacked), and
+    // everything past the limits: MaxBundles bundles, MaxBundleBytes charged on ATTEMPT, MaxBundleEntries attempted.
+    private static (IReadOnlyList<PackageAssembly> Assemblies, IReadOnlyList<NativeBinary> NativeBinaries, IReadOnlyList<UnextractedBundleRow> Unextracted) UnpackBundles(
+        IReadOnlyList<BundleHost> hosts, string bundleRoot, IEnumerable<string> topLevelPaths)
+    {
+        var (assemblies, natives, gaps) = (new List<PackageAssembly>(), new List<NativeBinary>(), new List<UnextractedBundleRow>());
+        var (budget, entriesLeft, reported) = (MaxBundleBytes, MaxBundleEntries, new HashSet<string>(topLevelPaths, StringComparer.Ordinal));
+        for (var n = 0; n < hosts.Count; n++)
+        {
+            var host = hosts[n];
+            string Inner(string name, int index) => Unique($"{host.Reported}!/{YaraPathSafety.Escape(name)}", index, reported);
+            UnextractedBundleRow Gap(string name, int index, string why) => new(Inner(name, index), host.Role, host.FullPath,
+                $"single-file bundle entry was NOT extracted: {why} (its content was never analysed - coverage not delivered, not a clean result)");
+            if (n >= MaxBundles || host.HeaderOffset < 0)
+            {
+                gaps.Add(Gap(string.Empty, -1, n >= MaxBundles
+                    ? $"more than {MaxBundles} bundles in the package"
+                    : "the bundle header could not be located or failed its checks"));
+                continue;
+            }
+            try
+            {
+                var (extracted, failed, charged, attempted) = SingleFileBundle.Extract(host.FullPath, host.HeaderOffset,
+                    Path.Combine(bundleRoot, n.ToString(System.Globalization.CultureInfo.InvariantCulture)), budget, entriesLeft);
+                budget -= charged;
+                entriesLeft -= attempted;
+                gaps.AddRange(failed.Select(f => Gap(f.Name, f.Index, f.Reason)));
+                foreach (var e in extracted)
+                {
+                    using var fs = File.OpenRead(e.FullPath);
+                    if (NativeBinaryDetector.Detect(fs) is not { } h)
+                        continue;
+                    var (binary, _) = MakeNativeBinary(fs, h, Inner(e.Name, e.Index), host.Role);
+                    if (h.Code != NativeBinaryCode.Native)
+                        assemblies.Add(new PackageAssembly(binary.RelativePath, e.FullPath, null, host.Role, binary.Sha256));
+                    if (h.Code != NativeBinaryCode.ILOnly)
+                        natives.Add(binary);
+                    if (binary.DotNetHost == DotNetHost.SingleFileBundle)
+                        gaps.Add(new(binary.RelativePath, host.Role, host.FullPath,
+                            "single-file bundle entry was NOT extracted: it is itself a single-file bundle, and nested bundles are " +
+                            "not unpacked (its content was never analysed - coverage not delivered, not a clean result)"));
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                gaps.Add(Gap(string.Empty, -1, $"{ex.GetType().Name} while unpacking"));
+            }
+        }
+        if (gaps.Count > 0)
+            Warn("Single-file bundle unpacking INCOMPLETE: {0} entr(ies) not extracted, e.g. {1}", gaps.Count, gaps[0].Reported);
+        return (assemblies, natives, gaps);
     }
 
     // THE kind test, and there is deliberately only one: it decides what the inventory gate picks up off disk (and so
@@ -823,5 +926,10 @@ public sealed class NuGetPackage : Runtime, IDisposable
     // The absolute cap on extracted bytes (ADR 0008), shared by the extractor's options and each side of the content
     // check in ContentMatchesNuGet (ADR 0036), which reads no more than the extraction already accepted.
     private const long MaxExtractedBytes = 2L * 1024 * 1024 * 1024;   // 2 GiB
+
+    // Single-file bundle unpacking limits, per package: bytes charged (on attempt) across all bundles, bundles unpacked,
+    // and entries attempted across all bundles (each becomes CIL work, so this bounds analysis amplification).
+    private const long MaxBundleBytes = 1L * 1024 * 1024 * 1024;     // 1 GiB
+    private const int MaxBundles = 32, MaxBundleEntries = 4096;
     #endregion
 }

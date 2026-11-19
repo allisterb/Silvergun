@@ -19,6 +19,10 @@
          method body the same way, and a second copy of the PE offset arithmetic would drift.
          See tests/Shared/FatHeaderPatcher.cs. -->
     <Compile Include="..\Shared\FatHeaderPatcher.cs" Link="Shared\FatHeaderPatcher.cs" />
+    <!-- The NuGet suite's in-code PE and single-file bundle builders (native-binaries-3), linked so BundleUnpackCompletenessTests
+         builds the same synthetic bundles; neither uses NuGet internals. NativeHeaderBuilder reads the IL fixture referenced below. -->
+    <Compile Include="..\Silvergun.PackageAnalysis.NuGet.Tests\NativeHeaderBuilder.cs" Link="Shared\NativeHeaderBuilder.cs" />
+    <Compile Include="..\Silvergun.PackageAnalysis.NuGet.Tests\SingleFileBundleBuilder.cs" Link="Shared\SingleFileBundleBuilder.cs" />
   </ItemGroup>
 
   <ItemGroup>

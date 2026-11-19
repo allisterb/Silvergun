@@ -30,11 +30,11 @@ public sealed class DotNetHostReportRendererTests
     }
 
     [Fact]
-    public void PackageRenderer_ABundleWithACount_NamesTheUnanalysedFiles()
+    public void PackageRenderer_ABundleWithACount_SaysItWasUnpacked()
     {
         var row = RowFor(Exe("tools/Squirrel.exe", DotNetHost.SingleFileBundle, 118), "tools/Squirrel.exe");
 
-        Assert.Contains("Executable (.NET single-file bundle, 118 file(s) not analysed)", row, StringComparison.Ordinal);
+        Assert.Contains("Executable (.NET single-file bundle, 118 file(s), unpacked)", row, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -42,15 +42,25 @@ public sealed class DotNetHostReportRendererTests
     {
         var row = RowFor(Exe("tools/Empty.exe", DotNetHost.SingleFileBundle, 0), "tools/Empty.exe");
 
-        Assert.Contains("(.NET single-file bundle, 0 file(s) not analysed)", row, StringComparison.Ordinal);
+        Assert.Contains("(.NET single-file bundle, 0 file(s), unpacked)", row, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void PackageRenderer_ABundleWithNoCount_SaysNotAnalysed()
+    public void PackageRenderer_ABundleWithNoCount_SaysNotUnpacked()
     {
         var row = RowFor(Exe("tools/Update.exe", DotNetHost.SingleFileBundle), "tools/Update.exe");
 
-        Assert.Contains("Executable (.NET single-file bundle, not analysed)", row, StringComparison.Ordinal);
+        Assert.Contains("Executable (.NET single-file bundle, NOT unpacked)", row, StringComparison.Ordinal);
+        Assert.DoesNotContain("file(s)", row, StringComparison.Ordinal);
+    }
+
+    // native-binaries-3: a bundle nested in a bundle ("!/" in its path) is not unpacked, even with a readable count.
+    [Fact]
+    public void PackageRenderer_ANestedBundleWithACount_SaysNotUnpacked()
+    {
+        var row = RowFor(Exe("tools/App.exe!/inner.exe", DotNetHost.SingleFileBundle, 3), "tools/App.exe!/inner.exe");
+
+        Assert.Contains("Executable (.NET single-file bundle, NOT unpacked)", row, StringComparison.Ordinal);
         Assert.DoesNotContain("file(s)", row, StringComparison.Ordinal);
     }
 
@@ -174,8 +184,8 @@ public sealed class DotNetHostReportRendererTests
         Assert.Null(ex);
         var output = writer.ToString();
         Assert.Contains("(.NET apphost)", output, StringComparison.Ordinal);
-        Assert.Contains("(.NET single-file bundle, 118 file(s) not analysed)", output, StringComparison.Ordinal);
-        Assert.Contains("(.NET single-file bundle, not analysed)", output, StringComparison.Ordinal);
+        Assert.Contains("(.NET single-file bundle, 118 file(s), unpacked)", output, StringComparison.Ordinal);
+        Assert.Contains("(.NET single-file bundle, NOT unpacked)", output, StringComparison.Ordinal);
         Assert.Contains("(.NET host template)", output, StringComparison.Ordinal);
         Assert.DoesNotContain("[/]", output);
     }
@@ -195,7 +205,7 @@ public sealed class DotNetHostReportRendererTests
         var output = writer.ToString();
         Assert.Contains("PWNED", output, StringComparison.Ordinal);
         Assert.Contains("[red]", output, StringComparison.Ordinal);
-        Assert.Contains("(.NET single-file bundle, 5 file(s) not analysed)", output, StringComparison.Ordinal);
+        Assert.Contains("(.NET single-file bundle, 5 file(s), unpacked)", output, StringComparison.Ordinal);
     }
     #endregion
 

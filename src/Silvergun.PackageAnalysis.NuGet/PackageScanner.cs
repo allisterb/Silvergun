@@ -45,6 +45,7 @@ public sealed class PackageScanner : Runtime
             // The inventoried assemblies, then the declared entries that never reached the inventory (ADR 0030).
             var results = package.Assemblies.Select(a => ScanAssembly(a, resolveReferences))
                 .Concat(package.UninventoriedDeclaredEntries.Select(e => NotInventoried(e.Declared, e.Reported)))
+                .Concat(package.UnextractedBundleEntries.Select(NotExtractedFromBundle))
                 .ToArray();
 
             // Script content scanning runs while the package is still open (its extraction dir exists — ADR 0012).
@@ -151,6 +152,12 @@ public sealed class PackageScanner : Runtime
             null,
             null);
     }
+
+    // A single-file bundle entry that was never extracted: a skipped result, so CompletenessAssessment reads the package
+    // as not complete. FullPath is the host file (not empty), so it is listed with the assemblies rather than as an
+    // uninventoried declared entry.
+    private static AssemblyScanResult NotExtractedFromBundle(UnextractedBundleRow row) =>
+        new(new PackageAssembly(row.Reported, row.HostFullPath, null, row.Role, string.Empty), null, row.Reason, null, null);
 
     // The native-binary pass's status and reason from NuGetPackage's unread files (escaped there): Completed iff none.
     internal static (NativeBinaryScanStatus Status, string? Reason) NativeBinaryScanOutcome(IReadOnlyList<string> unread) =>

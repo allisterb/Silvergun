@@ -280,6 +280,9 @@ internal static class NativeBinaryDetector
     #endregion
 }
 
+/// <summary>The result of <see cref="DotNetHostScanner.Scan"/>.</summary>
+internal readonly record struct DotNetHostScan(string Sha256, DotNetHost Host, int? BundledFiles, long BundleHeaderOffset);
+
 /// <summary>
 /// One pass over a detected binary: its SHA-256 and its <see cref="DotNetHost"/> marker. The marker can sit megabytes
 /// in (a singlefilehost-based bundle at ~7 MB), so it is searched over the whole file in the read the hash needs anyway.
@@ -289,6 +292,14 @@ internal static class DotNetHostScanner
     #region Methods
     /// <summary>Hashes <paramref name="stream"/> from the start and classifies its .NET host marker. Throws only on I/O failure.</summary>
     internal static (string Sha256, DotNetHost Host, int? BundledFiles) HashAndScan(Stream stream)
+    {
+        var s = Scan(stream);
+        return (s.Sha256, s.Host, s.BundledFiles);
+    }
+
+    /// <summary><see cref="HashAndScan"/> plus the bundle header's offset: set only for a SingleFileBundle whose header
+    /// passed the plausibility checks (BundledFiles non-null), else -1.</summary>
+    internal static DotNetHostScan Scan(Stream stream)
     {
         stream.Position = 0;
         using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
@@ -319,9 +330,12 @@ internal static class DotNetHostScanner
 
         var hash = Convert.ToHexStringLower(sha.GetHashAndReset());
         var headerOffset = signatureAt >= 8 ? BinaryPrimitives.ReadInt64LittleEndian(NativeBinaryDetector.ReadAt(stream, signatureAt - 8, 8)) : 0;
-        return signatureAt < 0 ? (hash, placeholder ? DotNetHost.HostTemplate : DotNetHost.None, null)
-            : headerOffset == 0 ? (hash, placeholder ? DotNetHost.HostTemplate : DotNetHost.AppHost, null)
-            : (hash, DotNetHost.SingleFileBundle, BundledFileCount(stream, signatureAt, headerOffset));
+        if (signatureAt < 0)
+            return new(hash, placeholder ? DotNetHost.HostTemplate : DotNetHost.None, null, -1);
+        if (headerOffset == 0)
+            return new(hash, placeholder ? DotNetHost.HostTemplate : DotNetHost.AppHost, null, -1);
+        var count = BundledFileCount(stream, signatureAt, headerOffset);
+        return new(hash, DotNetHost.SingleFileBundle, count, count is null ? -1 : headerOffset);
     }
 
     // The bundle header starts (major u32, minor u32, file count i32); null unless it is there and plausible. The bundler
