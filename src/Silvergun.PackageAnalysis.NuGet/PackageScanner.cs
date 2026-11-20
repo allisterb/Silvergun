@@ -283,6 +283,11 @@ public sealed class PackageScanner : Runtime
     //
     // The third element is why the status is Unavailable (null otherwise), for the report's YaraUnavailableReason: the
     // backend's own UnavailableReason, or the exception's message. The report escapes and bounds it on assignment.
+    //
+    // Two passes (native-binaries-4): the extraction inventory under ExtractionDir, then, when any single-file bundle was
+    // unpacked, the bundle inventory under BundleRoot (a sibling, so `yara -r ExtractionDir` never sees it), its hits
+    // reported at their "host!/entry" paths. Each pass is judged and fails closed on its own (YaraPass), so a failure in
+    // one never costs the other its hits; the package is Completed only when both are.
     private static (IReadOnlyList<YaraFinding> Findings, YaraScanStatus Status, string? UnavailableReason) ScanYara(
         NuGetPackage package, IYaraScanner? yaraScanner = null)
     {
@@ -297,24 +302,56 @@ public sealed class PackageScanner : Runtime
                 return (Array.Empty<YaraFinding>(), YaraScanStatus.Unavailable, $"no working YARA backend: {why}");
             }
 
+            // Built before any hit exists, so nothing past the top pass can throw into the outer catch and cost its hits.
+            var reported = package.BundleYaraInventory.ToDictionary(f => f.FullPath, f => f.Reported, StringComparer.Ordinal);
+            var top = YaraPass(scanner, package, package.ExtractionDir, package.YaraInventory, full => PackageRelativePath(package, full), string.Empty);
+            if (reported.Count == 0)
+                return (top.Findings, top.UnavailableReason is null ? YaraScanStatus.Completed : YaraScanStatus.Unavailable, top.UnavailableReason);
+
+            // An unlisted file (an unattributable hit, already fail-closed) gets a prefix no package path can carry.
+            var bundled = YaraPass(scanner, package, package.BundleRoot, [.. reported.Keys],
+                full => reported.GetValueOrDefault(full) ?? $"<bundles>/{NuGetPackage.RelativeUnderRoot(package.BundleRoot, full)}", BundleScope);
+            var reasons = new[] { top.UnavailableReason, bundled.UnavailableReason is { } r ? $"{BundleScope}: {r}" : null }
+                .OfType<string>().ToArray();
+            return ([.. top.Findings, .. bundled.Findings],
+                reasons.Length == 0 ? YaraScanStatus.Completed : YaraScanStatus.Unavailable,
+                reasons.Length == 0 ? null : string.Join("; ", reasons));
+        }
+        catch (Exception ex)
+        {
+            Warn("YARA scanning UNAVAILABLE for {0}: {1}. Malware-signature findings for this package are NOT verified.",
+                package.Identity.Id, YaraPathSafety.Escape(ex.Message).TrimEnd('.'));
+            return (Array.Empty<YaraFinding>(), YaraScanStatus.Unavailable, $"{ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    // One YARA pass over `files` listed under `root`, hits reported at pathOf(listed path). Never throws: the reason is
+    // null only when every listed file was scanned; an incomplete scan keeps its partial hits (ADR 0032 decision 2).
+    // `scope` names the pass in log lines (empty for the extraction inventory).
+    private static (IReadOnlyList<YaraFinding> Findings, string? UnavailableReason) YaraPass(
+        IYaraScanner scanner, NuGetPackage package, string root, IReadOnlyList<string> files, Func<string, string> pathOf, string scope)
+    {
+        var what = scope.Length == 0 ? package.Identity.Id : $"{package.Identity.Id} ({scope})";
+        try
+        {
             var index = YaraRuleIndex.Shared;
-            var findings = scanner.ScanFiles(package.ExtractionDir, package.YaraInventory)
-                .Select(hit => Enrich(hit.Match, PackageRelativePath(package, hit.FullPath), index))
+            var findings = scanner.ScanFiles(root, files)
+                .Select(hit => Enrich(hit.Match, pathOf(hit.FullPath), index))
                 .ToArray();
-            return (findings, YaraScanStatus.Completed, null);
+            return (findings, null);
         }
         catch (YaraScanIncompleteException ex)
         {
             // The backends' messages are whole sentences ending in '.'; the format below supplies its own, so the
             // message's is trimmed rather than doubled.
-            var partial = EnrichPartialFindings(ex, package);
+            var partial = EnrichPartialFindings(ex, package, pathOf);
             if (partial.Count > 0)
                 Warn("YARA scan INCOMPLETE for {0}: {1}. {2} match(es) found in the files that were scanned are reported; every other file's malware-signature findings are NOT verified.",
-                    package.Identity.Id, YaraPathSafety.Escape(ex.Message).TrimEnd('.'), partial.Count);
+                    what, YaraPathSafety.Escape(ex.Message).TrimEnd('.'), partial.Count);
             else
                 Warn("YARA scanning UNAVAILABLE for {0}: {1}. Malware-signature findings for this package are NOT verified.",
-                    package.Identity.Id, YaraPathSafety.Escape(ex.Message).TrimEnd('.'));
-            return (partial, YaraScanStatus.Unavailable, ex.Message);
+                    what, YaraPathSafety.Escape(ex.Message).TrimEnd('.'));
+            return (partial, ex.Message);
         }
         catch (Exception ex)
         {
@@ -323,23 +360,23 @@ public sealed class PackageScanner : Runtime
             // escape before logging so one cannot forge a line in our own log. Escape is idempotent, so a message
             // that was already built from escaped text is unchanged.
             Warn("YARA scanning UNAVAILABLE for {0}: {1}. Malware-signature findings for this package are NOT verified.",
-                package.Identity.Id, YaraPathSafety.Escape(ex.Message).TrimEnd('.'));
-            return (Array.Empty<YaraFinding>(), YaraScanStatus.Unavailable, $"{ex.GetType().Name}: {ex.Message}");
+                what, YaraPathSafety.Escape(ex.Message).TrimEnd('.'));
+            return (Array.Empty<YaraFinding>(), $"{ex.GetType().Name}: {ex.Message}");
         }
     }
 
     // The partial hits an incomplete scan carried out (ADR 0032 decision 2), enriched exactly as a completed scan's
-    // are. Total by construction — it runs inside ScanYara's catch, where nothing may escape: if enrichment throws,
-    // the package degrades to no findings (still Unavailable, so still fail-closed) rather than failing the whole
+    // are. Total by construction — it runs inside YaraPass's catch, where nothing may escape: if enrichment throws,
+    // the pass degrades to no findings (still Unavailable, so still fail-closed) rather than failing the whole
     // package scan. The message is escaped like every other one here.
     private static IReadOnlyList<YaraFinding> EnrichPartialFindings(
-        YaraScanIncompleteException ex, NuGetPackage package)
+        YaraScanIncompleteException ex, NuGetPackage package, Func<string, string> pathOf)
     {
         try
         {
             var index = YaraRuleIndex.Shared;
             return ex.PartialFindings
-                .Select(hit => Enrich(hit.Match, PackageRelativePath(package, hit.FullPath), index))
+                .Select(hit => Enrich(hit.Match, pathOf(hit.FullPath), index))
                 .ToArray();
         }
         catch (Exception enrichFailure)
@@ -417,5 +454,9 @@ public sealed class PackageScanner : Runtime
         Warn("Could not analyze indicators for {0}: {1}", cci.AssemblyPath, result.Message ?? "unknown error");
         return null;
     }
+    #endregion
+
+    #region Fields
+    private const string BundleScope = "unpacked single-file bundle files";
     #endregion
 }

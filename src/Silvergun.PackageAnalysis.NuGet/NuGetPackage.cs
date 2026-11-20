@@ -38,7 +38,8 @@ public sealed class NuGetPackage : Runtime, IDisposable
         IReadOnlyList<string> yaraInventory,
         IReadOnlyList<NativeBinary> nativeBinaries,
         IReadOnlyList<string> nativeBinaryUnreadFiles,
-        IReadOnlyList<UnextractedBundleRow> unextractedBundleEntries)
+        IReadOnlyList<UnextractedBundleRow> unextractedBundleEntries,
+        IReadOnlyList<BundleFile> bundleYaraInventory)
     {
         Identity = identity;
         Assemblies = assemblies;
@@ -53,6 +54,7 @@ public sealed class NuGetPackage : Runtime, IDisposable
         NativeBinaries = nativeBinaries;
         NativeBinaryUnreadFiles = nativeBinaryUnreadFiles;
         UnextractedBundleEntries = unextractedBundleEntries;
+        BundleYaraInventory = bundleYaraInventory;
     }
     #endregion
 
@@ -165,6 +167,16 @@ public sealed class NuGetPackage : Runtime, IDisposable
     /// escaped (<c>host!/entry</c>).
     /// </summary>
     internal IReadOnlyList<UnextractedBundleRow> UnextractedBundleEntries { get; }
+
+    /// <summary>
+    /// Every single-file bundle entry extracted under <see cref="BundleRoot"/>, of any kind, with its escaped
+    /// <c>host!/entry</c> path: the second YARA inventory, judged exactly like <see cref="YaraInventory"/> (ADR 0034).
+    /// <c>FullPath</c> is raw (opened, never logged).
+    /// </summary>
+    internal IReadOnlyList<BundleFile> BundleYaraInventory { get; }
+
+    /// <summary>Where single-file bundles were unpacked: a sibling of <see cref="ExtractionDir"/>.</summary>
+    internal string BundleRoot => BundleRootOf(ExtractionDir);
     #endregion
 
     #region Methods
@@ -275,8 +287,11 @@ public sealed class NuGetPackage : Runtime, IDisposable
 
             // Single-file bundles (native-binaries-3): their managed entries join the CIL inventory, their native entries
             // the native list, and every entry that could not be extracted becomes a reported coverage gap.
+            // Bundle paths share the YARA finding namespace with EVERY extracted file, so they are made unique against all
+            // of them (a top-level entry literally named "tools/App.exe!/readme.txt" must not alias a bundled one).
             var bundles = UnpackBundles(bundleHosts, BundleRootOf(extractionDir),
-                assemblies.Select(a => a.RelativePath).Concat(topNativeBinaries.Select(b => b.RelativePath)));
+                assemblies.Select(a => a.RelativePath).Concat(topNativeBinaries.Select(b => b.RelativePath))
+                    .Concat(yaraInventory.Select(f => YaraPathSafety.Escape(RelativeUnderRoot(contentRoot, f)))));
             assemblies = [.. assemblies, .. bundles.Assemblies];
             IReadOnlyList<NativeBinary> nativeBinaries = [.. topNativeBinaries, .. bundles.NativeBinaries];
 
@@ -302,7 +317,7 @@ public sealed class NuGetPackage : Runtime, IDisposable
             op.Complete();
             return Result.Success(new NuGetPackage(
                 identity, assemblies, scripts, nuspecPath, extractionDir, contentRoot, declaredEntryNames, uninventoried, yaraInventory,
-                nativeBinaries, nativeUnread, bundles.Unextracted));
+                nativeBinaries, nativeUnread, bundles.Unextracted, bundles.Files));
         }
         catch (Exception ex)
         {
@@ -737,10 +752,11 @@ public sealed class NuGetPackage : Runtime, IDisposable
     // consumers key on them; role is the host's. Coverage gaps, each a skipped result downstream: every entry not
     // extracted, a bundle whose header failed its checks, a bundle nested in a bundle (labelled, not unpacked), and
     // everything past the limits: MaxBundles bundles, MaxBundleBytes charged on ATTEMPT, MaxBundleEntries attempted.
-    private static (IReadOnlyList<PackageAssembly> Assemblies, IReadOnlyList<NativeBinary> NativeBinaries, IReadOnlyList<UnextractedBundleRow> Unextracted) UnpackBundles(
+    // Files: every extracted entry, binary or not, with its reported path, for the YARA pass over the bundle root.
+    private static (IReadOnlyList<PackageAssembly> Assemblies, IReadOnlyList<NativeBinary> NativeBinaries, IReadOnlyList<UnextractedBundleRow> Unextracted, IReadOnlyList<BundleFile> Files) UnpackBundles(
         IReadOnlyList<BundleHost> hosts, string bundleRoot, IEnumerable<string> topLevelPaths)
     {
-        var (assemblies, natives, gaps) = (new List<PackageAssembly>(), new List<NativeBinary>(), new List<UnextractedBundleRow>());
+        var (assemblies, natives, gaps, files) = (new List<PackageAssembly>(), new List<NativeBinary>(), new List<UnextractedBundleRow>(), new List<BundleFile>());
         var (budget, entriesLeft, reported) = (MaxBundleBytes, MaxBundleEntries, new HashSet<string>(topLevelPaths, StringComparer.Ordinal));
         for (var n = 0; n < hosts.Count; n++)
         {
@@ -764,10 +780,12 @@ public sealed class NuGetPackage : Runtime, IDisposable
                 gaps.AddRange(failed.Select(f => Gap(f.Name, f.Index, f.Reason)));
                 foreach (var e in extracted)
                 {
+                    var file = new BundleFile(e.FullPath, Inner(e.Name, e.Index));
+                    files.Add(file);
                     using var fs = File.OpenRead(e.FullPath);
                     if (NativeBinaryDetector.Detect(fs) is not { } h)
                         continue;
-                    var (binary, _) = MakeNativeBinary(fs, h, Inner(e.Name, e.Index), host.Role);
+                    var (binary, _) = MakeNativeBinary(fs, h, file.Reported, host.Role);
                     if (h.Code != NativeBinaryCode.Native)
                         assemblies.Add(new PackageAssembly(binary.RelativePath, e.FullPath, null, host.Role, binary.Sha256));
                     if (h.Code != NativeBinaryCode.ILOnly)
@@ -785,7 +803,7 @@ public sealed class NuGetPackage : Runtime, IDisposable
         }
         if (gaps.Count > 0)
             Warn("Single-file bundle unpacking INCOMPLETE: {0} entr(ies) not extracted, e.g. {1}", gaps.Count, gaps[0].Reported);
-        return (assemblies, natives, gaps);
+        return (assemblies, natives, gaps, files);
     }
 
     // THE kind test, and there is deliberately only one: it decides what the inventory gate picks up off disk (and so

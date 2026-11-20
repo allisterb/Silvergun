@@ -20,6 +20,10 @@ internal sealed record BundleHost(string FullPath, string Reported, PackageItemR
 /// and the reason (already worded for a SkipReason).</summary>
 internal sealed record UnextractedBundleRow(string Reported, PackageItemRole Role, string HostFullPath, string Reason);
 
+/// <summary>An extracted bundle entry, of any kind, as YARA scans it: the raw file on disk and its escaped
+/// <c>host!/entry</c> path.</summary>
+internal sealed record BundleFile(string FullPath, string Reported);
+
 /// <summary>
 /// Unpacks a .NET single-file bundle (the manifest the host's bundle header points at: major, minor, file count, bundle
 /// id, v2+ deps/runtimeconfig locations and flags, then per entry offset, size, v6+ compressed size, type, path; v6+
