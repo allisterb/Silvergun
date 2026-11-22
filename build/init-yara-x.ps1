@@ -52,7 +52,7 @@ try {
     $commit = $entry[1]
 
     if (Test-Path (Join-Path $dir '.git')) {
-        Set-Sparse (Resolve-Path (Git -C $dir rev-parse --git-dir)).Path
+        Set-Sparse (Git -C $dir rev-parse --absolute-git-dir)
         Git -C $dir sparse-checkout reapply
         Write-Host "Applied sparse-checkout to the existing $path checkout."
     }

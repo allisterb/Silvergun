@@ -62,4 +62,4 @@ Both builds regenerate `capi/include/yara_x.h`, `lib/src/modules/modules.rs` and
 in the submodule with LF endings (content unchanged); they were restored with `git checkout` afterwards.
 
 ## Not done
-CI workflow. Switching fetch-yara.ps1 / the csproj to the source-built DLL. Linux worker port (ADR 0033 decision 5).
+CI workflow written (`.github/workflows/yara-x-capi.yml`, 2026-11-22), not yet run on GitHub. Switching fetch-yara.ps1 / the csproj to the source-built DLL. Linux worker port (ADR 0033 decision 5).

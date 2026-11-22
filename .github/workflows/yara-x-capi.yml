@@ -1,0 +1,131 @@
+# Builds the YARA-X C API from the pinned ext/yara-x submodule for Windows x64 and Linux x64, verifies each
+# library (exports, dependencies, generated header) and uploads it with SHA256SUMS and BUILDINFO.txt.
+# Mirrors upstream's release.yaml C API build (release-lto, +crt-static on Windows) with plain cargo.
+# Action SHAs are upstream's pins, checked against the action repos' tags (2026-11-22).
+name: YARA-X C API
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, main]
+    paths:
+      - ext/yara-x
+      - .gitmodules
+      - build/init-yara-x.ps1
+      - build/check-yara-x-capi.py
+      - build/yara-x-capi-exports.txt
+      - .github/workflows/yara-x-capi.yml
+  pull_request:
+    paths:
+      - ext/yara-x
+      - .gitmodules
+      - build/init-yara-x.ps1
+      - build/check-yara-x-capi.py
+      - build/yara-x-capi-exports.txt
+      - .github/workflows/yara-x-capi.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUSTUP_TOOLCHAIN: 1.98.1
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            rustflags: -C target-feature=+crt-static
+            python: python
+            lib: yara_x_capi.dll
+            files: yara_x_capi.dll yara_x_capi.dll.lib yara_x_capi.pdb
+          # 22.04 (glibc 2.35) keeps the library's glibc floor at 2.34; the check fails if that rises.
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            rustflags: ''
+            python: python3
+            lib: libyara_x_capi.so
+            files: libyara_x_capi.so
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Check out Silvergun
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+          persist-credentials: false
+
+      - name: Check out ext/yara-x without test data
+        run: pwsh -NoProfile -File build/init-yara-x.ps1
+
+      - name: Resolve YARA-X tag
+        id: yarax
+        run: |
+          # Upstream also puts go/vX.Y.Z on release commits; take the vX.Y.Z one.
+          $tag = git -C ext/yara-x describe --tags --exact-match --match 'v[0-9]*' HEAD
+          if ($LASTEXITCODE -ne 0 -or $tag -notmatch '^v\d+\.\d+\.\d+$') { throw "ext/yara-x must be at a vX.Y.Z release tag (got '$tag')." }
+          $commit = git -C ext/yara-x rev-parse HEAD
+          if ($commit -notmatch '^[0-9a-f]{40}$') { throw "Unexpected commit '$commit'." }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "commit=$commit" >> $env:GITHUB_OUTPUT
+
+      - name: Install Rust ${{ env.RUSTUP_TOOLCHAIN }}
+        run: rustup toolchain install $env:RUSTUP_TOOLCHAIN --profile minimal --target ${{ matrix.target }} --no-self-update
+
+      - name: Build
+        working-directory: ext/yara-x
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+        run: cargo build -p yara-x-capi --profile release-lto --target ${{ matrix.target }} --locked
+
+      - name: Check the generated header matches upstream's
+        run: git -C ext/yara-x diff --exit-code --ignore-cr-at-eol -- capi/include/yara_x.h
+
+      - name: Verify and stage
+        id: stage
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+          TAG: ${{ steps.yarax.outputs.tag }}
+          COMMIT: ${{ steps.yarax.outputs.commit }}
+        run: |
+          $name = "yara-x-capi-$env:TAG-${{ matrix.target }}"
+          $out = "dist/$name"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          $bin = "ext/yara-x/target/${{ matrix.target }}/release-lto"
+          '${{ matrix.files }}'.Split(' ') | ForEach-Object { Copy-Item "$bin/$_" $out }
+          Copy-Item ext/yara-x/capi/include/yara_x.h, ext/yara-x/LICENSE $out
+          $rustc = rustc -V
+          if ($LASTEXITCODE -ne 0) { throw 'rustc -V failed.' }
+          @(
+            "source: https://github.com/VirusTotal/yara-x $env:TAG ($env:COMMIT)"
+            "licence: BSD-3-Clause (LICENSE)"
+            "built-by: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} from ${{ github.sha }}"
+            "command: cargo build -p yara-x-capi --profile release-lto --target ${{ matrix.target }} --locked"
+            "rustflags: $env:RUSTFLAGS"
+            "toolchain: $rustc"
+            "runner: ${{ matrix.os }} $env:ImageVersion"
+          ) | Set-Content -Encoding utf8NoBOM "$out/BUILDINFO.txt"
+          & ${{ matrix.python }} -I build/check-yara-x-capi.py "$out/${{ matrix.lib }}" build/yara-x-capi-exports.txt --sums $out
+          if ($LASTEXITCODE -ne 0) { throw 'Library verification failed.' }
+          "name=$name" >> $env:GITHUB_OUTPUT
+          @("### $name", '```', (Get-Content "$out/SHA256SUMS"), '```') | Add-Content $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.stage.outputs.name }}
+          path: dist/${{ steps.stage.outputs.name }}
+          if-no-files-found: error
