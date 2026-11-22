@@ -7,3 +7,6 @@
 [submodule "ext/Cilica"]
 	path = ext/Cilica
 	url = https://github.com/allisterb/Cilica.git
+[submodule "ext/yara-x"]
+	path = ext/yara-x
+	url = https://github.com/VirusTotal/yara-x.git

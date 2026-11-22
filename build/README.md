@@ -29,3 +29,17 @@ Windows PowerShell 5.1:
 - `-ZipPath` (alias `-ArchivePath`) installs from a local copy, after the same checks.
 
 Exit codes and details are in the script's comment-based help (`Get-Help build\fetch-yara.ps1 -Full`).
+
+## init-yara-x.ps1
+
+Checks out the `ext/yara-x` submodule without upstream's `testdata/` directories (malware samples and
+macro dumps for upstream's module tests, which antivirus quarantines; the C API build doesn't use them).
+Use it instead of `git submodule update --init` for this submodule:
+
+    powershell -NoProfile -ExecutionPolicy Bypass -File build\init-yara-x.ps1
+
+- **Fresh clone:** blobless clone (`--filter=blob:none`), so excluded files are never downloaded.
+  Then a non-cone sparse-checkout (`/*`, `!testdata/`) and checkout of the commit the index records.
+- **Existing checkout:** applies the same sparse-checkout in place.
+- Sparse-checkout is local git configuration and can't be committed, so each clone of Silvergun has
+  to run the script.
