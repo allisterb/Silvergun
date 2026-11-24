@@ -16,12 +16,13 @@ using Xunit;
 /// FINAL FORM; worker protocol v1 in <c>docs/agent/tasks/yarax-worker.md</c>), driven as a child process exactly as a parent
 /// would drive it: argument array, redirected stdin/stdout/stderr, requests written on their own task.
 ///
-/// <para><b>Amendment (m).</b> The YARA-X engine is built for Windows only (the net10.0-windows TFM). This build's verb
-/// therefore answers every valid invocation with exactly one <c>fatal</c> "engine unavailable on this platform" and exit 3
-/// (T3: never the T1 stub). Its argument checks still come first and are pinned here, cross-platform. The real-engine verb
-/// tests (the genuine ready, device-named files, locked files, the timeout, malformed request streams, and the YARA-X DLL
-/// loading in worker mode but never in a normal run) launch the net10.0-windows CLI from
-/// <c>Silvergun.PackageAnalysis.NuGet.Tests</c> (<c>YaraWorkerVerbWindowsTests</c>), which has that TFM.</para>
+/// <para><b>Amendment (m).</b> On Windows the YARA-X engine is in the net10.0-windows TFM only, so the net10.0 CLI this
+/// project builds answers every valid invocation there with exactly one <c>fatal</c> "engine unavailable on this platform"
+/// and exit 3 (T3: never the T1 stub); those tests are <see cref="NoYaraXEngineFactAttribute"/>. On Linux the net10.0 CLI
+/// HAS the engine (<c>docs/agent/tasks/yarax-worker-linux.md</c>), so they are a visible skip there. The argument checks
+/// still come first and are pinned here on every OS. The real-engine verb tests launch the CLI from
+/// <c>Silvergun.PackageAnalysis.NuGet.Tests</c>: the net10.0-windows CLI (<c>YaraWorkerVerbWindowsTests</c>) and, on Linux,
+/// the net10.0 CLI (<c>YaraWorkerVerbLinuxTests</c>).</para>
 ///
 /// <para>Records are pinned <b>byte for byte</b> (no BOM, <c>\n</c> only, one record per line), because the parent's reader is
 /// strict. Worker mode must load no analysis code (ADR 0033 decision 5), observed from outside the process with a startup
@@ -47,7 +48,7 @@ public sealed class YaraWorkerVerbCliTests
     // Formerly the T1 stub's ready/skipped/done, byte for byte. This build has no YARA-X engine, so whatever stdin holds,
     // stdout is exactly one fatal record and the exit code is 3: no ready (a parent must never see an engine here), no
     // result, no done.
-    [Theory]
+    [NoYaraXEngineTheory]
     [InlineData(0)]
     [InlineData(1)]
     [InlineData(20)]
@@ -62,7 +63,7 @@ public sealed class YaraWorkerVerbCliTests
     }
 
     // The same with a valid --timeout: the timeout is accepted (checked first), then the engine is unavailable.
-    [Theory]
+    [NoYaraXEngineTheory]
     [InlineData("2")]
     [InlineData("30")]
     [InlineData("3600")]
@@ -75,7 +76,7 @@ public sealed class YaraWorkerVerbCliTests
     }
 
     // Malformed stdin cannot change that: the request stream is never read on this build.
-    [Fact]
+    [NoYaraXEngineFact]
     public void Worker_OnThisBuild_IgnoresEvenAMalformedRequestStream()
     {
         var run = Run(WorkerArgs, Utf8("{\"index\":0,\"path\":\"a.bin\",\"extra\":1}\n" + new string('x', 70_000)));
@@ -85,7 +86,7 @@ public sealed class YaraWorkerVerbCliTests
     }
 
     // stdout carries protocol records only (ADR 0033 decision 5): the fatal is logged, and the log goes to stderr.
-    [Fact]
+    [NoYaraXEngineFact]
     public void Worker_LogsToStderrOnly_NeverToStdout()
     {
         var run = Run(WorkerArgs, []);
@@ -96,7 +97,7 @@ public sealed class YaraWorkerVerbCliTests
 
     // W2: worker mode replaces Console.Out with TextWriter.Null, so nothing written through Console.Out (here by the
     // startup hook, at process exit, after the verb has finished) ever reaches stdout.
-    [Fact]
+    [NoYaraXEngineFact]
     public void Worker_AConsoleOutWrite_NeverReachesStdout()
     {
         var run = Run(WorkerArgs, [], new Dictionary<string, string>
@@ -294,7 +295,7 @@ public sealed class YaraWorkerVerbCliTests
     // no YARA-X engine to load either. The allow-list is every app-local assembly the worker needs; anything else from the
     // CLI's own directory loading in worker mode is a regression (a static initialiser or a type reference in the verb's
     // path pulling analysis code in). The explicit deny-list repeats the ones the ADR names, for a readable red.
-    [Fact]
+    [NoYaraXEngineFact]
     public void Worker_LoadsOnlyTheRuntimeLoggingAndProtocolAssemblies_AndNoEngine()
     {
         var record = Path.Combine(Path.GetTempPath(), $"silvergun-yara-worker-modules-{Guid.NewGuid():N}.txt");
@@ -442,10 +443,10 @@ public sealed class YaraWorkerVerbCliTests
     #endregion
 
     #region Fields
-    // The one record this build's worker ever sends for a valid invocation (UnavailableYaraWorkerEngine.Reason). The
-    // writer's encoder writes the text as is: it holds no character it escapes.
+    // The one record this build's worker ever sends for a valid invocation where it has no engine
+    // (UnavailableYaraWorkerEngine.Reason). The writer's encoder writes the text as is: it holds no character it escapes.
     private const string EngineUnavailable =
-        "{\"type\":\"fatal\",\"reason\":\"engine unavailable on this platform: the YARA-X worker engine is built for Windows only\"}";
+        "{\"type\":\"fatal\",\"reason\":\"engine unavailable on this platform: the YARA-X worker engine runs on Windows and Linux only\"}";
 
     private const int TimeoutMs = 60_000;
 
@@ -462,5 +463,34 @@ public sealed class YaraWorkerVerbCliTests
         "Silvergun.CLI", "System.CommandLine", "Silvergun.Runtime", "Silvergun.PackageAnalysis.NuGet",
         "Serilog", "Serilog.Sinks.Console", "Serilog.Extensions.Logging", "Microsoft.Extensions.Logging.Abstractions",
     ];
+    #endregion
+}
+
+/// <summary>
+/// A <see cref="FactAttribute"/> for the net10.0 CLI's no-engine behaviour, which holds everywhere but Linux: there the
+/// net10.0 worker runs the YARA-X engine (<c>docs/agent/tasks/yarax-worker-linux.md</c>), so it is a visible skip.
+/// </summary>
+public sealed class NoYaraXEngineFactAttribute : FactAttribute
+{
+    #region Constructors
+    public NoYaraXEngineFactAttribute() => Skip = NoYaraXEngine.SkipReason;
+    #endregion
+}
+
+/// <summary>The <see cref="TheoryAttribute"/> twin of <see cref="NoYaraXEngineFactAttribute"/>.</summary>
+public sealed class NoYaraXEngineTheoryAttribute : TheoryAttribute
+{
+    #region Constructors
+    public NoYaraXEngineTheoryAttribute() => Skip = NoYaraXEngine.SkipReason;
+    #endregion
+}
+
+internal static class NoYaraXEngine
+{
+    #region Properties
+    internal static string? SkipReason => OperatingSystem.IsLinux()
+        ? "On Linux the net10.0 CLI's __worker yara runs the YARA-X engine (docs/agent/tasks/yarax-worker-linux.md); its "
+          + "real-engine verb tests are YaraWorkerVerbLinuxTests in Silvergun.PackageAnalysis.NuGet.Tests."
+        : null;
     #endregion
 }

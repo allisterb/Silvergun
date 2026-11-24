@@ -1,28 +1,27 @@
 namespace Silvergun.PackageAnalysis.NuGet.Yara.Worker;
 
-#if WINDOWS
 using Microsoft.Win32.SafeHandles;
 
 using Silvergun.PackageAnalysis.NuGet.Yara.YaraX;
-#endif
 
 /// <summary>
-/// The production engines of the <c>__worker yara</c> verb (ADR 0033 FINAL FORM). On Windows that is the YARA-X engine;
-/// on any other build the verb answers <c>fatal</c> "engine unavailable on this platform" until the Linux C API build
-/// (ADR 0033 revision decision 5). Never the T1 stub.
+/// The production engines of the <c>__worker yara</c> verb (ADR 0033 FINAL FORM). On Windows (the <c>net10.0-windows</c>
+/// build) that is the YARA-X engine with the rules cache; on Linux the YARA-X engine with no rules cache
+/// (docs/agent/tasks/yarax-worker-linux.md, L6); anywhere else the verb answers <c>fatal</c> "engine unavailable on this
+/// platform". Never the T1 stub.
 /// </summary>
 public static class YaraWorkerEngines
 {
     #region Methods
     /// <summary>
     /// The engine for this build, every scan bounded by <paramref name="timeoutSeconds"/> (≥ 1). Creating it loads
-    /// nothing: the YARA-X DLL and the rules load in <see cref="IYaraWorkerEngine.Start"/>.
+    /// nothing: the YARA-X library and the rules load in <see cref="IYaraWorkerEngine.Start"/>.
     /// </summary>
     public static IYaraWorkerEngine ForPlatform(int timeoutSeconds) =>
 #if WINDOWS
         new YaraXWorkerEngine(timeoutSeconds, new YaraXRulesCache());
 #else
-        new UnavailableYaraWorkerEngine();
+        OperatingSystem.IsLinux() ? new YaraXWorkerEngine(timeoutSeconds, cache: null) : new UnavailableYaraWorkerEngine();
 #endif
     #endregion
 }
@@ -37,31 +36,44 @@ internal sealed class UnavailableYaraWorkerEngine : IYaraWorkerEngine
     #endregion
 
     #region Fields
-    internal const string Reason = "engine unavailable on this platform: the YARA-X worker engine is built for Windows only";
+    internal const string Reason = "engine unavailable on this platform: the YARA-X worker engine runs on Windows and Linux only";
     #endregion
 }
 
 /// <summary>
-/// The request path form of worker protocol v1 (amendment G2), checked and turned into a Win32 verbatim path purely
-/// lexically. Never <see cref="Path.GetFullPath(string)"/>, which maps a real file named <c>nul.txt</c> to the device
-/// <c>\\.\NUL</c>, and never any other normalization: the verbatim prefix opens exactly the file named. The ONE
-/// definition of the form (amendment (j')): the worker uses it to open a request's file, and the parent
-/// (<c>YaraXWorkerScanner</c>) uses it both to refuse a path before sending it and as the form its link check walks, so
-/// the two sides agree by construction.
+/// The request path form of worker protocol v1 (amendment G2), checked and turned into the form the file is opened
+/// through, purely lexically. The ONE definition of the form (amendment (j')): the worker uses it to open a request's
+/// file, and the parent (<c>YaraXWorkerScanner</c>) uses it both to refuse a path before sending it and as the form its
+/// link check walks, so the two sides agree by construction.
+/// <para><b>Windows</b>: a Win32 verbatim path. Never <see cref="Path.GetFullPath(string)"/>, which maps a real file named
+/// <c>nul.txt</c> to the device <c>\\.\NUL</c>, and never any other normalization: the verbatim prefix opens exactly the
+/// file named.</para>
+/// <para><b>Unix</b> (docs/agent/tasks/yarax-worker-linux.md, L3): the path itself, which the kernel opens as named.
+/// <c>/</c> is the only separator; a backslash is an ordinary file-name character there.</para>
 /// </summary>
 internal static class WorkerPathForm
 {
     #region Methods
+    /// <summary>The form of <paramref name="path"/> to open on this OS, or <c>null</c> when it is not in the protocol's form.</summary>
+    internal static string? Verbatim(string? path) => Verbatim(path, OperatingSystem.IsWindows());
+
     /// <summary>
-    /// The verbatim form of <paramref name="path"/> — <c>\\?\C:\…</c> for a drive path, <c>\\?\UNC\server\share\…</c> for a
-    /// UNC path — or <c>null</c> when it is not in the protocol's form: well-formed UTF-16 (review W1), absolute
-    /// (<c>X:\</c> or <c>\\server\share\</c>), backslash-separated (no <c>/</c>), no empty, <c>.</c> or <c>..</c> segment,
-    /// no NUL, and no <c>:</c> outside the drive designator (an NTFS file name cannot hold one, so it could only name an
-    /// alternate data stream). Device and already-verbatim paths (<c>\\?\</c>, <c>\\.\</c>, <c>\??\</c>) are not in the form.
+    /// On Windows (<paramref name="windows"/>), the verbatim form of <paramref name="path"/> — <c>\\?\C:\…</c> for a drive
+    /// path, <c>\\?\UNC\server\share\…</c> for a UNC path — or <c>null</c> when it is not in the protocol's form:
+    /// well-formed UTF-16 (review W1), absolute (<c>X:\</c> or <c>\\server\share\</c>), backslash-separated (no <c>/</c>),
+    /// no empty, <c>.</c> or <c>..</c> segment, no NUL, and no <c>:</c> outside the drive designator (an NTFS file name
+    /// cannot hold one, so it could only name an alternate data stream). Device and already-verbatim paths (<c>\\?\</c>,
+    /// <c>\\.\</c>, <c>\??\</c>) are not in the form.
+    /// <para>Elsewhere, <paramref name="path"/> itself, or <c>null</c> unless it is well-formed UTF-16, has no NUL, is
+    /// absolute (<c>/</c> first) and has no empty, <c>.</c> or <c>..</c> segment.</para>
     /// </summary>
-    internal static string? Verbatim(string? path)
+    internal static string? Verbatim(string? path, bool windows)
     {
-        if (string.IsNullOrEmpty(path) || path.Contains('\0') || path.Contains('/') || !WorkerProtocol.IsWellFormedUtf16(path))
+        if (string.IsNullOrEmpty(path) || path.Contains('\0') || !WorkerProtocol.IsWellFormedUtf16(path))
+            return null;
+        if (!windows)
+            return path[0] == '/' && path[1..].Split('/').All(s => s.Length > 0 && s is not ("." or "..")) ? path : null;
+        if (path.Contains('/'))
             return null;
 
         if (path.Length > 3 && char.IsAsciiLetter(path[0]) && path[1] == ':' && path[2] == '\\')
@@ -87,24 +99,24 @@ internal static class WorkerPathForm
     #endregion
 }
 
-#if WINDOWS
 /// <summary>
-/// The YARA-X engine of <c>__worker yara</c> (ADR 0033; task T3). <see cref="Start"/> loads the engine and the embedded
+/// The YARA-X engine of <c>__worker yara</c> (ADR 0033; task T3; Linux: docs/agent/tasks/yarax-worker-linux.md). <see cref="Start"/> loads the engine and the embedded
 /// rules — from the user-private rules cache when an entry verifies, otherwise compiled — whose canary must pass, and
 /// creates the ONE scanner every request uses. It is used from one thread only: the thread that called
 /// <see cref="Start"/> (<see cref="YaraXScanner"/> refuses any other, because one scanner on two threads aborts the
 /// process).
 ///
 /// <para><b>Per request</b>: the path must be in the protocol's form (<see cref="WorkerPathForm"/>; otherwise
-/// <c>error</c> "invalid path form"); the file is opened through its verbatim path with read sharing only, so nobody can
-/// write or truncate it while it is read or mapped (amendment G7), and scanned by bytes with the length re-checked after.
+/// <c>error</c> "invalid path form"); the file is opened through that form with read sharing only, so nobody can write or
+/// truncate it while it is read or mapped (amendment G7; on Linux the sharing is advisory, and the length re-check is the
+/// guard), and scanned by bytes with the length re-checked after.
 /// Only a completed engine scan is <c>scanned</c>; a timeout is <c>timeout</c>, and every other failure — open, read,
 /// engine — is <c>error</c> with an escaped, bounded reason (ADR 0030: a file that was not scanned is never clean).</para>
 /// </summary>
 internal sealed class YaraXWorkerEngine : IYaraWorkerEngine, IDisposable
 {
     #region Constructors
-    internal YaraXWorkerEngine(int timeoutSeconds, YaraXRulesCache? cache)
+    internal YaraXWorkerEngine(int timeoutSeconds, IYaraXRulesCache? cache)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(timeoutSeconds, 1);
         (this.timeoutSeconds, this.cache) = (timeoutSeconds, cache);
@@ -191,9 +203,8 @@ internal sealed class YaraXWorkerEngine : IYaraWorkerEngine, IDisposable
     internal const string InvalidPathForm = "invalid path form";
 
     private readonly int timeoutSeconds;
-    private readonly YaraXRulesCache? cache;
+    private readonly IYaraXRulesCache? cache;
     private YaraXRules? rules;
     private YaraXScanner? scanner;
     #endregion
 }
-#endif

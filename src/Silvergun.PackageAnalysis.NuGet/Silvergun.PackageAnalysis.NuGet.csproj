@@ -8,9 +8,10 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(TargetFramework)'=='net10.0-windows'">
-    <!-- The YARA-X C API binding (Yara/YaraX, #if WINDOWS; ADR 0033) uses source-generated [LibraryImport] P/Invoke,
-         pointers and unmanaged callbacks, which require unsafe code. -->
+  <PropertyGroup>
+    <!-- The YARA-X C API binding (Yara/YaraX; ADR 0033, both TFMs: Windows, and Linux per
+         docs/agent/tasks/yarax-worker-linux.md) uses source-generated [LibraryImport] P/Invoke, pointers and unmanaged
+         callbacks, which require unsafe code. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
@@ -24,7 +25,7 @@
 
   <ItemGroup Condition="'$(TargetFramework)'=='net10.0' And $([MSBuild]::IsOSPlatform('Linux')) And Exists('$(MSBuildThisFileDirectory)..\..\artifacts\tools\yara-x-capi\linux-x64\libyara_x_capi.so')">
     <!-- The Linux counterpart (fetch-yara.ps1 -Engine YaraXCapi -Platform linux-x64), copied only when building on Linux.
-         Nothing loads it yet: the YARA-X worker is #if WINDOWS until its Linux port (ADR 0033 decision 5). -->
+         The `__worker yara` verb loads it on Linux (docs/agent/tasks/yarax-worker-linux.md). -->
     <None Include="$(MSBuildThisFileDirectory)..\..\artifacts\tools\yara-x-capi\linux-x64\libyara_x_capi.so" Link="libyara_x_capi.so" CopyToOutputDirectory="PreserveNewest" Visible="false" />
   </ItemGroup>
 

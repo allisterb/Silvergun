@@ -1,4 +1,3 @@
-#if WINDOWS
 namespace Silvergun.PackageAnalysis.NuGet.Yara.YaraX;
 
 using System.Runtime.InteropServices;
@@ -74,4 +73,3 @@ internal sealed class YaraXScannerHandle : SafeHandleZeroOrMinusOneIsInvalid
     private GCHandle sink;
     #endregion
 }
-#endif

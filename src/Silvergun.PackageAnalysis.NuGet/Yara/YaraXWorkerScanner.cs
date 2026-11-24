@@ -1,4 +1,3 @@
-#if WINDOWS
 namespace Silvergun.PackageAnalysis.NuGet.Yara;
 
 using System.Collections.Concurrent;
@@ -37,8 +36,10 @@ using Silvergun.PackageAnalysis.NuGet.Yara.YaraX;
 ///
 /// Clocks (the parent owns them; pipe reads are not cancellable, so every backstop is a kill, amendment (g)): <c>ready</c>
 /// within 15 s (G9); then no more than the engine timeout plus a 5 s grace between records; then, after <c>done</c>, a
-/// bounded wait for the exit code. Each run is placed in a kill-on-close Job Object (<see cref="WorkerJobObject"/>) held
-/// for this instance's lifetime, so no worker outlives this process. Windows-only for now, like the binding it drives.
+/// bounded wait for the exit code. On Windows each run is placed in a kill-on-close Job Object (<c>WorkerJobObject</c>)
+/// held for this instance's lifetime, so no worker outlives this process. On Linux there is no Job Object: the worker
+/// exits when its parent dies (<see cref="WorkerParentWatch"/>), and <see cref="Dispose"/> kills this instance's running
+/// workers itself (docs/agent/tasks/yarax-worker-linux.md, L4).
 /// </summary>
 public sealed class YaraXWorkerScanner : Runtime, IYaraScanner, IDisposable
 {
@@ -168,18 +169,25 @@ public sealed class YaraXWorkerScanner : Runtime, IYaraScanner, IDisposable
     }
 
     /// <summary>
-    /// Closes the Job Object, which kills every worker still running for this instance; their scans end incomplete.
-    /// Afterwards <see cref="Available"/> is <c>false</c> and every scan throws <see cref="YaraScanIncompleteException"/>.
-    /// Idempotent. The process-wide instance <see cref="YaraScannerFactory.Shared"/> is never disposed: its job handle
-    /// closes when the process exits, which kills any worker left.
+    /// Kills every worker still running for this instance (Windows: by closing the Job Object); their scans end
+    /// incomplete. Afterwards <see cref="Available"/> is <c>false</c> and every scan throws
+    /// <see cref="YaraScanIncompleteException"/>. Idempotent. The process-wide instance
+    /// <see cref="YaraScannerFactory.Shared"/> is never disposed: its job handle closes when the process exits, which kills
+    /// any worker left (on Linux, each worker exits when it sees its parent gone).
     /// </summary>
     public void Dispose()
     {
-        // Under the job lock, so a job being created right now is either disposed here or never created (review nit).
+        // Under the job lock, so a job (or a live worker) being added right now is either disposed here or never added (review nit).
         lock (jobLock)
         {
             disposed = true;
+#if WINDOWS
             job?.Dispose();
+#else
+            foreach (var worker in live)
+                Kill(worker);
+            live.Clear();
+#endif
         }
     }
 
@@ -203,15 +211,16 @@ public sealed class YaraXWorkerScanner : Runtime, IYaraScanner, IDisposable
 
     // One worker run over already-enumerated files: refuse what may not be sent, run the worker over the rest, and map
     // what came back. Never throws for a worker failure — that is the outcome's Failure, with every file lacking a genuine
-    // 'scanned' result in Unscanned. Paths go on the wire with '/' folded to '\' (a separator on Windows, never a name
-    // character; amendment (q)); hits are reported against the path as ENUMERATED, so they resolve against the root as given.
+    // 'scanned' result in Unscanned. On Windows paths go on the wire with '/' folded to '\' (a separator there, never a
+    // name character; amendment (q)); on Linux unchanged, where '\' is a name character (L3). Hits are reported against
+    // the path as ENUMERATED, so they resolve against the root as given.
     private ScanOutcome Scan(IReadOnlyList<string> files, string? rootDir)
     {
         var refused = new List<(string File, string Why)>();
         var sent = new List<(string File, string Wire)>();
         foreach (var file in files)
         {
-            var wire = file.Replace('/', '\\');
+            var wire = OperatingSystem.IsWindows() ? file.Replace('/', '\\') : file;
             var why = Refusal(rootDir, file, wire);
             if (why is null)
                 sent.Add((file, wire));
@@ -242,7 +251,9 @@ public sealed class YaraXWorkerScanner : Runtime, IYaraScanner, IDisposable
     // reported as clean; only its reason differs from a link's.
     private static string? Refusal(string? rootDir, string file, string wire) =>
         WorkerPathForm.Verbatim(wire) is null
-            ? "its path is not in the worker protocol's form (absolute, backslash-separated, well-formed UTF-16, no NUL, no '.', '..' or empty segment, no ':' past the drive, not a device path)"
+            ? OperatingSystem.IsWindows()
+                ? "its path is not in the worker protocol's form (absolute, backslash-separated, well-formed UTF-16, no NUL, no '.', '..' or empty segment, no ':' past the drive, not a device path)"
+                : "its path is not in the worker protocol's form (absolute, well-formed UTF-16, no NUL, no '.', '..' or empty segment)"
         : IsLink(rootDir, file, wire) switch
         {
             true => "it is a link, lies under a linked directory, or could not be checked for either; following a link would scan content outside the package",
@@ -310,6 +321,7 @@ public sealed class YaraXWorkerScanner : Runtime, IYaraScanner, IDisposable
         finally
         {
             Kill(process);
+            Release(process);
             WaitQuietly(background, DrainTimeout);
         }
     }
@@ -457,6 +469,7 @@ public sealed class YaraXWorkerScanner : Runtime, IYaraScanner, IDisposable
             Debug("[yara-worker] (stderr exceeded {0} bytes; {1} more byte(s) discarded)", MaxStderrBytes, discarded);
     }
 
+#if WINDOWS
     // Places the worker in this instance's kill-on-close Job Object; null on success, else why the run must not go on.
     // A worker that has already exited needs no containing: its output is still read and judged.
     private string? Contain(Process process)
@@ -472,6 +485,35 @@ public sealed class YaraXWorkerScanner : Runtime, IYaraScanner, IDisposable
         }
     }
 
+    private static void Release(Process process)
+    {
+        /* the Job Object holds it, not this instance */
+    }
+#else
+    // No Job Object in this build (L4). On Linux the worker is registered as live, so Dispose can kill it, and it watches
+    // its parent itself (WorkerParentWatch). Anywhere else — this build on Windows included — nothing would contain it, so
+    // the run ends like a failed containment does on Windows; so does a run on an already disposed instance.
+    private string? Contain(Process process)
+    {
+        if (!OperatingSystem.IsLinux())
+            return "this build has no worker containment on this platform (a Job Object on Windows needs the net10.0-windows build), so the worker was killed";
+        lock (jobLock)
+        {
+            if (disposed)
+                return "the scanner has been disposed";
+            live.Add(process);
+            return null;
+        }
+    }
+
+    private void Release(Process process)
+    {
+        lock (jobLock)
+            live.Remove(process);
+    }
+#endif
+
+#if WINDOWS
     // This instance's Job Object, created on first use (one attempt; a failure is warned about once), or null once
     // disposed. Creation and Dispose share jobLock, so a job is never created after, or leaked by, a racing Dispose.
     private WorkerJobObject? Job()
@@ -499,6 +541,7 @@ public sealed class YaraXWorkerScanner : Runtime, IYaraScanner, IDisposable
             return null;
         }
     }
+#endif
 
     // The availability probe (amendment (c)): a zero-file run must complete with a genuine ready.
     private bool Probe()
@@ -544,7 +587,7 @@ public sealed class YaraXWorkerScanner : Runtime, IYaraScanner, IDisposable
         }
         catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or NotSupportedException or AggregateException)
         {
-            /* already gone, or the job's close will take it */
+            /* already gone; or, on Windows, the job's close will take it (on Linux the worker's parent watch will) */
         }
     }
 
@@ -611,7 +654,8 @@ public sealed class YaraXWorkerScanner : Runtime, IYaraScanner, IDisposable
     // W-A: every path checked is the VERBATIM form the worker opens (WorkerPathForm.Verbatim). The plain form is
     // normalised first — a directory named `con` becomes \\.\con, and `bar.` loses its dot — so a junction with such a
     // name had no link target there and was walked straight through (measured: `con`, `bar.`, `lpt1.d`). Attributes are
-    // read without following the link, and ANY reparse point counts, not only those .NET reports a target for.
+    // read without following the link, and ANY reparse point counts, not only those .NET reports a target for. On Linux
+    // the same walk splits on '/', and .NET reports a symlink (read with lstat, not followed) as a reparse point (L3).
     private static bool? IsLink(string? rootDir, string file, string wire)
     {
         try
@@ -619,10 +663,11 @@ public sealed class YaraXWorkerScanner : Runtime, IYaraScanner, IDisposable
             if (rootDir is null)
                 return IsReparsePoint(wire);
 
+            var separator = OperatingSystem.IsWindows() ? '\\' : '/';
             var start = file.Length - YaraPathSafety.Relative(rootDir, file).Length;
             return start == 0
                 || Enumerable.Range(start, wire.Length - start)
-                    .Where(i => wire[i] == '\\')
+                    .Where(i => wire[i] == separator)
                     .Append(wire.Length)
                     .Any(end => IsReparsePoint(wire[..end]));
         }
@@ -695,8 +740,8 @@ public sealed class YaraXWorkerScanner : Runtime, IYaraScanner, IDisposable
     #endregion
 
     #region Fields
-    /// <summary>The environment variable that selects the Windows YARA backend (<see cref="YaraScannerFactory"/>); this
-    /// backend is the default when it is unset or empty.</summary>
+    /// <summary>The environment variable that selects the YARA backend (<see cref="YaraScannerFactory"/>). This backend is
+    /// the Windows default (unset or empty); on Linux it is selected by <c>yarax</c>.</summary>
     public const string EngineVar = YaraScannerFactory.EngineVar;
 
     /// <summary>The <see cref="EngineVar"/> value that selects this backend.</summary>
@@ -748,8 +793,12 @@ public sealed class YaraXWorkerScanner : Runtime, IYaraScanner, IDisposable
     private readonly TimeSpan exitTimeout;
     private readonly Lazy<bool> availability;
     private readonly Lock jobLock = new();
+#if WINDOWS
     private WorkerJobObject? job;
     private bool jobAttempted;
+#else
+    private readonly HashSet<Process> live = [];   // running workers, for Dispose to kill (no Job Object here)
+#endif
     private volatile bool disposed;
     private volatile string? probeFailure;   // why the probe failed (UnavailableReason); written once, by the probe, before availability is published
     #endregion
@@ -811,4 +860,3 @@ public sealed class YaraXWorkerScanner : Runtime, IYaraScanner, IDisposable
     }
     #endregion
 }
-#endif

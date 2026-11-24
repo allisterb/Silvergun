@@ -6,7 +6,8 @@ namespace Silvergun.PackageAnalysis.NuGet.Yara;
 /// out-of-process <c>YaraXWorkerScanner</c> (ADR 0033) by default — <c>SILVERGUN_YARA_ENGINE</c> unset, empty or
 /// <c>yarax</c> — or, only when <c>SILVERGUN_YARA_ENGINE=libyara</c> asks for it, the in-process
 /// <see cref="LibYaraScanner"/> (whose engine is already static/shared), an explicit fallback until its package is
-/// removed. Neither ever falls back to the other. Everywhere else it is a shared <see cref="YaraCliScanner"/> when
+/// removed. Neither ever falls back to the other. On Linux <c>SILVERGUN_YARA_ENGINE=yarax</c> selects the YARA-X worker
+/// (docs/agent/tasks/yarax-worker-linux.md). Otherwise it is a shared <see cref="YaraCliScanner"/> when
 /// <c>SILVERGUN_YARA_PATH</c> is set and valid, otherwise the <see cref="NullYaraScanner"/>. Selection happens once,
 /// lazily, on first use.
 /// </summary>
@@ -50,9 +51,15 @@ public static class YaraScannerFactory
 
         return new YaraXWorkerScanner();
 #else
-        // `yarax` and `libyara` are real values, just not for this build: say so rather than call them unrecognised.
-        if (string.Equals(engine, YaraXEngineValue, StringComparison.OrdinalIgnoreCase) || string.Equals(engine, LibYaraEngineValue, StringComparison.OrdinalIgnoreCase))
-            Runtime.Warn("{0}='{1}' has no effect on this build (it selects a Windows backend); using the default YARA backend.",
+        // On Linux `yarax` selects the YARA-X worker (docs/agent/tasks/yarax-worker-linux.md, L5), over SILVERGUN_YARA_PATH;
+        // it becomes the default there once the Linux gate passes. Like on Windows, it never falls back to another backend.
+        var yarax = string.Equals(engine, YaraXEngineValue, StringComparison.OrdinalIgnoreCase);
+        if (yarax && OperatingSystem.IsLinux())
+            return new YaraXWorkerScanner();
+
+        // Otherwise `yarax` and `libyara` are real values, just not for this build: say so rather than call them unrecognised.
+        if (yarax || string.Equals(engine, LibYaraEngineValue, StringComparison.OrdinalIgnoreCase))
+            Runtime.Warn("{0}='{1}' has no effect on this build (it selects a backend this platform does not have); using the default YARA backend.",
                 EngineVar, Worker.WorkerProtocol.Safe(engine, MaxEngineValueChars));
         else
             WarnIfUnrecognised(engine, "this build has no alternative YARA backend to select");
@@ -75,10 +82,10 @@ public static class YaraScannerFactory
     #endregion
 
     #region Fields
-    /// <summary>The environment variable that selects the Windows YARA backend (unset or empty: the default).</summary>
+    /// <summary>The environment variable that selects the YARA backend (unset or empty: the default).</summary>
     internal const string EngineVar = "SILVERGUN_YARA_ENGINE";
 
-    /// <summary>The <see cref="EngineVar"/> value that selects the out-of-process YARA-X worker backend (Windows; the default).</summary>
+    /// <summary>The <see cref="EngineVar"/> value that selects the out-of-process YARA-X worker backend (the Windows default; on Linux, opt-in).</summary>
     internal const string YaraXEngineValue = "yarax";
 
     /// <summary>The <see cref="EngineVar"/> value that selects the in-process libyara.NET backend (Windows; an explicit fallback).</summary>

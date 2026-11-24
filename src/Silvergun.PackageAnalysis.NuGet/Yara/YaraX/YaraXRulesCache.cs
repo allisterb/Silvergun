@@ -108,7 +108,7 @@ using System.Text;
 /// never distrusts our own writes. The owner is never set by path: by then the file at that path may not be the one this
 /// process created, and setting it would vouch for someone else's entry (review W1).</para>
 /// </summary>
-internal sealed class YaraXRulesCache
+internal sealed class YaraXRulesCache : IYaraXRulesCache
 {
     #region Constructors
     /// <summary>
@@ -156,7 +156,7 @@ internal sealed class YaraXRulesCache
     /// warning). DPAPI must vouch for the entry's exact body before any of it goes near the engine (class doc). The caller
     /// still runs the canary.
     /// </summary>
-    internal YaraXRules? TryLoad(string sourcesSha256)
+    public YaraXRules? TryLoad(string sourcesSha256)
     {
         var path = EntryPath(sourcesSha256);
         try
@@ -207,7 +207,7 @@ internal sealed class YaraXRulesCache
     /// <see cref="YaraXRules.SourceErrors"/> is never written: a cache hit must vouch for every source (amendment G1).
     /// Neither is one whose body DPAPI could not bind (class doc): nothing is written, and the cache simply misses.
     /// </summary>
-    internal bool Store(YaraXRules rules)
+    public bool Store(YaraXRules rules)
     {
         var path = EntryPath(rules.SourcesSha256);
         string? temp = null;

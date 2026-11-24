@@ -1,4 +1,3 @@
-#if WINDOWS
 namespace Silvergun.PackageAnalysis.NuGet.Tests;
 
 using System;
@@ -197,6 +196,7 @@ internal static class ScannerInternals
     #endregion
 }
 
+#if WINDOWS
 /// <summary>A tree of files under a <c>silvergun-yara-x-...</c> temp root, removed without following any link inside it.</summary>
 internal sealed class ScanTree : IDisposable
 {

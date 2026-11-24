@@ -1,4 +1,3 @@
-#if WINDOWS
 namespace Silvergun.PackageAnalysis.NuGet.Yara.YaraX;
 
 using System.Security.Cryptography;
@@ -81,4 +80,3 @@ internal sealed class YaraXCanary
     private readonly byte[] marker;
     #endregion
 }
-#endif

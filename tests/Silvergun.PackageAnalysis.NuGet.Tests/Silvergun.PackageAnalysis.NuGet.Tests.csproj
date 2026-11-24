@@ -80,4 +80,24 @@
     <ProjectReference Include="..\Silvergun.CLI.Tests.LoadedAssembliesHook\Silvergun.CLI.Tests.LoadedAssembliesHook.csproj" />
   </ItemGroup>
 
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0' And $([MSBuild]::IsOSPlatform('Linux'))">
+    <!-- The Linux counterpart of the reference above (docs/agent/tasks/yarax-worker-linux.md, Phase 1): on Linux the
+         net10.0 CLI's `__worker yara` runs the real YARA-X engine (libyara_x_capi.so beside it, copied by the product's
+         csproj when building on Linux). This reference only makes the CLI restore and BUILD first. The net10.0 test output
+         must keep having no CLI apphost (GraphWorkerNoCliTests and ReachabilityScanWiringTests pin that the graph worker is
+         NotRun without one), so ReferenceOutputAssembly=false keeps Silvergun.CLI.dll out, and RemoveCliFromTestOutput below
+         deletes the apphost, deps.json and runtimeconfig.json the SDK still copies for a referenced Exe. The real-engine
+         Linux tests (YaraWorkerVerbLinuxTests, YaraXWorkerScannerLinuxTests) launch the apphost from the CLI's own output
+         directory (LinuxYaraX.CliPath). Linux only, so the Windows net10.0 pass builds exactly what it always did. -->
+    <ProjectReference Include="..\..\src\Silvergun.CLI\Silvergun.CLI.csproj" ReferenceOutputAssembly="false" SetTargetFramework="TargetFramework=net10.0" />
+    <!-- The startup hook that lists a CLI child's loaded assemblies and native modules, for the Linux ADR 0033 decision 5
+         pins in YaraWorkerVerbLinuxTests (the worker loads libyara_x_capi.so; a normal run never does). A library: only its
+         dll lands here, and nothing compiles against it. -->
+    <ProjectReference Include="..\Silvergun.CLI.Tests.LoadedAssembliesHook\Silvergun.CLI.Tests.LoadedAssembliesHook.csproj" />
+  </ItemGroup>
+
+  <Target Name="RemoveCliFromTestOutput" AfterTargets="CopyFilesToOutputDirectory" Condition="'$(TargetFramework)' == 'net10.0' And $([MSBuild]::IsOSPlatform('Linux'))">
+    <Delete Files="$(OutDir)Silvergun.CLI;$(OutDir)Silvergun.CLI.dll;$(OutDir)Silvergun.CLI.pdb;$(OutDir)Silvergun.CLI.deps.json;$(OutDir)Silvergun.CLI.runtimeconfig.json" />
+  </Target>
+
 </Project>

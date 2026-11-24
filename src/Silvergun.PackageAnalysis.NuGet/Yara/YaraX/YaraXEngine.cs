@@ -1,15 +1,29 @@
-#if WINDOWS
 namespace Silvergun.PackageAnalysis.NuGet.Yara.YaraX;
 
 /// <summary>
-/// The outcome of <see cref="YaraXEngine.Load(YaraXRulesCache?)"/>: rules whose canary passed, or why there are none.
+/// The outcome of <see cref="YaraXEngine.Load(IYaraXRulesCache?)"/>: rules whose canary passed, or why there are none.
 /// <see cref="Failure"/> is escaped and bounded, and is set exactly when <see cref="Rules"/> is <c>null</c>.
 /// </summary>
 internal sealed record YaraXLoadResult(YaraXRules? Rules, bool FromCache, string? Failure);
 
 /// <summary>
+/// A store of compiled rules the engine may load instead of compiling (on Windows, <c>YaraXRulesCache</c>; Linux has
+/// none yet, docs/agent/tasks/yarax-worker-linux.md Phase 2).
+/// </summary>
+internal interface IYaraXRulesCache
+{
+    #region Methods
+    /// <summary>Verified rules for <paramref name="sourcesSha256"/>, or <c>null</c> (a miss). Never throws.</summary>
+    YaraXRules? TryLoad(string sourcesSha256);
+
+    /// <summary>Writes <paramref name="rules"/>; <c>false</c> when they were not written. Never throws.</summary>
+    bool Store(YaraXRules rules);
+    #endregion
+}
+
+/// <summary>
 /// Brings the YARA-X engine up for the <c>__worker yara</c> verb (ADR 0033), and for nothing else: this is the one entry
-/// point into the binding, and nothing calls it outside the worker. It loads <c>yara_x_capi.dll</c> from the application
+/// point into the binding, and nothing calls it outside the worker. It loads the C API library (<see cref="YaraXNative.LibraryFileName"/>) from the application
 /// directory, then the rules — from the cache when an entry verifies, otherwise compiled from the embedded sources and
 /// cached — and passes them only after their canary rule hits its marker.
 /// </summary>
@@ -17,10 +31,10 @@ internal static class YaraXEngine
 {
     #region Methods
     /// <summary>
-    /// <see cref="Load(IReadOnlyList{ValueTuple{string, string}}, YaraXRulesCache?)"/> over the embedded rule sources
+    /// <see cref="Load(IReadOnlyList{ValueTuple{string, string}}, IYaraXRulesCache?)"/> over the embedded rule sources
     /// (<see cref="YaraRuleResources.ReadAll"/>). Never throws.
     /// </summary>
-    internal static YaraXLoadResult Load(YaraXRulesCache? cache)
+    internal static YaraXLoadResult Load(IYaraXRulesCache? cache)
     {
         try
         {
@@ -38,7 +52,7 @@ internal static class YaraXEngine
     /// compile, which is then written to the cache. No cache when <paramref name="cache"/> is <c>null</c>. Never throws:
     /// a missing DLL is the failure "engine unavailable: …".
     /// </summary>
-    internal static YaraXLoadResult Load(IReadOnlyList<(string Name, string Text)> sources, YaraXRulesCache? cache)
+    internal static YaraXLoadResult Load(IReadOnlyList<(string Name, string Text)> sources, IYaraXRulesCache? cache)
     {
         try
         {
@@ -96,4 +110,3 @@ internal static class YaraXEngine
     internal const int CanaryTimeoutSeconds = 5;
     #endregion
 }
-#endif

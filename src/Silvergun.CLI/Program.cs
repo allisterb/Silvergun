@@ -1002,10 +1002,12 @@ internal static class Program
     // The hidden `__worker yara` verb (ADR 0033). Worker-mode logging only (stderr, capped, no file sink — so nothing
     // reaches the normal Silvergun log), raw stdin/stdout streams (UTF-8, no BOM, no Console encoding), and nothing
     // from the analysis paths: no CCI, NuGet, OSV or libyara.NET code runs here. The engine is the platform's real one
-    // (YARA-X on Windows; elsewhere a `fatal` "engine unavailable on this platform"), never the T1 stub.
+    // (YARA-X on Windows and Linux; elsewhere a `fatal` "engine unavailable on this platform"), never the T1 stub. On
+    // Linux the worker exits when its parent dies (WorkerParentWatch), which the Job Object does on Windows.
     private static int RunYaraWorker(string? protocol, string? timeout)
     {
         Runtime.WithStderrLogging("Silvergun", "worker-yara");
+        WorkerParentWatch.Start();
         using var stdin = Console.OpenStandardInput();
         using var stdout = Console.OpenStandardOutput();
         // W2: from here on only the protocol writer, over the raw stream above, can reach stdout.

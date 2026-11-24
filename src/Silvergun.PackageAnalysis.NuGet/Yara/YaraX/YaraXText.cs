@@ -1,4 +1,3 @@
-#if WINDOWS
 namespace Silvergun.PackageAnalysis.NuGet.Yara.YaraX;
 
 /// <summary>
@@ -30,4 +29,3 @@ internal static class YaraXText
     private const string Ellipsis = "...";
     #endregion
 }
-#endif

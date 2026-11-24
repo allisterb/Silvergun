@@ -1,4 +1,3 @@
-#if WINDOWS
 namespace Silvergun.PackageAnalysis.NuGet.Yara.YaraX;
 
 /// <summary>One matching rule: its identifier, namespace (<c>default</c> unless a rule set one) and tags.</summary>
@@ -31,4 +30,3 @@ internal abstract record YaraXScanResult
     }
     #endregion
 }
-#endif

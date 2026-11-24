@@ -1,4 +1,3 @@
-#if WINDOWS
 namespace Silvergun.PackageAnalysis.NuGet.Yara.YaraX;
 
 using System.IO.MemoryMappedFiles;
@@ -277,4 +276,3 @@ internal sealed unsafe class YaraXScanner : IDisposable
     }
     #endregion
 }
-#endif

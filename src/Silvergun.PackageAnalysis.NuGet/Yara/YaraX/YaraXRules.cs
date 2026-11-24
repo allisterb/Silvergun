@@ -1,4 +1,3 @@
-#if WINDOWS
 namespace Silvergun.PackageAnalysis.NuGet.Yara.YaraX;
 
 using System.Buffers.Binary;
@@ -32,7 +31,7 @@ internal sealed unsafe class YaraXRules : IDisposable
     /// <summary>
     /// How many of the sources compiled had compile errors (their failing rules are absent) or were dropped whole: the
     /// worker's <c>ready.ruleSourceErrors</c> (amendment G1). 0 for a ruleset rebuilt by <see cref="Deserialize"/>, because
-    /// the rules cache stores only rulesets that compiled with none (<see cref="YaraXRulesCache.Store"/>).
+    /// the rules cache stores only rulesets that compiled with none (<see cref="IYaraXRulesCache.Store"/>).
     /// </summary>
     internal int SourceErrors { get; }
 
@@ -258,4 +257,3 @@ internal sealed unsafe class YaraXRules : IDisposable
     }
     #endregion
 }
-#endif

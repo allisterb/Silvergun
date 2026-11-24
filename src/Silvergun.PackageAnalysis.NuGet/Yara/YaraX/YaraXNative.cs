@@ -1,4 +1,3 @@
-#if WINDOWS
 namespace Silvergun.PackageAnalysis.NuGet.Yara.YaraX;
 
 using System.Reflection;
@@ -33,8 +32,9 @@ internal unsafe struct YaraXBuffer
 }
 
 /// <summary>
-/// Source-generated P/Invoke declarations for the YARA-X 1.22.0 C API (<c>yara_x_capi.dll</c>, ADR 0033), derived from
-/// the pinned <c>yara_x.h</c> installed by <c>build/fetch-yara.ps1</c>, and the loader that binds them.
+/// Source-generated P/Invoke declarations for the YARA-X 1.22.0 C API (<c>yara_x_capi.dll</c>, or <c>libyara_x_capi.so</c>
+/// on Linux; ADR 0033), derived from the pinned <c>yara_x.h</c> installed by <c>build/fetch-yara.ps1</c>, and the loader
+/// that binds them.
 ///
 /// <para><b>Loading.</b> Nothing here touches the DLL until <see cref="TryLoad(out string?)"/> is called — there is no
 /// static constructor and no field initialiser that does, so merely loading this assembly (the CLI, WPF, the tests) never
@@ -130,7 +130,7 @@ internal static unsafe partial class YaraXNative
     // default search order, which is exactly what this resolver exists to prevent. Other names are not ours to decide.
     private static nint Resolve(string libraryName, Assembly assembly, DllImportSearchPath? searchPath)
     {
-        if (libraryName is not (LibraryName or LibraryFileName))
+        if (libraryName != LibraryName && libraryName != LibraryFileName)
             return 0;
 
         var handle = Volatile.Read(ref library);
@@ -200,8 +200,8 @@ internal static unsafe partial class YaraXNative
     /// <summary>The import name every declaration above binds through (resolved by <see cref="Resolve"/> only).</summary>
     internal const string LibraryName = "yara_x_capi";
 
-    /// <summary>The DLL's file name in the application directory.</summary>
-    internal const string LibraryFileName = "yara_x_capi.dll";
+    /// <summary>The library's file name in the application directory: <c>yara_x_capi.dll</c>, or <c>libyara_x_capi.so</c> on Linux.</summary>
+    internal static readonly string LibraryFileName = OperatingSystem.IsWindows() ? "yara_x_capi.dll" : "libyara_x_capi.so";
 
     /// <summary>The engine version this binding is written against: the pinned C API (<c>YARA_X_MAJOR/MINOR/PATCH</c>).</summary>
     internal const string EngineVersion = "1.22.0";
@@ -215,4 +215,3 @@ internal static unsafe partial class YaraXNative
     private static nint library;
     #endregion
 }
-#endif

@@ -1,4 +1,3 @@
-#if WINDOWS
 namespace Silvergun.PackageAnalysis.NuGet.Tests;
 
 using System;
@@ -17,6 +16,7 @@ using Silvergun.PackageAnalysis.NuGet.Yara.YaraX;
 
 using Xunit;
 
+#if WINDOWS
 /// <summary>
 /// Shared helpers for the YARA-X C API binding tests (ADR 0033 T2): the engine is loaded once per test process from the
 /// test output directory (the pinned <c>yara_x_capi.dll</c> is copied there by the product's csproj), and every ruleset is
@@ -67,6 +67,8 @@ internal static class YaraX
     #endregion
 }
 
+#endif
+
 /// <summary>
 /// A temp directory named <c>silvergun-yara-x-…</c> (so the suite's temp-leak check counts it), removed through its
 /// <c>\\?\</c> form so entries named like DOS devices (<c>NUL</c>, <c>CON</c>) and junctions inside it are deleted as
@@ -97,7 +99,7 @@ internal sealed class YaraXTempDir : IDisposable
         {
             try
             {
-                Directory.Delete(@"\\?\" + Root, recursive: true);
+                Directory.Delete(OperatingSystem.IsWindows() ? @"\\?\" + Root : Root, recursive: true);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -108,6 +110,7 @@ internal sealed class YaraXTempDir : IDisposable
     #endregion
 }
 
+#if WINDOWS
 /// <summary>Win32 file-system operations the BCL does not expose: sparse files and directory junctions.</summary>
 internal static class WindowsFileSystem
 {

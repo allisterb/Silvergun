@@ -445,11 +445,11 @@ public sealed class YaraWorkerLoopTests
     [Theory]
     [MemberData(nameof(AcceptedPaths))]
     public void Verbatim_AcceptsTheProtocolsForm_AndPrefixesItLexically(string path, string expected) =>
-        Assert.Equal(expected, WorkerPathForm.Verbatim(path));
+        Assert.Equal(expected, WorkerPathForm.Verbatim(path, windows: true));
 
     [Fact]
     public void Verbatim_AcceptsASurrogatePair() =>
-        Assert.Equal(@"\\?\C:\a\" + char.ConvertFromUtf32(0x1F600) + ".bin", WorkerPathForm.Verbatim(@"C:\a\" + char.ConvertFromUtf32(0x1F600) + ".bin"));
+        Assert.Equal(@"\\?\C:\a\" + char.ConvertFromUtf32(0x1F600) + ".bin", WorkerPathForm.Verbatim(@"C:\a\" + char.ConvertFromUtf32(0x1F600) + ".bin", windows: true));
 
     // Named cases, built in code: NUL and lone surrogates must not travel through the test runner's serializer.
     public static TheoryData<string> RejectedPaths() => new(RejectedPathCases.Keys);
@@ -457,7 +457,63 @@ public sealed class YaraWorkerLoopTests
     [Theory]
     [MemberData(nameof(RejectedPaths))]
     public void Verbatim_RejectsEverythingElse(string what) =>
-        Assert.Null(WorkerPathForm.Verbatim(RejectedPathCases[what]));
+        Assert.Null(WorkerPathForm.Verbatim(RejectedPathCases[what], windows: true));
+    #endregion
+
+    #region Methods: WorkerPathForm.Verbatim, the Unix form (docs/agent/tasks/yarax-worker-linux.md, L3)
+    // Absolute, '/'-separated, returned unchanged (no prefix). A backslash, a colon and a DOS device name are ordinary
+    // name characters on Linux, and so are `...` and dot-prefixed names (only `.` and `..` themselves are segments).
+    [Theory]
+    [InlineData("/a")]
+    [InlineData("/a/b.bin")]
+    [InlineData(@"/a/dir\name.bin")]
+    [InlineData(@"/a\b\c")]
+    [InlineData(@"/C:\a")]
+    [InlineData("/a/b:ads")]
+    [InlineData("/a/nul.txt")]
+    [InlineData("/a/CON")]
+    [InlineData("/a/.../b")]
+    [InlineData("/a/.hidden")]
+    [InlineData("/a/..b/c..")]
+    [InlineData("/a/b ")]
+    [InlineData("/a/b.")]
+    [InlineData("/tmp/silvergun/root/lib/net8.0/x.dll")]
+    public void Verbatim_OnUnix_AcceptsTheProtocolsForm_Unchanged(string path) =>
+        Assert.Equal(path, WorkerPathForm.Verbatim(path, windows: false));
+
+    [Fact]
+    public void Verbatim_OnUnix_AcceptsASurrogatePair()
+    {
+        var path = "/a/" + char.ConvertFromUtf32(0x1F600) + ".bin";
+
+        Assert.Equal(path, WorkerPathForm.Verbatim(path, windows: false));
+    }
+
+    public static TheoryData<string> RejectedUnixPaths() => new(RejectedUnixPathCases.Keys);
+
+    [Theory]
+    [MemberData(nameof(RejectedUnixPaths))]
+    public void Verbatim_OnUnix_RejectsEverythingElse(string what) =>
+        Assert.Null(WorkerPathForm.Verbatim(RejectedUnixPathCases[what], windows: false));
+
+    // The two forms are disjoint where it matters: neither OS's form is accepted as the other's.
+    [Theory]
+    [InlineData(@"C:\a\b.bin")]
+    [InlineData(@"\\srv\share\f")]
+    public void Verbatim_OnUnix_RejectsTheWindowsForm(string path) =>
+        Assert.Null(WorkerPathForm.Verbatim(path, windows: false));
+
+    [Fact]
+    public void Verbatim_OnWindows_RejectsTheUnixForm() =>
+        Assert.Null(WorkerPathForm.Verbatim("/a/b.bin", windows: true));
+
+    // The one-argument form is this OS's.
+    [Theory]
+    [InlineData(@"C:\a\b.bin")]
+    [InlineData("/a/b.bin")]
+    [InlineData(@"/a/dir\name.bin")]
+    public void Verbatim_WithoutAnOs_IsThisOsForm(string path) =>
+        Assert.Equal(WorkerPathForm.Verbatim(path, OperatingSystem.IsWindows()), WorkerPathForm.Verbatim(path));
     #endregion
 
     #region Methods: helpers
@@ -702,6 +758,32 @@ public sealed class YaraWorkerLoopTests
         ["a reversed surrogate pair"] = @"C:\a" + (char)0xDC00 + (char)0xD800,
         ["a digit for a drive"] = @"1:\a",
         ["two letters for a drive"] = @"CC:\a",
+    };
+
+    private static readonly Dictionary<string, string?> RejectedUnixPathCases = new()
+    {
+        ["null"] = null,
+        ["empty"] = "",
+        ["the root alone"] = "/",
+        ["relative"] = "a/b",
+        ["a bare name"] = "b.bin",
+        ["dot-relative"] = "./a",
+        ["dot-dot-relative"] = "../a",
+        ["home-relative"] = "~/a",
+        ["a double slash at the root"] = "//a",
+        ["an empty segment"] = "/a//b",
+        ["a trailing slash"] = "/a/b/",
+        ["a dot segment"] = "/a/./b",
+        ["a trailing dot segment"] = "/a/.",
+        ["a leading dot segment"] = "/./a",
+        ["a dot-dot segment"] = "/a/../b",
+        ["a trailing dot-dot"] = "/a/..",
+        ["a leading dot-dot"] = "/../a",
+        ["a NUL"] = "/a" + (char)0 + "b",
+        ["a lone high surrogate"] = "/a" + (char)0xD800,
+        ["a lone low surrogate"] = "/a" + (char)0xDC00 + "b",
+        ["a reversed surrogate pair"] = "/a" + (char)0xDC00 + (char)0xD800,
+        ["a backslash root"] = @"\a\b",
     };
     #endregion
 }
