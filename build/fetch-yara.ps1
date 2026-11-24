@@ -2,11 +2,12 @@
 .SYNOPSIS
     Fetch a pinned prebuilt YARA engine, verify it against pinned sha256 hashes, and install it
     under artifacts/tools/. Classic yara 4.5.5 for Windows x64 (the default), YARA-X 1.22.0
-    (yr) for Windows x64 or Linux x64, or the YARA-X 1.22.0 C API (DLL, import library, header)
-    for Windows x64.
+    (yr) for Windows x64 or Linux x64, or the YARA-X 1.22.0 C API (library and header) for
+    Windows x64 or Linux x64, built from source by Silvergun's CI.
 
 .DESCRIPTION
-    Four pinned assets are known, all official VirusTotal releases. -Engine/-Platform pick one:
+    Five pinned assets are known. -Engine/-Platform pick one. The first three are official
+    VirusTotal releases; the C API ones are Silvergun's own source builds:
 
       -Engine Classic (default; win-x64 only) -> artifacts/tools/yara/win-x64/, cache artifacts/cache/yara/
       https://github.com/VirusTotal/yara/releases/download/v4.5.5/yara-4.5.5-2368-win64.zip
@@ -22,14 +23,18 @@
 
       (both YARA-X assets are cached in artifacts/cache/yara-x/)
 
-      -Engine YaraXCapi (win-x64 only) -> artifacts/tools/yara-x-capi/win-x64/, cache artifacts/cache/yara-x-capi/
-      https://github.com/VirusTotal/yara-x/releases/download/v1.22.0/yara-x-capi-v1.22.0-x86_64-pc-windows-msvc.zip
-      20,798,844 bytes, sha256 40317f65781e3a17bffe31f9837143a51c1c28ce5061eac2b90695fbb30e1664
-      The zip is flat: yara_x_capi.dll, yara_x_capi.dll.lib (import library), yara_x.h,
-      yara_x_capi.def and yara_x_capi.lib (static library, 64,117,162 bytes). Only the DLL, its
-      import library and the header are extracted and installed; every other entry is listed and
-      reported, never installed. For this engine only, an entry over the size limit below is listed
-      by its declared size (not hashed, never extracted) instead of failing the run.
+      -Engine YaraXCapi -> artifacts/tools/yara-x-capi/<platform>/, cache artifacts/cache/yara-x-capi-src/
+      Built from YARA-X v1.22.0 (e27597f2) by .github/workflows/yara-x-capi.yml, run 45035746101
+      (Silvergun 89614cb0), and published as release yara-x-capi-v1.22.0 of allisterb/Silvergun.
+      VirusTotal publishes no Linux C API. Verification: data/results/yara-x-capi-source-build-2026-11-21.md.
+        win-x64:   https://github.com/allisterb/Silvergun/releases/download/yara-x-capi-v1.22.0/yara-x-capi-v1.22.0-x86_64-pc-windows-msvc.zip
+                   9,409,746 bytes, sha256 ed0ebbc347bcd7e660b7591aaf0345128291f7e605335ab34cd602b8a68c5280
+                   installs yara_x_capi.dll, yara_x_capi.dll.lib (import library), yara_x.h, LICENSE
+        linux-x64: https://github.com/allisterb/Silvergun/releases/download/yara-x-capi-v1.22.0/yara-x-capi-v1.22.0-x86_64-unknown-linux-gnu.zip
+                   8,506,355 bytes, sha256 8e20bdea14b61350351c883df194f9f35ad6a9c0d139dec1a2061ce01e2d3573
+                   installs libyara_x_capi.so (glibc 2.34+), yara_x.h, LICENSE
+      The zips also hold BUILDINFO.txt, SHA256SUMS and (Windows) yara_x_capi.pdb: listed and hashed,
+      never installed.
 
     Each archive sha256 is GitHub's own asset digest for that release asset, and it is the trust
     anchor. Order of operations:
@@ -49,7 +54,8 @@
          Member names are used only if they are plain relative paths with no glob characters.
          No binary data passes through the PowerShell pipeline.
       4. Each extracted binary (yara64.exe, yarac64.exe; yr.exe / yr; or, for the C API, the
-         DLL, import library and header, all called "binaries" below) is checked against its
+         DLL and its import library or libyara_x_capi.so, and the header, all called "binaries"
+         below) is checked against its
          own pin. A binary whose pin is empty is NOT installed: the script prints the sha256 it
          observed so the pin can be recorded after review, and exits non-zero.
       5. The binaries, any licence file in the archive (the yara 4.5.5 win64 zip holds only
@@ -111,12 +117,11 @@
 
 .PARAMETER Engine
     Classic (default): yara 4.5.5, Windows x64 only. YaraX: YARA-X 1.22.0 (yr). YaraXCapi: the
-    YARA-X 1.22.0 C API (DLL, import library, header), Windows x64 only.
+    YARA-X 1.22.0 C API (library and header), Silvergun's source build.
 
 .PARAMETER Platform
-    win-x64 (default) or linux-x64. linux-x64 is only available with -Engine YaraX. The Linux
-    binary is stored on NTFS, which keeps no executable bit; it is meant to be copied into
-    WSL/Linux by the caller.
+    win-x64 (default) or linux-x64. linux-x64 is available with -Engine YaraX and YaraXCapi. A Linux
+    yr installed on NTFS keeps no executable bit; it is meant to be copied into WSL/Linux by the caller.
 
 .EXAMPLE
     powershell -NoProfile -ExecutionPolicy Bypass -File build\fetch-yara.ps1
@@ -141,6 +146,11 @@
 .EXAMPLE
     powershell -NoProfile -ExecutionPolicy Bypass -File build\fetch-yara.ps1 -Engine YaraXCapi
     Verify, or fetch, verify and install, the YARA-X C API into artifacts/tools/yara-x-capi/win-x64/.
+    An install of the earlier VirusTotal-built DLL fails verification (exit 5); re-run with -Force once.
+
+.EXAMPLE
+    powershell -NoProfile -ExecutionPolicy Bypass -File build\fetch-yara.ps1 -Engine YaraXCapi -Platform linux-x64
+    Verify, or fetch, verify and install, the Linux x64 C API into artifacts/tools/yara-x-capi/linux-x64/.
 #>
 [CmdletBinding()]
 param(
@@ -204,25 +214,38 @@ $YaraXLinuxPins = [ordered]@{
     'yr' = ''
 }
 
-# --- YARA-X 1.22.0 C API, Windows x64 (-Engine YaraXCapi) ---
+# --- YARA-X 1.22.0 C API, Silvergun source build (-Engine YaraXCapi) ---
 
-# Trust anchor: GitHub's published asset digest for $YaraXCapiUrl.
-$YaraXCapiName   = 'yara-x-capi-v1.22.0-x86_64-pc-windows-msvc.zip'
-$YaraXCapiUrl    = 'https://github.com/VirusTotal/yara-x/releases/download/v1.22.0/yara-x-capi-v1.22.0-x86_64-pc-windows-msvc.zip'
-$YaraXCapiSize   = 20798844
-$YaraXCapiSha256 = '40317f65781e3a17bffe31f9837143a51c1c28ce5061eac2b90695fbb30e1664'
+# Release yara-x-capi-v1.22.0 of allisterb/Silvergun: the CI artifacts of run 45035746101, uploaded
+# unchanged. Trust anchor: GitHub's asset digest for each URL, equal to the CI artifact digest.
+$YaraXCapiRelease = 'https://github.com/allisterb/Silvergun/releases/download/yara-x-capi-v1.22.0'
 
-# sha256 of the DLL, its import library and the header as extracted from the zip above. Each key
-# is both the zip entry's file name (matched case-insensitively, wherever it sits in the zip) and
-# the name it is installed under. EMPTY = NOT YET REVIEWED, exactly as for $BinaryPins.
-# Recorded 2026-10-22, APPROVED BY THE USER on 2026-10-22 (docs/agent/tasks/yarax-worker.md, "T0 approved"):
-# taken from the v1.22.0 C API zip whose sha256 matches GitHub's asset digest for $YaraXCapiUrl
-# ($YaraXCapiSha256, 40317f65...0e1664); the member hashes were computed independently, in memory.
-$YaraXCapiPins = [ordered]@{
-    'yara_x_capi.dll'     = 'bb5c112bf479d1b1706fbecf85275d3806321ee2912dea4f36750289d0294848'
-    'yara_x_capi.dll.lib' = 'f229c490530c812d45d4184679b97322e9c3ab7d467102bb65bdfd5d5efc34c8'
-    'yara_x.h'            = '68b6239bc308adeedd56a7c258f0cd384189edb688c34c0a77265de0f5aa76c8'
+$YaraXCapiWinName   = 'yara-x-capi-v1.22.0-x86_64-pc-windows-msvc.zip'
+$YaraXCapiWinSize   = 9409746
+$YaraXCapiWinSha256 = 'ed0ebbc347bcd7e660b7591aaf0345128291f7e605335ab34cd602b8a68c5280'
+
+$YaraXCapiLinuxName   = 'yara-x-capi-v1.22.0-x86_64-unknown-linux-gnu.zip'
+$YaraXCapiLinuxSize   = 8506355
+$YaraXCapiLinuxSha256 = '8e20bdea14b61350351c883df194f9f35ad6a9c0d139dec1a2061ce01e2d3573'
+
+# sha256 of each installed file as extracted from the zips above. Each key is both the zip entry's
+# file name (matched case-insensitively) and the name it is installed under.
+# Recorded 2026-11-24 at the user's request, from the CI artifacts the user downloaded: zip digests
+# matched GitHub's, every member matched the zip's SHA256SUMS, check-yara-x-capi.py passed on both
+# libraries, and the YARA tests passed with this DLL (1,211 passed, 0 failed); see
+# data/results/yara-x-capi-source-build-2026-11-21.md. Release assets re-checked against these digests.
+$YaraXCapiWinPins = [ordered]@{
+    'yara_x_capi.dll'     = '74943f71327cbdd29b467343ae358eb455a3466916840de2bedcba00fa12c82b'
+    'yara_x_capi.dll.lib' = 'd3c59133c930822bfd9652bc55bf0dea6009a6dc30dc2e097d62f6fb66904fba'
+    'yara_x.h'            = '116e01b76aa14b7f53f9e3e6ccf26a3568237de0823228abb519ba9772705e7e'
 }
+$YaraXCapiLinuxPins = [ordered]@{
+    'libyara_x_capi.so' = '8bd73385e237648348d7eaf9bd4a837f4383d2621524a52c12610e2455507977'
+    'yara_x.h'          = '116e01b76aa14b7f53f9e3e6ccf26a3568237de0823228abb519ba9772705e7e'
+}
+
+# Entries the C API zips carry for the record, listed and hashed but never installed.
+$YaraXCapiRecordEntries = @('BUILDINFO.txt', 'SHA256SUMS', 'yara_x_capi.pdb')
 
 # --- All engines ---
 
@@ -277,28 +300,39 @@ $Targets = @{
             "note         spike install (docs/agent/tasks/yara-x-spike.md); never executed by this script"
         )
     }
-    # The C API zip may also hold a large static library, so entries over $MaxEntryBytes are listed
-    # (unhashed) and reported instead of failing the run; none of them is ever extracted.
+    # The cache directory differs from the earlier VirusTotal C API's (artifacts\cache\yara-x-capi),
+    # whose Windows zip has the same file name but other bytes.
     'YaraXCapi/win-x64' = @{
-        Product = 'yara-x C API'; Version = $YaraXVersion; Description = 'Windows x64'
-        ArchiveName = $YaraXCapiName; Url = $YaraXCapiUrl; Size = $YaraXCapiSize; Sha256 = $YaraXCapiSha256; Format = 'zip'
-        BinaryPins = $YaraXCapiPins; PinVariable = '$YaraXCapiPins'; FileLabel = 'file'
-        InstallDir = 'artifacts\tools\yara-x-capi\win-x64'; CacheDir = 'artifacts\cache\yara-x-capi'
-        SkipOversizeEntries = $true
-        NoLicenceNote = "licence      yara-x is BSD-3-Clause (LICENSE in the yara-x source tree); the v1.22.0 capi windows-msvc zip ships no licence file"
+        Product = 'yara-x C API'; Version = $YaraXVersion; Description = 'Windows x64 (Silvergun source build)'
+        ArchiveName = $YaraXCapiWinName; Url = "$YaraXCapiRelease/$YaraXCapiWinName"; Size = $YaraXCapiWinSize; Sha256 = $YaraXCapiWinSha256; Format = 'zip'
+        BinaryPins = $YaraXCapiWinPins; PinVariable = '$YaraXCapiWinPins'; FileLabel = 'file'
+        InstallDir = 'artifacts\tools\yara-x-capi\win-x64'; CacheDir = 'artifacts\cache\yara-x-capi-src'
+        SkipOversizeEntries = $false; NoLicenceNote = $null; RecordEntries = $YaraXCapiRecordEntries
         Notes = @(
-            "note         only the DLL, its import library and the header are installed; the zip's other entries are not"
-            "note         C API spike install (docs/agent/tasks/yara-x-spike.md, addendum); never loaded or executed by this script"
+            "note         built from yara-x v1.22.0 (e27597f2) by .github/workflows/yara-x-capi.yml, run 45035746101"
+            "note         never loaded or executed by this script"
+        )
+    }
+    'YaraXCapi/linux-x64' = @{
+        Product = 'yara-x C API'; Version = $YaraXVersion; Description = 'Linux x64, glibc 2.34+ (Silvergun source build)'
+        ArchiveName = $YaraXCapiLinuxName; Url = "$YaraXCapiRelease/$YaraXCapiLinuxName"; Size = $YaraXCapiLinuxSize; Sha256 = $YaraXCapiLinuxSha256; Format = 'zip'
+        BinaryPins = $YaraXCapiLinuxPins; PinVariable = '$YaraXCapiLinuxPins'; FileLabel = 'file'
+        InstallDir = 'artifacts\tools\yara-x-capi\linux-x64'; CacheDir = 'artifacts\cache\yara-x-capi-src'
+        SkipOversizeEntries = $false; NoLicenceNote = $null; RecordEntries = $YaraXCapiRecordEntries
+        Notes = @(
+            "note         built from yara-x v1.22.0 (e27597f2) by .github/workflows/yara-x-capi.yml, run 45035746101"
+            "note         never loaded or executed by this script"
         )
     }
 }
 
 $T = $Targets["$Engine/$Platform"]
 if (-not $T) {
-    $why = if ($Engine -eq 'YaraXCapi') { 'the YARA-X C API is published for win-x64 only' } else { 'classic yara is fetched for win-x64 only' }
-    Write-Host "error: -Platform $Platform is not available for -Engine $Engine ($why)." -ForegroundColor Red
+    Write-Host "error: -Platform $Platform is not available for -Engine $Engine (classic yara is fetched for win-x64 only)." -ForegroundColor Red
     exit 1
 }
+# Zip entries carried for the record: listed and hashed, never installed, not warned about.
+$RecordEntries = if ($T.ContainsKey('RecordEntries')) { @($T.RecordEntries) } else { @() }
 # What the downloaded file is called in messages: 'zip' or 'archive'.
 $Noun  = if ($T.Format -eq 'zip') { 'zip' } else { 'archive' }
 $ANoun = if ($T.Format -eq 'zip') { 'a zip' } else { 'an archive' }
@@ -522,9 +556,9 @@ function Expand-Expected([string] $Zip, [string] $OutDir) {
         }
 
         foreach ($entry in $files) {
-            if (-not $claimed.ContainsKey($entry.FullName)) {
-                Write-Warn "unexpected zip entry, NOT installed: $($entry.FullName)"
-            }
+            if ($claimed.ContainsKey($entry.FullName)) { continue }
+            if ($RecordEntries -contains $entry.FullName) { Write-Info "record entry, not installed: $($entry.FullName)" }
+            else { Write-Warn "unexpected zip entry, NOT installed: $($entry.FullName)" }
         }
         $extracted
     }
@@ -665,7 +699,11 @@ function Install-Yara([string] $Scratch) {
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
     $licenceLines = @()
     foreach ($name in @($extracted.Keys | Sort-Object)) {
-        Copy-Item -LiteralPath $extracted[$name] -Destination (Join-Path $InstallDir $name) -Force
+        $dest = Join-Path $InstallDir $name
+        Copy-Item -LiteralPath $extracted[$name] -Destination $dest -Force
+        # Stamped with the install time, not the archive's: builds copy these with PreserveNewest, which
+        # would otherwise keep an older install's file that happens to be newer on disk.
+        (Get-Item -LiteralPath $dest).LastWriteTimeUtc = [DateTime]::UtcNow
         Write-Info "installed $name"
         if ($name -match $LicencePattern) { $licenceLines += "licence      $name  sha256 $(Get-Sha256 $extracted[$name])" }
     }

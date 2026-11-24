@@ -15,11 +15,17 @@
   </PropertyGroup>
 
   <ItemGroup Condition="'$(TargetFramework)'=='net10.0-windows' And Exists('$(MSBuildThisFileDirectory)..\..\artifacts\tools\yara-x-capi\win-x64\yara_x_capi.dll')">
-    <!-- The pinned YARA-X C API DLL (installed and verified by build/fetch-yara.ps1 -Engine YaraXCapi; ADR 0033), copied
-         next to the assembly so YaraXNative loads it from the application directory. CopyToOutputDirectory makes it flow
-         to every referencing project's output (the CLI, the tests). Not a NuGet dependency. Absent DLL => not copied =>
-         the worker reports "engine unavailable". -->
+    <!-- The pinned YARA-X C API DLL, Silvergun's source build (release yara-x-capi-v1.22.0; installed and verified by
+         build/fetch-yara.ps1 -Engine YaraXCapi; ADR 0033), copied next to the assembly so YaraXNative loads it from the
+         application directory. CopyToOutputDirectory makes it flow to every referencing project's output (the CLI, the
+         tests). Not a NuGet dependency. Absent DLL => not copied => the worker reports "engine unavailable". -->
     <None Include="$(MSBuildThisFileDirectory)..\..\artifacts\tools\yara-x-capi\win-x64\yara_x_capi.dll" Link="yara_x_capi.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)'=='net10.0' And $([MSBuild]::IsOSPlatform('Linux')) And Exists('$(MSBuildThisFileDirectory)..\..\artifacts\tools\yara-x-capi\linux-x64\libyara_x_capi.so')">
+    <!-- The Linux counterpart (fetch-yara.ps1 -Engine YaraXCapi -Platform linux-x64), copied only when building on Linux.
+         Nothing loads it yet: the YARA-X worker is #if WINDOWS until its Linux port (ADR 0033 decision 5). -->
+    <None Include="$(MSBuildThisFileDirectory)..\..\artifacts\tools\yara-x-capi\linux-x64\libyara_x_capi.so" Link="libyara_x_capi.so" CopyToOutputDirectory="PreserveNewest" Visible="false" />
   </ItemGroup>
 
   <ItemGroup>

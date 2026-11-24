@@ -61,5 +61,42 @@ builds with the right interface only; scanning with it comes with the Linux work
 Both builds regenerate `capi/include/yara_x.h`, `lib/src/modules/modules.rs` and `lib/src/modules/protos/generated/*.rs`
 in the submodule with LF endings (content unchanged); they were restored with `git checkout` afterwards.
 
+## CI build (`.github/workflows/yara-x-capi.yml`)
+Run https://github.com/allisterb/Silvergun/actions/runs/45035746101 (2026-11-22, Silvergun 89614cb0, both jobs
+succeeded, all checks passed). Artifacts expire 2027-02-20.
+
+| Artifact | zip bytes | zip sha256 (GitHub digest) |
+| --- | --- | --- |
+| `yara-x-capi-v1.22.0-x86_64-pc-windows-msvc` | 9,409,746 | `ed0ebbc347bcd7e660b7591aaf0345128291f7e605335ab34cd602b8a68c5280` |
+| `yara-x-capi-v1.22.0-x86_64-unknown-linux-gnu` | 8,506,355 | `8e20bdea14b61350351c883df194f9f35ad6a9c0d139dec1a2061ce01e2d3573` |
+
+Linux artifact, downloaded by the user and re-checked locally on 2026-11-24 (zip digest matches; SHA256SUMS matches
+every file; `check-yara-x-capi.py` passes in WSL; header byte-identical to the local build's; max GLIBC_2.34; same
+NEEDED). Runner ubuntu-22.04 image 20261116.365.1, rustc 1.98.1.
+- `libyara_x_capi.so`: 28,570,544 bytes, sha256 `8bd73385e237648348d7eaf9bd4a837f4383d2621524a52c12610e2455507977`
+  (768 bytes smaller than the local WSL build: not reproducible across machines, as expected)
+- `yara_x.h`: sha256 `116e01b76aa14b7f53f9e3e6ccf26a3568237de0823228abb519ba9772705e7e`
+
+Windows artifact, downloaded by the user and re-checked locally on 2026-11-24 (zip digest matches; SHA256SUMS matches
+every file; `check-yara-x-capi.py` passes: 55 exports, imports within the allowlist, so no MSVC runtime; header
+byte-identical to the Linux artifact's). Runner windows-2022 image 20261116.370.1, rustc 1.98.1, `+crt-static`.
+- `yara_x_capi.dll`: 22,245,888 bytes, sha256 `74943f71327cbdd29b467343ae358eb455a3466916840de2bedcba00fa12c82b`
+- `yara_x_capi.dll.lib`: sha256 `d3c59133c930822bfd9652bc55bf0dea6009a6dc30dc2e097d62f6fb66904fba`
+- `yara_x_capi.pdb`: sha256 `1bf989a8444ba0fdb733a42ac1bc96f7bedfae43543d33d7a29442e366535e79`
+- `yara_x.h`: sha256 `116e01b76aa14b7f53f9e3e6ccf26a3568237de0823228abb519ba9772705e7e` (same as Linux)
+- `LICENSE` is 1,534 bytes vs 1,509 on Linux: CRLF line endings from the Windows runner's checkout, same text.
+
+Behaviour: with the CI DLL swapped into the test output directory, `Silvergun.PackageAnalysis.NuGet.Tests`
+(net10.0-windows, filter `Yara`) gave **1,211 passed, 0 failed, 73 skipped**, identical to the published and local
+DLLs; DLL sha256 checked after the run, then the published DLL (`bb5c112b`) restored.
+
+## Release and switch (2026-11-24)
+The user published both zips unchanged as release `yara-x-capi-v1.22.0` of allisterb/Silvergun (tag on 89614cb0,
+pre-release); the release asset sizes and digests equal the CI artifacts'. `build/fetch-yara.ps1 -Engine YaraXCapi`
+now installs from it (win-x64 and linux-x64), pinned to the hashes above; the csproj copies the installed DLL as before.
+After the switch, the NuGet tests (net10.0-windows, filter `Yara`) built with the new DLL in their output: 1,211 passed,
+0 failed, 73 skipped; the CLI output carries the same DLL (`74943f71`).
+
 ## Not done
-CI workflow written (`.github/workflows/yara-x-capi.yml`, 2026-11-22), not yet run on GitHub. Switching fetch-yara.ps1 / the csproj to the source-built DLL. Linux worker port (ADR 0033 decision 5).
+Linux worker port (ADR 0033 decision 5). fetch-yara.ps1 runs only on Windows, so a Linux build host gets the `.so` from
+a Windows checkout (e.g. WSL `/mnt/c`) or by copying `artifacts/tools/yara-x-capi/linux-x64/`.

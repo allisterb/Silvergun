@@ -14,13 +14,22 @@ Windows PowerShell 5.1:
 | `Classic` / `win-x64` (default) | yara 4.5.5 `yara-4.5.5-2368-win64.zip` | `artifacts/tools/yara/win-x64/` | `artifacts/cache/yara/` |
 | `YaraX` / `win-x64` | YARA-X 1.22.0 `yara-x-v1.22.0-x86_64-pc-windows-msvc.zip` | `artifacts/tools/yara-x/win-x64/` | `artifacts/cache/yara-x/` |
 | `YaraX` / `linux-x64` | YARA-X 1.22.0 `yara-x-v1.22.0-x86_64-unknown-linux-gnu.tar.gz` | `artifacts/tools/yara-x/linux-x64/` | `artifacts/cache/yara-x/` |
-| `YaraXCapi` / `win-x64` (only) | YARA-X 1.22.0 C API `yara-x-capi-v1.22.0-x86_64-pc-windows-msvc.zip` | `artifacts/tools/yara-x-capi/win-x64/` | `artifacts/cache/yara-x-capi/` |
+| `YaraXCapi` / `win-x64` | YARA-X 1.22.0 C API, our source build: `yara-x-capi-v1.22.0-x86_64-pc-windows-msvc.zip` from Silvergun release `yara-x-capi-v1.22.0` | `artifacts/tools/yara-x-capi/win-x64/` | `artifacts/cache/yara-x-capi-src/` |
+| `YaraXCapi` / `linux-x64` | the same build for Linux (glibc 2.34+): `yara-x-capi-v1.22.0-x86_64-unknown-linux-gnu.zip` | `artifacts/tools/yara-x-capi/linux-x64/` | `artifacts/cache/yara-x-capi-src/` |
 
 - The outer archive is checked against GitHub's asset size and sha256 digest **before** extraction.
 - Only the expected binary (`yara64.exe`/`yarac64.exe`, `yr.exe`, `yr`) and any licence file are
-  extracted, to names the script chooses. For `YaraXCapi` the expected files are `yara_x_capi.dll`,
-  its import library `yara_x_capi.dll.lib` and the header `yara_x.h`; the zip's static library
-  `yara_x_capi.lib` and `yara_x_capi.def` are listed and reported, never extracted. The `.tar.gz` is handled by `%SystemRoot%\System32\tar.exe`
+  extracted, to names the script chooses. For `YaraXCapi` the expected files are the library
+  (`yara_x_capi.dll` and its import library `yara_x_capi.dll.lib`, or `libyara_x_capi.so`), the
+  header `yara_x.h` and `LICENSE`; the zip's `BUILDINFO.txt`, `SHA256SUMS` and `.pdb` are listed and
+  hashed, never installed. The zips come from `.github/workflows/yara-x-capi.yml`; installed files
+  are stamped with the install time so builds pick up a reinstall.
+- **Upgrading from VirusTotal's C API DLL:** an existing install fails verification (exit 5) until you run
+  `-Engine YaraXCapi -Force` once; until then builds keep copying the old DLL. `artifacts/cache/yara-x-capi/`
+  is no longer used and can be deleted.
+- The script runs on Windows only. A Linux build host gets `libyara_x_capi.so` from a Windows checkout
+  (e.g. WSL `/mnt/c`) or a copy of `artifacts/tools/yara-x-capi/linux-x64/`.
+- The `.tar.gz` is handled by `%SystemRoot%\System32\tar.exe`
   (bsdtar): first a listing, then one member per extraction into a fresh scratch directory.
 - Each binary must match its own pin. **Pins are empty until reviewed**: with an empty pin the
   script refuses to install, prints the observed sha256 and exits 3. Record pins in the script.
