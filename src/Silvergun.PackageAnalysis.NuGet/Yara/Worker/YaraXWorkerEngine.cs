@@ -6,9 +6,9 @@ using Silvergun.PackageAnalysis.NuGet.Yara.YaraX;
 
 /// <summary>
 /// The production engines of the <c>__worker yara</c> verb (ADR 0033 FINAL FORM). On Windows (the <c>net10.0-windows</c>
-/// build) that is the YARA-X engine with the rules cache; on Linux the YARA-X engine with no rules cache
-/// (docs/agent/tasks/yarax-worker-linux.md, L6); anywhere else the verb answers <c>fatal</c> "engine unavailable on this
-/// platform". Never the T1 stub.
+/// build) that is the YARA-X engine with the DPAPI-bound rules cache; on Linux the YARA-X engine with the secure-path rules
+/// cache (<c>YaraXLinuxRulesCache</c>, docs/agent/tasks/yarax-worker-linux.md, Phase 2); anywhere else the verb answers
+/// <c>fatal</c> "engine unavailable on this platform". Never the T1 stub.
 /// </summary>
 public static class YaraWorkerEngines
 {
@@ -21,7 +21,7 @@ public static class YaraWorkerEngines
 #if WINDOWS
         new YaraXWorkerEngine(timeoutSeconds, new YaraXRulesCache());
 #else
-        OperatingSystem.IsLinux() ? new YaraXWorkerEngine(timeoutSeconds, cache: null) : new UnavailableYaraWorkerEngine();
+        OperatingSystem.IsLinux() ? new YaraXWorkerEngine(timeoutSeconds, new YaraXLinuxRulesCache()) : new UnavailableYaraWorkerEngine();
 #endif
     #endregion
 }

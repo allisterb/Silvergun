@@ -83,7 +83,7 @@ internal static class LinuxYaraX
     /// A production-shaped scanner over the real worker at <see cref="CliPath"/>: the production launch arguments and
     /// engine timeout, through the test constructor only because the worker is not in <see cref="AppContext.BaseDirectory"/>
     /// (the production constructor's step 2 is pinned by <see cref="YaraXWorkerScanner.ResolveWorkerExecutable"/> instead).
-    /// The ready bound is generous: every Linux worker compiles the rules (no cache, L6).
+    /// The ready bound is generous: a worker with no cache entry yet compiles the rules (~2.2 s on Linux).
     /// </summary>
     internal static YaraXWorkerScanner Scanner(int engineTimeoutSeconds = WorkerProtocol.DefaultTimeoutSeconds, double graceSeconds = 5) =>
         new(CliPath, WorkerProtocol.YaraWorkerLaunchArguments(engineTimeoutSeconds), engineTimeoutSeconds,

@@ -25,7 +25,9 @@ using static LinuxYaraX;
 /// Windows twin is <c>YaraWorkerVerbWindowsTests</c>). The CLI apphost is NOT in this test output (that must hold none;
 /// the Linux-only ProjectReference only builds the CLI): it is launched from the CLI's own output directory,
 /// <c>src/Silvergun.CLI/bin/&lt;configuration&gt;/net10.0/</c> (<see cref="LinuxYaraX.CliDirectory"/>), with its
-/// <c>libyara_x_capi.so</c> beside it. There is no rules cache on Linux in Phase 1 (L6), so every run compiles.
+/// <c>libyara_x_capi.so</c> beside it. Since Phase 2 a Linux worker has a rules cache (<see cref="YaraXLinuxRulesCache"/>):
+/// in this host it is under the private <c>XDG_CACHE_HOME</c> of <see cref="TestHostXdgCache"/>, never the user's, and a
+/// test that must see a compile gives its worker a fresh one (the cache itself: <c>YaraXLinuxRulesCacheTests</c>).
 ///
 /// <para>The positive is <see cref="HermeticWiperSample"/>: inert bytes derived at run time from the embedded rule.</para>
 /// </summary>
@@ -33,11 +35,12 @@ public sealed class YaraWorkerVerbLinuxTests(ITestOutputHelper output)
 {
     #region Methods: ready
     // G1 on Linux: the parent's own hash of its embedded rules, a real rule count, the canary passed, no source in error.
-    // The rules were compiled (no cache on Linux, L6), and the per-file timeout is the product default.
+    // With a fresh rules cache (its own XDG_CACHE_HOME) the rules were compiled, and the per-file timeout is the product default.
     [LinuxYaraXFact]
     public void Ready_IsGenuine_WithTheCanaryPassed_AndNoSourceErrors()
     {
-        var run = Run(WorkerArgs, []);
+        using var cache = new LinuxCacheTree("verb-ready");
+        var run = Run(WorkerArgs, [], env: new Dictionary<string, string?> { ["XDG_CACHE_HOME"] = cache.Path("xdg") });
 
         Assert.Equal(0, run.Exit);
         var lines = Lines(run);

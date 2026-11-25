@@ -7,8 +7,8 @@ namespace Silvergun.PackageAnalysis.NuGet.Yara.YaraX;
 internal sealed record YaraXLoadResult(YaraXRules? Rules, bool FromCache, string? Failure);
 
 /// <summary>
-/// A store of compiled rules the engine may load instead of compiling (on Windows, <c>YaraXRulesCache</c>; Linux has
-/// none yet, docs/agent/tasks/yarax-worker-linux.md Phase 2).
+/// A store of compiled rules the engine may load instead of compiling: on Windows <c>YaraXRulesCache</c> (DPAPI), on
+/// Linux <c>YaraXLinuxRulesCache</c> (a secure path; docs/agent/tasks/yarax-worker-linux.md, Phase 2).
 /// </summary>
 internal interface IYaraXRulesCache
 {

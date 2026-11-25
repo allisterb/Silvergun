@@ -15,20 +15,24 @@ using Silvergun.PackageAnalysis.NuGet.Yara.YaraX;
 using Xunit;
 
 /// <summary>
-/// The worker's engine on the net10.0 build (<c>docs/agent/tasks/yarax-worker-linux.md</c>, Phase 1). Which engine the
-/// verb gets is pinned on every OS this build runs on (L1, L6). The real-engine timeout runs the worker's own
-/// <see cref="YaraXWorkerEngine"/> in this test host over the real <c>libyara_x_capi.so</c>: Linux has no rules cache in
-/// Phase 1, so the CLI worker always compiles the embedded rules (which hold nothing slow), and the slow ruleset reaches
+/// The worker's engine on the net10.0 build (<c>docs/agent/tasks/yarax-worker-linux.md</c>, Phases 1 and 2). Which engine
+/// the verb gets is pinned on every OS this build runs on (L1; Phase 2 replaced L6's "no cache" with the secure-path
+/// <see cref="YaraXLinuxRulesCache"/>). The real-engine timeout runs the worker's own <see cref="YaraXWorkerEngine"/> in
+/// this test host over the real <c>libyara_x_capi.so</c>: the embedded rules hold nothing slow, so the slow ruleset reaches
 /// the engine through the <see cref="IYaraXRulesCache"/> seam instead of a planted cache entry (the Windows twin's way).
 /// </summary>
 public sealed class YaraXWorkerEngineLinuxTests
 {
-    #region Methods: L1 / L6, the engine for this build
-    // Linux: the YARA-X engine with NO rules cache (L6: every worker compiles). Windows net10.0 (no YARA-X library in this
-    // TFM's output) and anything else: the Unavailable engine. Creating either loads nothing.
+    #region Methods: L1 / Phase 2, the engine for this build
+    // Linux: the YARA-X engine with the Linux rules cache at its default location (Phase 2, P3). Windows net10.0 (no YARA-X
+    // library in this TFM's output) and anything else: the Unavailable engine. (That constructing the cache creates nothing
+    // is pinned on a private location by YaraXLinuxRulesCacheTests: the default one here is shared with every real worker
+    // this host runs in parallel, so its existence cannot be compared before and after.)
     [Fact]
-    public void ForPlatform_IsTheYaraXEngineWithNoCache_OnLinux_AndUnavailableElsewhere()
+    public void ForPlatform_IsTheYaraXEngineWithTheLinuxCacheAtItsDefaultLocation_OnLinux_AndUnavailableElsewhere()
     {
+        var location = OperatingSystem.IsLinux() ? YaraXLinuxRulesCache.DefaultDirectory() : null;
+
         var engine = YaraWorkerEngines.ForPlatform(5);
 
         if (OperatingSystem.IsLinux())
@@ -36,7 +40,9 @@ public sealed class YaraXWorkerEngineLinuxTests
             var yarax = Assert.IsType<YaraXWorkerEngine>(engine);
             var cache = typeof(YaraXWorkerEngine).GetField("cache", BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.True(cache is not null, "YaraXWorkerEngine.cache is gone; this test reads it.");
-            Assert.Null(cache!.GetValue(yarax));
+            var linux = Assert.IsType<YaraXLinuxRulesCache>(cache!.GetValue(yarax));
+            Assert.NotNull(linux.Location);
+            Assert.Equal(location, linux.Location);
         }
         else
         {

@@ -29,17 +29,17 @@ using System.Text;
 /// machine-scope blob included) is a miss or a skipped write, with a warning; it never blocks a scan.</para>
 ///
 /// <para><b>Where.</b> One location, per user (<see cref="DefaultDirectory"/>): <c>%LOCALAPPDATA%\Silvergun\yara-x-rules\</c>
-/// on Windows; <c>$XDG_CACHE_HOME/silvergun/yara-x-rules/</c> (or <c>~/.cache/…</c>) on Unix. There is no override (ADR
+/// (Linux has its own cache, <c>YaraXLinuxRulesCache</c>, in the <c>net10.0</c> build). There is no override (ADR
 /// 0033, amendment of 2026-10-22): the cache decides what a scan trusts, and a user-chosen location cannot be trusted by
 /// its path, because anyone who can rename one of its ancestors can race every path-based check, swapping in a junction
 /// to files of their choosing between the checks and the use. Other users cannot rename the default location's ancestors
 /// (<c>%USERPROFILE%</c>, <c>%LOCALAPPDATA%</c>). The constructor's directory argument exists for tests, and is used
 /// exactly as the default location is.</para>
 ///
-/// <para><b>Owner-only.</b> The cache directory is owner-only: on Windows a protected DACL (inheritance disabled) with one
-/// ACE, full control for the current user, inherited by everything created in it, and the user as owner; on Unix mode
-/// 0700. The directory and its parent are checked for being links (reparse points) before anything reads or changes the
-/// directory's ACL, and a link is never used; directories above the parent are not checked. A missing directory is created
+/// <para><b>Owner-only.</b> The cache directory is owner-only: a protected DACL (inheritance disabled) with one ACE, full
+/// control for the current user, inherited by everything created in it, and the user as owner. The directory and its
+/// parent are checked for being links (reparse points) before anything reads or changes the directory's ACL, and a link
+/// is never used; directories above the parent are not checked. A missing directory is created
 /// owner-only in one step (its parent first, when that is missing too). An existing directory that is not exactly
 /// owner-only (owner included) is corrected and its entries deleted (while it was open, anyone could have written one); if
 /// it cannot be corrected, or the entries cannot be deleted, the cache is not used.</para>
@@ -127,18 +127,8 @@ internal sealed class YaraXRulesCache : IYaraXRulesCache
     /// <summary>The per-user default location (see the class doc), or <c>null</c> when there is none.</summary>
     internal static string? DefaultDirectory()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.DoNotVerify);
-            return Path.IsPathFullyQualified(local) ? Path.Combine(local, "Silvergun", "yara-x-rules") : null;
-        }
-
-        var xdg = Environment.GetEnvironmentVariable("XDG_CACHE_HOME");
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile, Environment.SpecialFolderOption.DoNotVerify);
-        var root = !string.IsNullOrEmpty(xdg) && Path.IsPathFullyQualified(xdg) ? xdg
-            : Path.IsPathFullyQualified(home) ? Path.Combine(home, ".cache")
-            : null;
-        return root is null ? null : Path.Combine(root, "silvergun", "yara-x-rules");
+        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.DoNotVerify);
+        return Path.IsPathFullyQualified(local) ? Path.Combine(local, "Silvergun", "yara-x-rules") : null;
     }
 
     // W2: an ACE whose effect is just its SID, mask and flags: an allow or deny CommonAce that is not a callback
@@ -148,7 +138,7 @@ internal sealed class YaraXRulesCache : IYaraXRulesCache
 
     /// <summary>The cache file for <paramref name="sourcesSha256"/>, or <c>null</c> without a cache directory.</summary>
     internal string? EntryPath(string sourcesSha256) =>
-        Location is null ? null : Path.Combine(Location, $"rules-{YaraXNative.EngineVersion}-{sourcesSha256}.sgyx");
+        Location is null ? null : Path.Combine(Location, YaraXRulesEntry.FileName(sourcesSha256));
 
     /// <summary>
     /// The cached rules for <paramref name="sourcesSha256"/>, with the canary compiled into them, or <c>null</c> (a miss,
@@ -164,8 +154,7 @@ internal sealed class YaraXRulesCache : IYaraXRulesCache
             // Under the lock: the directory check (and any correction), the entry's owner and DACL checks (S1, W-A) and the
             // read. Verifying and deserializing need no lock.
             var entry = path is null ? null
-                : Locked(() => PrepareDirectory() is null || !File.Exists(path) ? null
-                    : OperatingSystem.IsWindows() ? ReadOwnEntry(path) : ReadBounded(path), timedOut: null);
+                : Locked(() => PrepareDirectory() is null || !File.Exists(path) ? null : ReadOwnEntry(path), timedOut: null);
             if (entry is null)
             {
                 Runtime.Debug("YARA-X rules cache: no usable entry for {0}.", sourcesSha256);
@@ -185,10 +174,7 @@ internal sealed class YaraXRulesCache : IYaraXRulesCache
             }
 
             // DPAPI has vouched for exactly these bytes (Invalid): only now is anything read from the body.
-            var body = entry.AsSpan(BodyOffset(entry));
-            var canary = YaraXCanary.From(body.Slice(CanaryIdOffset, CanaryIdBytes), body.Slice(MarkerOffset, YaraXCanary.MarkerBytes))!;
-            var ruleCount = BinaryPrimitives.ReadInt32LittleEndian(body.Slice(RuleCountOffset, sizeof(int)));
-            var rules = YaraXRules.Deserialize(body[BodyHeaderBytes..], canary, sourcesSha256, ruleCount, out var failure);
+            var rules = YaraXRulesEntry.Rules(entry.AsSpan(BodyOffset(entry)), sourcesSha256, out var failure);
             if (rules is null)
                 Runtime.Warn("YARA-X rules cache: ignoring {0}: {1}. The rules will be recompiled.", YaraXText.Bounded(path), failure ?? "");
             return rules;
@@ -221,16 +207,7 @@ internal sealed class YaraXRulesCache : IYaraXRulesCache
                 return false;
             }
 
-            var blob = rules.Serialize(out var failure)
-                ?? throw new InvalidOperationException(failure ?? "the rules could not be serialized");
-
-            var body = new byte[BodyHeaderBytes + blob.Length];
-            Convert.FromHexString(rules.SourcesSha256).CopyTo(body.AsSpan(SourcesOffset, Sha256Bytes));
-            rules.Canary.IdBytes().CopyTo(body.AsSpan(CanaryIdOffset, CanaryIdBytes));
-            rules.Canary.Marker.CopyTo(body.AsSpan(MarkerOffset, YaraXCanary.MarkerBytes));
-            BinaryPrimitives.WriteInt32LittleEndian(body.AsSpan(RuleCountOffset, sizeof(int)), rules.RuleCount);
-            blob.CopyTo(body.AsSpan(BodyHeaderBytes));
-
+            var body = YaraXRulesEntry.Body(rules);
             var binding = WindowsSecurityNative.Protect(SHA256.HashData(body), Entropy, out var protectFailure);
             if (binding is null || binding.Length > MaxProtectedBytes)
             {
@@ -251,10 +228,9 @@ internal sealed class YaraXRulesCache : IYaraXRulesCache
                 if (PrepareDirectory() is not { } dir)
                     return false;
 
-                SweepStaleTemps(dir);
-                temp = Path.Combine(dir, $"{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
-                using (var stream = OperatingSystem.IsWindows() ? CreateOwnedByUser(temp)
-                    : new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                YaraXRulesEntry.SweepStaleTemps(dir);
+                temp = YaraXRulesEntry.TempPath(dir, path);
+                using (var stream = CreateOwnedByUser(temp))
                 {
                     stream.Write(entry);
                     stream.Flush(flushToDisk: true);
@@ -291,8 +267,7 @@ internal sealed class YaraXRulesCache : IYaraXRulesCache
         if (Link(Location) is { } before)
             return Refuse(before, "it is a link");
 
-        var ok = OperatingSystem.IsWindows() ? PrepareWindows(Location) : PrepareUnix(Location);
-        if (!ok)
+        if (!PrepareWindows(Location))
             return null;
 
         return Link(Location) is { } after ? Refuse(after, "it is a link") : Location;
@@ -389,7 +364,7 @@ internal sealed class YaraXRulesCache : IYaraXRulesCache
     private static bool DeleteEntries(string dir)
     {
         var failed = 0;
-        foreach (var file in Directory.EnumerateFiles(dir, EntryPattern).Concat(Directory.EnumerateFiles(dir, TempPattern)).ToArray())
+        foreach (var file in Directory.EnumerateFiles(dir, YaraXRulesEntry.EntryPattern).Concat(Directory.EnumerateFiles(dir, YaraXRulesEntry.TempPattern)).ToArray())
         {
             try
             {
@@ -446,33 +421,6 @@ internal sealed class YaraXRulesCache : IYaraXRulesCache
         @"Local\Silvergun.YaraXRulesCache."
         + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(Path.TrimEndingDirectorySeparator(dir).ToUpperInvariant())))[..32];
 
-    // N3: best-effort removal of temp files left by a writer that died between writing and moving its entry. A live
-    // writer's temp exists only for the write and move of one ~2.3 MB entry, which happens while a worker starts — and
-    // the parent kills a worker that is not ready within 15 s (amendment G9) — so a temp file not written to for
-    // StaleTempAge is an orphan. Never throws.
-    private static void SweepStaleTemps(string dir)
-    {
-        try
-        {
-            foreach (var file in new DirectoryInfo(dir).EnumerateFiles(TempPattern))
-            {
-                try
-                {
-                    if (DateTime.UtcNow - file.LastWriteTimeUtc > StaleTempAge)
-                        file.Delete();
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                    // best effort: in use, or already gone
-                }
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            Runtime.Debug("YARA-X rules cache: could not sweep stale temp files: {0}", YaraXText.Bounded(ex.Message));
-        }
-    }
-
     // Owner: the user. DACL: protected (nothing inherited from the parent), exactly one ACE — full control for the user,
     // inherited by every file and subdirectory created inside. With setOwner false the owner is left out of the descriptor:
     // SetAccessControl writes only the sections that were set (DACL here), so no WRITE_OWNER is needed (FR2.2).
@@ -517,23 +465,6 @@ internal sealed class YaraXRulesCache : IYaraXRulesCache
             && only.InheritanceFlags == (InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit)
             && only.PropagationFlags == PropagationFlags.None;
 
-    // Unix (not built yet: this file is Windows-only until the Linux C API build, ADR 0033 revision decision 5).
-    // TODO(T8, Linux YARA-X): the Windows rules are not honoured here yet: an existing directory is made 0700 without the
-    // quarantine and without deleting its entries (W-B), and an entry's owner and mode are not checked before it is read
-    // (S1, W-A). The whole file is compiled only under #if WINDOWS, so none of this is compiled or tested yet. Also,
-    // DefaultDirectory honours XDG_CACHE_HOME and HOME, both user-chosen paths: T8 must apply the threat model of the ADR
-    // 0033 amendment of 2026-10-22 (a renamable ancestor races every path-based check) before trusting them. And there is
-    // no DPAPI on Unix, which is what entry integrity rests on here (class doc): T8 must choose between binding entries
-    // with a key kept in a 0700 directory (e.g. a MAC) and no cache at all.
-    [UnsupportedOSPlatform("windows")]
-    private static bool PrepareUnix(string dir)
-    {
-        const UnixFileMode ownerOnly = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
-        Directory.CreateDirectory(dir, ownerOnly);
-        File.SetUnixFileMode(dir, ownerOnly);
-        return File.GetUnixFileMode(dir) == ownerOnly;
-    }
-
     // S1, W-A (class doc, "Whose entry"): the entry at `path` when it is not a link, the current user owns it and its DACL
     // is exactly the one our own entries carry; otherwise null, after deleting it (best effort) with one warning. The link
     // check is by path, before opening; the owner and the DACL are checked on the handle, which is the very handle the
@@ -563,7 +494,7 @@ internal sealed class YaraXRulesCache : IYaraXRulesCache
         var why = identity.User is not { } user || descriptor.Owner is not { } owner || !user.Equals(owner) ? "its owner is not the current user"
             : NotOwnEntryDacl(descriptor.DiscretionaryAcl, user) is { } detail ? $"{NotOwnEntryPermissions}: {detail}"
             : null;
-        return why is null ? (ReadBounded(stream), null) : (null, why);
+        return why is null ? (YaraXRulesEntry.ReadBounded(stream, MinEntryBytes), null) : (null, why);
     }
 
     // Null when `dacl` is exactly what our own entries carry, (A;ID;FA;;;<user>) inherited from the owner-only directory:
@@ -625,22 +556,6 @@ internal sealed class YaraXRulesCache : IYaraXRulesCache
         }
     }
 
-    private static byte[] ReadBounded(string path)
-    {
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-        return ReadBounded(stream);
-    }
-
-    private static byte[] ReadBounded(FileStream stream)
-    {
-        if (stream.Length is < MinEntryBytes or > MaxEntryBytes)
-            throw new InvalidDataException($"the entry is {stream.Length} bytes, outside [{MinEntryBytes}, {MaxEntryBytes}]");
-
-        var entry = new byte[stream.Length];
-        stream.ReadExactly(entry);
-        return entry;
-    }
-
     // Null when the entry is this format, this user's DPAPI (a user-scope blob, C1, with this format's and engine's
     // entropy) vouches for its exact body, and it is for this key; otherwise what is wrong with it. P is bounded before any
     // DPAPI call, and nothing in the body is looked at before DPAPI has vouched for it (class doc). The DPAPI output is a
@@ -650,7 +565,7 @@ internal sealed class YaraXRulesCache : IYaraXRulesCache
         if (!entry.AsSpan(0, MagicBytes).SequenceEqual(Encoding.ASCII.GetBytes(Magic)))
             return "unknown format";
         var length = ProtectedLength(entry);
-        if (length is < 1 or > MaxProtectedBytes || length > entry.Length - ProtectedOffset - BodyHeaderBytes)
+        if (length is < 1 or > MaxProtectedBytes || length > entry.Length - ProtectedOffset - YaraXRulesEntry.BodyHeaderBytes)
             return $"its DPAPI blob length ({length}) is out of range";
 
         var body = entry.AsSpan(ProtectedOffset + length);
@@ -662,7 +577,7 @@ internal sealed class YaraXRulesCache : IYaraXRulesCache
                 : vouched.Length != Sha256Bytes ? $"its DPAPI payload is {vouched.Length} bytes, not {Sha256Bytes}"
                 : !CryptographicOperations.FixedTimeEquals(vouched, SHA256.HashData(body))
                     ? "its body does not match the hash DPAPI vouches for (corrupt, or not written by Silvergun for you)"
-                : !Convert.ToHexStringLower(body[..Sha256Bytes]).Equals(sourcesSha256, StringComparison.Ordinal) ? "it is for other rule sources"
+                : !YaraXRulesEntry.IsFor(body, sourcesSha256) ? "it is for other rule sources"
                 : null;
         }
         finally
@@ -691,34 +606,15 @@ internal sealed class YaraXRulesCache : IYaraXRulesCache
     private const string Magic = "SGYXRC03";
     private const string PreviousMagic = "SGYXRC02";
     private const int MagicBytes = 8;
-    private const int Sha256Bytes = 32;
-    private const int CanaryIdBytes = 16;
+    private const int Sha256Bytes = YaraXRulesEntry.Sha256Bytes;
 
-    // The entry: the magic, P, the DPAPI blob (P bytes, at most MaxProtectedBytes), then the body.
+    // The entry: the magic, P, the DPAPI blob (P bytes, at most MaxProtectedBytes), then the body (YaraXRulesEntry).
     private const int ProtectedLengthOffset = MagicBytes;
     private const int ProtectedOffset = ProtectedLengthOffset + sizeof(int);
     private const int MaxProtectedBytes = 1024;
 
-    // The body, at offsets from its start: sources sha256, canary id, canary marker, rule count, then the serialized rules.
-    private const int SourcesOffset = 0;
-    private const int CanaryIdOffset = SourcesOffset + Sha256Bytes;
-    private const int MarkerOffset = CanaryIdOffset + CanaryIdBytes;
-    private const int RuleCountOffset = MarkerOffset + YaraXCanary.MarkerBytes;
-    private const int BodyHeaderBytes = RuleCountOffset + sizeof(int);
-
     // The smallest entry with a DPAPI blob and a body header: smaller is not an entry at all.
-    private const int MinEntryBytes = ProtectedOffset + 1 + BodyHeaderBytes;
-
-    // The 1,240-rule blob is ~2.3 MB; anything near this is not ours.
-    private const long MaxEntryBytes = 256L * 1024 * 1024;
-
-    // The cache's own files: entries (EntryPath) and the temp files they are written through (Store).
-    private const string EntryPattern = "rules-*.sgyx";
-    private const string TempPattern = "*.tmp";
-
-    // A temp file untouched this long is an orphan (see SweepStaleTemps): 40× the 15 s startup bound inside which every
-    // live writer finishes or is killed, so no live writer's temp is swept; an orphan goes at the next write after that.
-    private static readonly TimeSpan StaleTempAge = TimeSpan.FromMinutes(10);
+    private const int MinEntryBytes = ProtectedOffset + 1 + YaraXRulesEntry.BodyHeaderBytes;
 
     // How long a load or store waits for the cache lock (W-B). A holder only checks the directory and reads or writes one
     // ~2.3 MB entry, so this is generous; and two waits plus a ~1.6 s compile stay well inside the 15 s startup bound (G9).
