@@ -157,6 +157,36 @@ public abstract class Runtime
         return stderr;
     }
 
+    /// <summary>
+    /// Server-mode logging (the MCP server, docs/agent/tasks/mcp-server.md D9): the shared log file is the record, and stderr
+    /// gets a copy capped at <paramref name="maxStderrBytes"/> in total, because a client may discard it. Nothing goes to
+    /// stdout. The file is opened shared, so several server processes can log to one directory; each line names its process.
+    /// Returns the capped stderr writer.
+    /// </summary>
+    public static CappedTextWriter WithFileAndStderrLogging(string toolname, string logname, bool debug, string? logdir = null, long maxStderrBytes = ServerStderrCapBytes)
+    {
+        var stderr = new CappedTextWriter(new StreamWriter(Console.OpenStandardError(), new UTF8Encoding(false)) { AutoFlush = true }, maxStderrBytes);
+        Console.SetError(stderr);
+        var logger = new LoggerConfiguration()
+             .Enrich.FromLogContext()
+             .Enrich.WithProperty("ProcessId", Environment.ProcessId)
+             .MinimumLevel.Is(debug ? Serilog.Events.LogEventLevel.Verbose : Serilog.Events.LogEventLevel.Information)
+             .WriteTo.File(Path.Combine(logdir ?? AssemblyLocation, toolname + "-" + logname + ".log"),
+                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] ({ProcessId}) {Message:lj}{NewLine}{Exception}",
+                rollingInterval: RollingInterval.Day,
+                rollOnFileSizeLimit: true,
+                fileSizeLimitBytes: 4 * 1024 * 1024,
+                retainedFileCountLimit: 14,
+                shared: true)
+             .WriteTo.Console(
+                outputTemplate: "[{Level:u3}] {Message:lj}{NewLine}{Exception}",
+                theme: Serilog.Sinks.SystemConsole.Themes.ConsoleTheme.None,
+                standardErrorFromLevel: Serilog.Events.LogEventLevel.Verbose)
+             .CreateLogger();
+        Initialize(toolname, logname, debug, new SerilogLoggerFactory(logger), new SerilogLoggerProvider(logger, false));
+        return stderr;
+    }
+
     [DebuggerStepThrough]
     public static void Info(string messageTemplate, params object[] args) => logger.LogInformation(messageTemplate, args);
 
@@ -437,6 +467,9 @@ public abstract class Runtime
     #region Fields
     /// <summary>The total stderr budget of a worker process (ADR 0033 worker protocol v1): 64 KiB.</summary>
     public const long WorkerStderrCapBytes = 64 * 1024;
+
+    /// <summary>The total stderr budget of the MCP server process (docs/agent/tasks/mcp-server.md D9): 1 MiB; the log file is the record.</summary>
+    public const long ServerStderrCapBytes = 1024 * 1024;
 
     public static Microsoft.Extensions.Logging.ILogger logger = NullLogger.Instance;
     public static Serilog.ILogger _logger = Log.Logger;

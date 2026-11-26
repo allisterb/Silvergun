@@ -14,6 +14,7 @@ using Spectre.Console;
 using Silvergun.CLI.Reports;
 using Silvergun.CodeAnalysis.IL;
 using Silvergun.Intel;
+using Silvergun.MCPServer;
 using Silvergun.PackageAnalysis.NuGet;
 using Silvergun.PackageAnalysis.NuGet.Graph;
 using Silvergun.PackageAnalysis.NuGet.Squats;
@@ -58,6 +59,16 @@ internal static class Program
     #region Methods
     private static int Main(string[] args)
     {
+        // `mcp` (ADR 0039 D9): stdout belongs to the MCP transport. Take the raw stream first, then point Console.Out at
+        // stderr before anything can write, so help, parse errors and any library's Console.Out text land on stderr.
+        var inMcp = args is [var first, ..] && first == McpVerb;
+        Stream? mcpStdout = null;
+        if (inMcp)
+        {
+            mcpStdout = Console.OpenStandardOutput();
+            Console.SetOut(Console.Error);
+        }
+
         var assemblyPathArgument = new Argument<string>("assembly-path")
         {
             Description = "Path to the .NET assembly to analyze."
@@ -322,9 +333,51 @@ internal static class Program
         };
         workerCommand.Hidden = true;
 
+        // mcp (ADR 0039, docs/agent/tasks/mcp-server.md D1): the MCP server on stdio. Every option is fixed for the process;
+        // no tool can change one.
+        var mcpRootOption = new Option<string[]>("--root")
+        {
+            Description = "A directory that packages given to the server must lie under. Repeatable. Default: the working directory."
+        };
+        var mcpNetworkOption = new Option<bool>("--network")
+        {
+            Description = "Allow network intel (OSV, project health, squat checks). Default off."
+        };
+        var mcpMaxJobsOption = new Option<int>("--max-jobs")
+        {
+            Description = $"Analysis jobs that may run at once (1 to {McpServerSettings.MaxJobsCap}).",
+            DefaultValueFactory = _ => McpServerSettings.DefaultMaxJobs
+        };
+        var mcpCacheDirOption = new Option<string?>("--cache-dir")
+        {
+            Description = "The job cache directory. Default: %LOCALAPPDATA%\\Silvergun\\mcp, or $XDG_CACHE_HOME/silvergun/mcp."
+        };
+        var mcpCacheMaxGbOption = new Option<int>("--cache-max-gb")
+        {
+            Description = "The job cache's size cap in GiB.",
+            DefaultValueFactory = _ => McpServerSettings.DefaultCacheMaxGb
+        };
+        var mcpLogDirOption = new Option<string?>("--log-dir")
+        {
+            Description = "The directory for the server's log file. Default: the CLI's own directory."
+        };
+        var mcpCommand = new Command(McpVerb, "Run the Silvergun MCP server on stdin/stdout, for AI agents.")
+        {
+            mcpRootOption, mcpNetworkOption, mcpMaxJobsOption, mcpCacheDirOption, mcpCacheMaxGbOption, mcpLogDirOption, debugOption
+        };
+        mcpCommand.SetAction(parse => RunMcp(
+            mcpStdout ??= Console.OpenStandardOutput(),
+            parse.GetValue(mcpRootOption) ?? [],
+            parse.GetValue(mcpNetworkOption),
+            parse.GetValue(mcpMaxJobsOption),
+            parse.GetValue(mcpCacheDirOption),
+            parse.GetValue(mcpCacheMaxGbOption),
+            parse.GetValue(mcpLogDirOption),
+            parse.GetValue(debugOption)));
+
         var root = new RootCommand("Silvergun — static capability analysis for .NET assemblies.")
         {
-            analyzeCommand, scanPackageCommand, checkSquatCommand, healthCommand, capabilityDiffCommand, workerCommand
+            analyzeCommand, scanPackageCommand, checkSquatCommand, healthCommand, capabilityDiffCommand, mcpCommand, workerCommand
         };
 
         // Worker mode keeps stdout protocol-only even for a command line that does not parse (FR2.3): System.CommandLine
@@ -332,6 +385,16 @@ internal static class Program
         // action (a parse error such as a repeated --timeout, help, a directive) is one `fatal` record and exit 3: in the
         // graph protocol when the verb is `__worker graph`, otherwise in the yara protocol, as before.
         var parse = root.Parse(args);
+        // A command line that reaches `mcp` some other way (a response file) gets the same posture; parsing wrote nothing.
+        if (!inMcp && IsWithin(parse.CommandResult, mcpCommand))
+        {
+            inMcp = true;
+            mcpStdout = Console.OpenStandardOutput();
+            Console.SetOut(Console.Error);
+        }
+        // The parser's own output (help, version, parse errors) goes to stderr too; no Ctrl+C hook of its own (D9).
+        if (inMcp)
+            return parse.Invoke(new InvocationConfiguration { Output = Console.Error, Error = Console.Error, ProcessTerminationTimeout = null });
         var inWorker = (args is [var verb, ..] && verb == workerCommand.Name) || IsWithin(parse.CommandResult, workerCommand);
         // Every worker path, before any work: a worker's crash must end the process at once, not wait on WER
         // (WorkerErrorReporting). Process-wide, so never for the CLI's own verbs.
@@ -1061,6 +1124,39 @@ internal static class Program
             + $"; expected __worker graph --protocol {GraphWorkerProtocol.Version}");
     }
 
+    // The `mcp` verb (ADR 0039). File log plus a capped stderr copy, never the console sink (it writes to stdout); the
+    // transport gets the raw stdout taken in Main, and Console.Out is then a null writer, as in the workers.
+    private static int RunMcp(Stream stdout, string[] roots, bool network, int maxJobs, string? cacheDir, int cacheMaxGb, string? logDir, bool debug)
+    {
+        var settings = McpServerSettings.Create(roots, network, maxJobs, cacheDir, cacheMaxGb, logDir, debug);
+        if (!settings.IsSuccess)
+        {
+            Console.Error.WriteLine($"mcp: {settings.Message}.");
+            return 1;
+        }
+
+        if (McpServerSettings.LogDirectoryProblem(settings.Value.LogDir ?? Runtime.AssemblyLocation) is { } logProblem)
+        {
+            Console.Error.WriteLine($"mcp: {logProblem}; pass a writable --log-dir.");
+            return 1;
+        }
+
+        Runtime.WithFileAndStderrLogging("Silvergun", "MCP", debug, settings.Value.LogDir);
+        Console.SetOut(TextWriter.Null);
+        var stdin = Console.OpenStandardInput();
+        try
+        {
+            SilvergunMcpServer.RunAsync(settings.Value, stdin, stdout).GetAwaiter().GetResult();
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            // Type and escaped message only: an SDK exception's text can be agent-chosen (D9).
+            Runtime.Error("mcp: the server stopped on an error:{0}", SdkLogRedactor.RenderException(ex, debug));
+            return 1;
+        }
+    }
+
     // Whether `result` is `command`'s, or lies under it in the parse tree.
     private static bool IsWithin(SymbolResult? result, Command command) =>
         result is not null && ((result is CommandResult { Command: var c } && ReferenceEquals(c, command)) || IsWithin(result.Parent, command));
@@ -1134,6 +1230,8 @@ internal static class Program
     #endregion
 
     #region Fields
+    private const string McpVerb = "mcp";
+
     // Env var carrying the libraries.io API key; presence auto-selects the libraries.io source. Never emitted.
     private const string LibrariesIoApiKeyEnvVar = "SILVERGUN_LIBRARIESIO_API_KEY";
 
