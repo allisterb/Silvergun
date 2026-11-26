@@ -24,9 +24,11 @@ internal sealed partial class WorkerJobObject : IDisposable
     /// <summary>
     /// A new, unnamed job that kills its processes when closed, and, when <paramref name="processMemoryLimit"/> is not 0,
     /// caps each process's committed memory at that many bytes (<c>JOB_OBJECT_LIMIT_PROCESS_MEMORY</c>: an allocation past
-    /// it fails). Throws <see cref="Win32Exception"/> on failure.
+    /// it fails), and when <paramref name="jobMemoryLimit"/> is not 0, caps the whole job's (<c>JOB_OBJECT_LIMIT_JOB_MEMORY</c>).
+    /// Processes a member starts join the job too, so the job limit bounds the whole tree. Throws
+    /// <see cref="Win32Exception"/> on failure.
     /// </summary>
-    internal static WorkerJobObject Create(ulong processMemoryLimit = 0)
+    internal static WorkerJobObject Create(ulong processMemoryLimit = 0, ulong jobMemoryLimit = 0)
     {
         var job = CreateJobObjectW(0, null);
         if (job.IsInvalid)
@@ -38,8 +40,9 @@ internal sealed partial class WorkerJobObject : IDisposable
 
         var limits = new ExtendedLimitInformation
         {
-            BasicLimitInformation = new() { LimitFlags = KillOnJobClose | (processMemoryLimit > 0 ? ProcessMemory : 0) },
+            BasicLimitInformation = new() { LimitFlags = KillOnJobClose | (processMemoryLimit > 0 ? ProcessMemory : 0) | (jobMemoryLimit > 0 ? JobMemory : 0) },
             ProcessMemoryLimit = (nuint)processMemoryLimit,
+            JobMemoryLimit = (nuint)jobMemoryLimit,
         };
         if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, ref limits, (uint)Marshal.SizeOf<ExtendedLimitInformation>()))
         {
@@ -81,6 +84,7 @@ internal sealed partial class WorkerJobObject : IDisposable
     private const int JobObjectExtendedLimitInformation = 9;
     private const uint KillOnJobClose = 0x2000;   // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
     private const uint ProcessMemory = 0x100;     // JOB_OBJECT_LIMIT_PROCESS_MEMORY
+    private const uint JobMemory = 0x200;         // JOB_OBJECT_LIMIT_JOB_MEMORY
 
     private readonly SafeJobHandle handle;
     #endregion

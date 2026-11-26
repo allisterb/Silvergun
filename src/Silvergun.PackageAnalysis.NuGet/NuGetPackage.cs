@@ -185,12 +185,23 @@ public sealed class NuGetPackage : Runtime, IDisposable
     /// the inventoried files to a unique temp directory. Never throws: a missing file, non-zip content, or any
     /// read/extract failure is returned as a failure <see cref="Result{T}"/> (the temp dir is cleaned up first).
     /// </summary>
-    public static Result<NuGetPackage> Open(string nupkgPath)
+    public static Result<NuGetPackage> Open(string nupkgPath) => Open(nupkgPath, null);
+
+    /// <summary>
+    /// <see cref="Open(string)"/>, extracting into <paramref name="extractionDir"/> when it is given: a fully qualified
+    /// path that does not exist yet (its parent must). A package opened this way keeps its extraction on
+    /// <see cref="Dispose"/>, for a caller that serves the files later (the MCP server's job cache); a failed open still
+    /// deletes what it extracted.
+    /// </summary>
+    public static Result<NuGetPackage> Open(string nupkgPath, string? extractionDir)
     {
         if (string.IsNullOrWhiteSpace(nupkgPath) || !File.Exists(nupkgPath))
             return Result.FailureWithError<NuGetPackage>($"NuGet package file not found: {nupkgPath}.");
+        if (extractionDir is not null && (!Path.IsPathFullyQualified(extractionDir) || Path.Exists(extractionDir) || Path.Exists(BundleRootOf(extractionDir))))
+            return Result.FailureWithError<NuGetPackage>("The extraction directory must be a fully qualified path that does not exist yet.");
 
-        var extractionDir = Path.Combine(Path.GetTempPath(), "silvergun", "pkg-" + RandomString(12));
+        var keep = extractionDir is not null;
+        extractionDir ??= Path.Combine(Path.GetTempPath(), "silvergun", "pkg-" + RandomString(12));
         using var op = Begin("Opening NuGet package {0}", nupkgPath);
         try
         {
@@ -317,7 +328,7 @@ public sealed class NuGetPackage : Runtime, IDisposable
             op.Complete();
             return Result.Success(new NuGetPackage(
                 identity, assemblies, scripts, nuspecPath, extractionDir, contentRoot, declaredEntryNames, uninventoried, yaraInventory,
-                nativeBinaries, nativeUnread, bundles.Unextracted, bundles.Files));
+                nativeBinaries, nativeUnread, bundles.Unextracted, bundles.Files) { keepExtraction = keep });
         }
         catch (Exception ex)
         {
@@ -327,11 +338,15 @@ public sealed class NuGetPackage : Runtime, IDisposable
         }
     }
 
-    /// <summary>Deletes the extraction directory and the bundle unpack root. Idempotent; IO failures are swallowed and warned.</summary>
+    /// <summary>
+    /// Deletes the extraction directory and the bundle unpack root, unless they were given to <see cref="Open(string, string?)"/>.
+    /// Idempotent; IO failures are swallowed and warned.
+    /// </summary>
     public void Dispose()
     {
         if (disposed) return;
         disposed = true;
+        if (keepExtraction) return;
         TryDeleteDir(ExtractionDir);
         TryDeleteDir(BundleRootOf(ExtractionDir));
     }
@@ -632,7 +647,8 @@ public sealed class NuGetPackage : Runtime, IDisposable
     //      every YARA hit path rendered absolute, carrying the user's temp layout into the report. Nothing in the
     //      package can create a sibling of that directory (a zip-slip entry is clamped inside it, measured);
     //   3. otherwise extractionDir, as before.
-    private static string ContentRootOf(string extractionDir, string nupkgPath)
+    // Internal so the MCP server's job inventory takes paths against the same root (ADR 0039).
+    internal static string ContentRootOf(string extractionDir, string nupkgPath)
     {
         var expected = Path.Combine(extractionDir, Path.GetFileName(nupkgPath));
         var directories = Directory.GetDirectories(extractionDir);
@@ -940,6 +956,8 @@ public sealed class NuGetPackage : Runtime, IDisposable
 
     #region Fields
     private bool disposed;
+    // Set by Open when the caller chose the extraction directory: Dispose leaves it in place.
+    private bool keepExtraction;
 
     // The absolute cap on extracted bytes (ADR 0008), shared by the extractor's options and each side of the content
     // check in ContentMatchesNuGet (ADR 0036), which reads no more than the extraction already accepted.

@@ -185,6 +185,13 @@ internal sealed class McpChildProcess : IDisposable
         return new ExitObservation(exited, elapsed, exited ? process.ExitCode : null, stderrRead.IsCompletedSuccessfully ? stderrRead.Result : "<stderr not drained>");
     }
 
+    /// <summary>Terminates the server process alone (TerminateProcess / SIGKILL), not its tree: no handler of its own runs.</summary>
+    public void KillServerOnly()
+    {
+        process.Kill(entireProcessTree: false);
+        process.WaitForExit(10_000);
+    }
+
     public void Dispose()
     {
         if (!process.HasExited)

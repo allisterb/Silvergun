@@ -15,6 +15,7 @@ using Silvergun.CLI.Reports;
 using Silvergun.CodeAnalysis.IL;
 using Silvergun.Intel;
 using Silvergun.MCPServer;
+using Silvergun.MCPServer.Jobs;
 using Silvergun.PackageAnalysis.NuGet;
 using Silvergun.PackageAnalysis.NuGet.Graph;
 using Silvergun.PackageAnalysis.NuGet.Squats;
@@ -327,9 +328,20 @@ internal static class Program
             graphProtocolOption
         };
         workerGraphCommand.SetAction(parse => RunGraphWorker(parse.GetValue(graphProtocolOption)));
+        // `__worker job --protocol 1` runs one MCP analysis job (ADR 0039, docs/agent/tasks/mcp-server.md S1): the same
+        // scan-package projection, written into the job directory the MCP server names. The same string-typed --protocol posture.
+        var jobProtocolOption = new Option<string?>("--protocol")
+        {
+            Description = $"Worker protocol version (only {JobProtocol.Version} is supported)."
+        };
+        var workerJobCommand = new Command("job", "Internal: one MCP server analysis job.")
+        {
+            jobProtocolOption
+        };
+        workerJobCommand.SetAction(parse => RunJobWorker(parse.GetValue(jobProtocolOption)));
         var workerCommand = new Command("__worker", "Internal: worker processes started by Silvergun itself.")
         {
-            workerYaraCommand, workerGraphCommand
+            workerYaraCommand, workerGraphCommand, workerJobCommand
         };
         workerCommand.Hidden = true;
 
@@ -401,9 +413,12 @@ internal static class Program
         if (inWorker)
             WorkerErrorReporting.OptOut();
         return !inWorker || ReferenceEquals(parse.Action, workerYaraCommand.Action) || ReferenceEquals(parse.Action, workerGraphCommand.Action)
+                || ReferenceEquals(parse.Action, workerJobCommand.Action)
             ? parse.Invoke()
             : IsWithin(parse.CommandResult, workerGraphCommand) || (args is [_, var worker, ..] && worker == workerGraphCommand.Name)
             ? RunGraphWorkerArgumentError(parse.Errors.Count)
+            : IsWithin(parse.CommandResult, workerJobCommand) || (args is [_, var job, ..] && job == workerJobCommand.Name)
+            ? RunJobWorkerArgumentError(parse.Errors.Count)
             : RunYaraWorkerArgumentError(parse.Errors.Count);
     }
 
@@ -641,16 +656,25 @@ internal static class Program
     // findings gate too, but ONLY the three ADR 0026 categories (ReportTheme.IsGatingIndicatorCategory), aggregated
     // across every packaged assembly that produced an IndicatorReport — mirrors AllFindings' own "across every
     // analyzed assembly" posture.
-    internal static int ScanPackageExitCode(PackageCapabilityReport report, bool strict, bool allowIncomplete) =>
-        ScanExitCode(
+    internal static int ScanPackageExitCode(PackageCapabilityReport report, bool strict, bool allowIncomplete)
+    {
+        var gate = GateFindings(report);
+        return ScanExitCode(
             strict,
-            hasYaraFindings: report.YaraFindings.Count > 0,
-            hasVulnerabilities: report.Vulnerabilities.Count > 0,
-            hasGatingIndicatorFindings: report.Assemblies
-                .Where(a => a.Indicators is not null)
-                .Any(a => a.Indicators!.Findings.Any(f => ReportTheme.IsGatingIndicatorCategory(f.Category))),
+            hasYaraFindings: gate.Yara,
+            hasVulnerabilities: gate.Vulnerabilities,
+            hasGatingIndicatorFindings: gate.GatingIndicators,
             isIncomplete: !CompletenessAssessment.ForPackage(report).IsComplete,
             allowIncomplete: allowIncomplete);
+    }
+
+    // The three finding gates of a package report, once: ScanPackageExitCode and the MCP job's gate.json both read them.
+    internal static (bool Yara, bool Vulnerabilities, bool GatingIndicators) GateFindings(PackageCapabilityReport report) =>
+        (report.YaraFindings.Count > 0,
+         report.Vulnerabilities.Count > 0,
+         report.Assemblies
+            .Where(a => a.Indicators is not null)
+            .Any(a => a.Indicators!.Findings.Any(f => ReportTheme.IsGatingIndicatorCategory(f.Category))));
 
     // Best-effort OSV.dev known-vulnerability lookup for scan-package (default-on; ADR 0017). Builds queries from the
     // LOCAL nuspec identity (package@version + declared deps at their range floor), then sync-bridges the network call
@@ -1157,6 +1181,60 @@ internal static class Program
         }
     }
 
+    // The hidden `__worker job` verb (ADR 0039 S1). The workers' posture: stderr-only, capped logging; raw stdin/stdout;
+    // the parent watch on Linux, the Job Object the server put it in on Windows. stdin is not disposed: the worker's stdin
+    // watch may still be reading it as the process ends.
+    private static int RunJobWorker(string? protocol)
+    {
+        Runtime.WithStderrLogging("Silvergun", "worker-job");
+        WorkerParentWatch.Start();
+        var stdin = Console.OpenStandardInput();
+        using var stdout = Console.OpenStandardOutput();
+        Console.SetOut(TextWriter.Null);
+        return JobWorker.Run(protocol, stdin, stdout, ScanForJob);
+    }
+
+    // A `__worker job` command line that did not parse: one job-protocol `fatal`, exit 3, with fixed text (the parser's
+    // messages can quote argument tokens).
+    private static int RunJobWorkerArgumentError(int errors)
+    {
+        Runtime.WithStderrLogging("Silvergun", "worker-job");
+        using var stdout = Console.OpenStandardOutput();
+        Console.SetOut(TextWriter.Null);
+        return JobWorker.Refuse(stdout, (errors > 0 ? $"the worker's arguments did not parse ({errors} error(s))" : "the worker's arguments asked for something other than a worker session")
+            + $"; expected __worker job --protocol {JobProtocol.Version}");
+    }
+
+    // One MCP job's analysis (ADR 0039 S1): scan-package's passes into the job's extraction directory, OSV only when the
+    // server allows the network, then exactly scan-package --json's projection (the completeness splice included) and the
+    // gate its exit-code seam decides. A deep job adds reachability and SSA, as --reachability --ssa do.
+    private static Result<JobScanOutput> ScanForJob(string nupkgPath, string extractionDir, JobDepth depth, bool network, IProgress<PackageScanProgress> progress)
+    {
+        var deep = depth == JobDepth.Deep;
+        var scan = PackageScanner.ScanInto(nupkgPath, extractionDir, progress, runReachability: deep, runSsa: deep);
+        if (!scan.IsSuccess)
+            return Result.Failure<JobScanOutput>(scan.Message ?? "the package could not be scanned", scan.Exception);
+
+        var report = scan.Value;
+        if (network)
+        {
+            var (findings, status) = ResolveVulnerabilities(report.Package, report.ResolvedDependencies);
+            report = report with { Vulnerabilities = findings, VulnerabilitiesStatus = status };
+        }
+
+        var completeness = CompletenessAssessment.ForPackage(report);
+        var (yara, vulnerabilities, indicators) = GateFindings(report);
+        var gate = new JobGate(
+            ScanPackageExitCode(report, strict: true, allowIncomplete: false),
+            ScanPackageExitCode(report, strict: false, allowIncomplete: false),
+            [.. new[] { (yara, JobGate.YaraReason), (vulnerabilities, JobGate.VulnerabilityReason), (indicators, JobGate.IndicatorReason) }.Where(g => g.Item1).Select(g => g.Item2)],
+            completeness.IsComplete,
+            // Raw, bounded: the summary escapes each caveat once, after removing host paths.
+            [.. completeness.Caveats.Take(MaxJobCaveats).Select(c => c.Length <= MaxJobCaveatChars ? c : c[..(char.IsHighSurrogate(c[MaxJobCaveatChars - 1]) ? MaxJobCaveatChars - 1 : MaxJobCaveatChars)])]);
+        return Result.Success(new JobScanOutput(report, WithCompleteness(report.ToJson(), completeness), gate,
+            Enum.GetValues<IndicatorCategory>().Where(ReportTheme.IsGatingIndicatorCategory).ToHashSet()));
+    }
+
     // Whether `result` is `command`'s, or lies under it in the parse tree.
     private static bool IsWithin(SymbolResult? result, Command command) =>
         result is not null && ((result is CommandResult { Command: var c } && ReferenceEquals(c, command)) || IsWithin(result.Parent, command));
@@ -1231,6 +1309,10 @@ internal static class Program
 
     #region Fields
     private const string McpVerb = "mcp";
+
+    // gate.json's caveat bounds (JobArtifacts checks them on reading): a caveat can name many package paths.
+    private const int MaxJobCaveats = 64;
+    private const int MaxJobCaveatChars = 2000;
 
     // Env var carrying the libraries.io API key; presence auto-selects the libraries.io source. Never emitted.
     private const string LibrariesIoApiKeyEnvVar = "SILVERGUN_LIBRARIESIO_API_KEY";

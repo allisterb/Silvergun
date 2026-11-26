@@ -31,7 +31,9 @@ public sealed class ServerTools(ServerState state)
             {
                 ["silvergun"] = ServerState.SilvergunVersion,
                 ["mcpSdk"] = ServerState.SdkVersion,
-                ["protocol"] = server.NegotiatedProtocolVersion
+                ["protocol"] = server.NegotiatedProtocolVersion,
+                ["rulesHash"] = Jobs.BuildIdentity.RulesHash,
+                ["cacheBuildKey"] = Jobs.BuildIdentity.BuildKey
             },
             ["settings"] = new JsonObject
             {
@@ -48,7 +50,8 @@ public sealed class ServerTools(ServerState state)
                 ["maxWaitSeconds"] = McpLimits.MaxWaitSeconds,
                 ["standardJobBudgetSeconds"] = McpLimits.StandardJobBudgetSeconds,
                 ["deepJobBudgetSeconds"] = McpLimits.DeepJobBudgetSeconds,
-                ["jobMemoryBytes"] = McpLimits.JobMemoryBytes
+                ["jobMemoryBytes"] = McpLimits.JobMemoryBytes,
+                ["deepJobMemoryBytes"] = McpLimits.DeepJobMemoryBytes
             }
         });
     }
@@ -60,6 +63,10 @@ public static class ToolNames
 {
     #region Fields
     public const string GetServerInfo = "get_server_info";
+    public const string AnalyzePackage = "analyze_package";
+    public const string WaitForJob = "wait_for_job";
+    public const string CancelJob = "cancel_job";
+    public const string GetSummary = "get_summary";
     #endregion
 }
 
@@ -73,6 +80,11 @@ public static class McpLimits
     public const int MaxWaitSeconds = 55;
     public const int StandardJobBudgetSeconds = 900;
     public const int DeepJobBudgetSeconds = 1_500;
+    /// <summary>A standard job's whole process tree (Windows Job Object).</summary>
     public const long JobMemoryBytes = 4L * 1024 * 1024 * 1024;
+    /// <summary>A deep job's tree: the child's heap plus the graph worker's own 4 GiB process limit, with room for YARA-X.</summary>
+    public const long DeepJobMemoryBytes = 8L * 1024 * 1024 * 1024;
+    /// <summary>The job child's own GC heap hard limit, at either depth (the only memory bound on Linux).</summary>
+    public const long JobHeapBytes = 3L * 1024 * 1024 * 1024;
     #endregion
 }

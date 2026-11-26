@@ -41,6 +41,28 @@ public sealed class McpClientTests
         Assert.False(annotations.OpenWorldHint, "openWorldHint");
     }
 
+    /// <summary>D7: every tool is read-only toward the user's machine and closed-world (S5's tools are the only open-world ones).</summary>
+    [Fact]
+    public async Task ToolsList_JobTools_AreReadOnly_Idempotent_AndClosedWorld()
+    {
+        using var dirs = new TestDirs();
+        using var cts = new CancellationTokenSource(McpCli.Timeout);
+        var stderr = new List<string>();
+        await using var client = await ConnectAsync(McpCli.Args(dirs), dirs, stderr, cts.Token);
+
+        var tools = await client.ListToolsAsync(cancellationToken: cts.Token);
+
+        foreach (var name in new[] { ToolNames.AnalyzePackage, ToolNames.WaitForJob, ToolNames.CancelJob, ToolNames.GetSummary })
+        {
+            var annotations = Assert.Single(tools, t => t.Name == name).ProtocolTool.Annotations;
+            Assert.NotNull(annotations);
+            Assert.True(annotations.ReadOnlyHint, $"{name}: readOnlyHint");
+            Assert.True(annotations.IdempotentHint, $"{name}: idempotentHint");
+            Assert.False(annotations.DestructiveHint, $"{name}: destructiveHint");
+            Assert.False(annotations.OpenWorldHint, $"{name}: openWorldHint");
+        }
+    }
+
     [Fact]
     public async Task Guide_IsReadableAsMarkdown()
     {
@@ -90,6 +112,9 @@ public sealed class McpClientTests
         Assert.False(string.IsNullOrWhiteSpace(ServerState.SdkVersion));
         Assert.Equal(client.NegotiatedProtocolVersion, versions.GetProperty("protocol").GetString());
         Assert.False(string.IsNullOrWhiteSpace(client.NegotiatedProtocolVersion));
+        Assert.Matches("^[0-9a-f]{64}$", versions.GetProperty("rulesHash").GetString());
+        Assert.Equal(Silvergun.MCPServer.Jobs.BuildIdentity.RulesHash, versions.GetProperty("rulesHash").GetString());
+        Assert.Equal(Silvergun.MCPServer.Jobs.BuildIdentity.BuildKey, versions.GetProperty("cacheBuildKey").GetString());
 
         var settings = s.GetProperty("settings");
         var roots = settings.GetProperty("roots").EnumerateArray().Select(r => r.GetString()!).ToArray();
@@ -113,6 +138,7 @@ public sealed class McpClientTests
         Assert.Equal(McpLimits.StandardJobBudgetSeconds, limits.GetProperty("standardJobBudgetSeconds").GetInt32());
         Assert.Equal(McpLimits.DeepJobBudgetSeconds, limits.GetProperty("deepJobBudgetSeconds").GetInt32());
         Assert.Equal(McpLimits.JobMemoryBytes, limits.GetProperty("jobMemoryBytes").GetInt64());
+        Assert.Equal(McpLimits.DeepJobMemoryBytes, limits.GetProperty("deepJobMemoryBytes").GetInt64());
 
         // No host path anywhere in the result (D6.5): not the roots, not the cache, not the log directory.
         var whole = s.GetRawText();

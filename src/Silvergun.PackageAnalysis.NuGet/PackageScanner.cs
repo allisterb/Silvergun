@@ -32,10 +32,23 @@ public sealed class PackageScanner : Runtime
         Scan(nupkgPath, resolveReferences, runYara, yaraScanner,
             runReachability ? p => PackageReachability.Analyze(p, runSsa ? PackageReachabilityOptions.Default with { Ssa = SsaFactBounds.Default } : null) : null);
 
+    /// <summary>
+    /// <see cref="Scan(string, bool, bool, IYaraScanner?, bool, bool)"/>, extracting into <paramref name="extractionDir"/>
+    /// (see <see cref="NuGetPackage.Open(string, string?)"/>), which is kept afterwards, and reporting each stage to
+    /// <paramref name="progress"/> as it starts.
+    /// </summary>
+    public static Result<PackageCapabilityReport> ScanInto(string nupkgPath, string extractionDir, IProgress<PackageScanProgress>? progress, bool resolveReferences = true,
+        bool runYara = true, bool runReachability = false, bool runSsa = false) =>
+        Scan(nupkgPath, resolveReferences, runYara, null,
+            runReachability ? p => PackageReachability.Analyze(p, runSsa ? PackageReachabilityOptions.Default with { Ssa = SsaFactBounds.Default } : null) : null,
+            extractionDir, progress);
+
     /// <summary><see cref="Scan(string, bool, bool, IYaraScanner?, bool, bool)"/> with the graph pass supplied; null for none.</summary>
-    internal static Result<PackageCapabilityReport> Scan(string nupkgPath, bool resolveReferences, bool runYara, IYaraScanner? yaraScanner, Func<NuGetPackage, PackageReachabilityReport>? reachability)
+    internal static Result<PackageCapabilityReport> Scan(string nupkgPath, bool resolveReferences, bool runYara, IYaraScanner? yaraScanner, Func<NuGetPackage, PackageReachabilityReport>? reachability,
+        string? extractionDir = null, IProgress<PackageScanProgress>? progress = null)
     {
-        var opened = NuGetPackage.Open(nupkgPath);
+        progress?.Report(new(PackageScanStage.Extract, 0, 1));
+        var opened = NuGetPackage.Open(nupkgPath, extractionDir);
         if (!opened.IsSuccess)
             return Result.Failure<PackageCapabilityReport>(opened.Message, opened.Exception);
 
@@ -43,7 +56,11 @@ public sealed class PackageScanner : Runtime
         try
         {
             // The inventoried assemblies, then the declared entries that never reached the inventory (ADR 0030).
-            var results = package.Assemblies.Select(a => ScanAssembly(a, resolveReferences))
+            var results = package.Assemblies.Select((a, i) =>
+                {
+                    progress?.Report(new(PackageScanStage.Assemblies, i, package.Assemblies.Count));
+                    return ScanAssembly(a, resolveReferences);
+                })
                 .Concat(package.UninventoriedDeclaredEntries.Select(e => NotInventoried(e.Declared, e.Reported)))
                 .Concat(package.UnextractedBundleEntries.Select(NotExtractedFromBundle))
                 .ToArray();
@@ -51,12 +68,15 @@ public sealed class PackageScanner : Runtime
             // Script content scanning runs while the package is still open (its extraction dir exists — ADR 0012).
             // Best-effort: a scanner failure never sinks the whole scan, and any file that could not be scanned makes
             // the status Unavailable — with the hits of the files that were scanned kept (ADR 0030, ADR 0032).
+            progress?.Report(new(PackageScanStage.Scripts, 0, package.Scripts.Count + 1));
             var (scriptFindings, scriptStatus, scriptUnavailableReason) = ScanScripts(package);
 
             // YARA malware-signature scanning over every extracted file (ADR 0016), while the extraction dir still
             // exists. Best-effort/never-throws: an unavailable backend or a failed scan yields Unavailable — with
             // whatever hits an incomplete scan did find (ADR 0032), otherwise empty — so a caller can never mistake
             // "could not scan" for "scanned and clean" (the defect this status field exists to close).
+            if (runYara)
+                progress?.Report(new(PackageScanStage.Yara, 0, package.YaraInventory.Count + package.BundleYaraInventory.Count));
             var (yaraFindings, yaraStatus, yaraUnavailableReason) = runYara
                 ? ScanYara(package, yaraScanner)
                 : (Array.Empty<YaraFinding>(), YaraScanStatus.NotRun, null);
@@ -68,6 +88,8 @@ public sealed class PackageScanner : Runtime
 
             // The graph pass (R3, opt-in) runs last, after YARA, so the minutes it can take never widen the window in
             // which YARA's inventory goes stale (ADR 0034). It needs the extracted files, so the package is still open.
+            if (reachability is not null)
+                progress?.Report(new(PackageScanStage.Reachability, 0, 1));
             var reachabilitySummary = reachability is null ? null : SummarizeReachability(package, reachability);
             var (nativeStatus, nativeReason) = NativeBinaryScanOutcome(package.NativeBinaryUnreadFiles);
 
@@ -460,3 +482,12 @@ public sealed class PackageScanner : Runtime
     private const string BundleScope = "unpacked single-file bundle files";
     #endregion
 }
+
+/// <summary>A stage of <see cref="PackageScanner.ScanInto"/>, in the order they run.</summary>
+public enum PackageScanStage { Extract, Assemblies, Scripts, Yara, Reachability }
+
+/// <summary>
+/// A stage starting, or progress within it: <see cref="Done"/> of <see cref="Total"/> units (assemblies, files) finished.
+/// Native-header reading is part of <see cref="PackageScanStage.Extract"/>.
+/// </summary>
+public readonly record struct PackageScanProgress(PackageScanStage Stage, int Done, int Total);
