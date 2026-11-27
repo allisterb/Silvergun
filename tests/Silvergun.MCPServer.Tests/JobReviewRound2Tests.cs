@@ -306,10 +306,12 @@ public sealed class JobRound2StoreTests
         var view = await InProcess.RunToEndAsync(InProcess.Manager(dirs), package);
 
         Assert.True(view.State == JobState.Completed, $"{view.State} {view.Reason}");
-        var rows = JsonNode.Parse(File.ReadAllText(Path.Combine(view.EntryDir!, JobProtocol.InventoryFile)))!["rows"]!.AsArray();
-        var row = Assert.Single(rows, r => r!["kind"]!.GetValue<string>() == "notExtracted")!;
+        // S2: one row per line (inventory.jsonl), the path wrapped as {"untrusted": ...}.
+        var rows = File.ReadAllLines(Path.Combine(view.EntryDir!, JobProtocol.InventoryFile)).Where(l => l.Length > 0).Select(l => JsonNode.Parse(l)!.AsObject()).ToList();
+        var row = Assert.Single(rows, r => r["kind"]!.GetValue<string>() == "notExtracted");
         Assert.Equal("report", row["pathForm"]!.GetValue<string>());
-        var path = row["path"]!.GetValue<string>();
+        Assert.Single(row["path"]!.AsObject());
+        var path = row["path"]!["untrusted"]!.GetValue<string>();
         var cut = path.IndexOf((char)0x2026 + "[+", StringComparison.Ordinal);
         Assert.True(cut > 0, $"the path was not cut: {path}");
         Assert.True(cut <= 512, $"kept {cut} chars");

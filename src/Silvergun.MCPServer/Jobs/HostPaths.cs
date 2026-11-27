@@ -48,8 +48,9 @@ public static class HostPaths
     }
 
     /// <summary>
-    /// <see cref="Reduce"/> applied in place to the free text of a served summary only: every string under a
-    /// <c>reason</c> or <c>caveats</c> key. Package paths and names elsewhere are evidence and are never rewritten.
+    /// <see cref="Reduce"/> applied in place to the free text of a served result only: every string under a <c>reason</c>,
+    /// <c>reasons</c>, <c>caveats</c>, <c>note</c> or <c>notes</c> key. Package paths and names elsewhere are evidence and are
+    /// never rewritten.
     /// </summary>
     public static JsonNode? ReduceReasons(JsonNode? node, IReadOnlyList<(string Path, string Label)> known)
     {
@@ -57,7 +58,7 @@ public static class HostPaths
         {
             case JsonObject obj:
                 foreach (var key in obj.Select(p => p.Key).ToArray())
-                    if (key is "reason" or "caveats")
+                    if (key is "reason" or "reasons" or "caveats" or "note" or "notes")
                     {
                         if (Reduced(obj[key], known) is { } value)
                             obj[key] = value;

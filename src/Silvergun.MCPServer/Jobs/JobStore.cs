@@ -88,6 +88,23 @@ public sealed class JobStore(string root, long maxBytes, bool network = false)
             TryDelete(EntryDir(sha256, depth));
     }
 
+    /// <summary>
+    /// Deletes a completed entry a reader found corrupt, so the next <c>analyze_package</c> re-runs it rather than serve it
+    /// (task D4). Only under the key's lock: an entry being run or deleted elsewhere is left alone. Whether it was deleted.
+    /// </summary>
+    public bool Invalidate(string sha256, JobDepth depth)
+    {
+        try
+        {
+            using var held = TryLock(sha256, depth);
+            return held is not null && TryDelete(EntryDir(sha256, depth));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>A new, private temporary directory for the key's run.</summary>
     public string CreateTemp(string sha256, JobDepth depth)
     {

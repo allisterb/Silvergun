@@ -1,6 +1,7 @@
 namespace Silvergun.MCPServer;
 
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -34,9 +35,11 @@ public static class ToolEnvelope
     /// The result of <paramref name="tool"/>. <paramref name="data"/>'s fields follow the envelope's and must not reuse
     /// its names. <paramref name="message"/> is Silvergun-authored text; <paramref name="reason"/> is text that is or quotes
     /// package or agent input, and is always wrapped by <see cref="Untrusted"/> (task D6.2). Both are escaped and cut to
-    /// <see cref="MaxMessageChars"/>.
+    /// <see cref="MaxMessageChars"/>. <paramref name="bulk"/>, when set, is a second text block: package text already inside
+    /// its <see cref="UntrustedFence"/> (task D6.3).
     /// </summary>
-    public static CallToolResult Create(string tool, ToolStatus status, Stopwatch elapsed, JsonObject? data = null, string? message = null, string? reason = null)
+    public static CallToolResult Create(string tool, ToolStatus status, Stopwatch elapsed, JsonObject? data = null, string? message = null, string? reason = null,
+        string? bulk = null)
     {
         var body = new JsonObject
         {
@@ -57,7 +60,9 @@ public static class ToolEnvelope
         {
             IsError = !IsOk(status),
             StructuredContent = element,
-            Content = [new TextContentBlock { Text = element.GetRawText() }]
+            Content = bulk is null
+                ? [new TextContentBlock { Text = element.GetRawText() }]
+                : [new TextContentBlock { Text = element.GetRawText() }, new TextContentBlock { Text = bulk }]
         };
     }
 
@@ -95,5 +100,45 @@ public static class ToolEnvelope
     // as \uXXXX, so a key or value a tool forgot to wrap still cannot reach the agent raw, and a forged fence cannot
     // appear verbatim in the JSON (S0 review round 2).
     private static readonly JsonSerializerOptions jsonOptions = new() { WriteIndented = false };
+    #endregion
+}
+
+/// <summary>
+/// Bulk package text between fences (task D6.3), with a nonce from <see cref="RandomNumberGenerator"/>, one per response.
+/// Inside, every fence marker (in any case) is escaped, and the nonce is drawn again until it occurs nowhere in the content
+/// (S2 review W1), so only the real fences carry either.
+/// </summary>
+public sealed class UntrustedFence
+{
+    #region Constructors
+    /// <summary>Fences <paramref name="text"/>, which is already escaped for display.</summary>
+    public UntrustedFence(string text)
+    {
+        Content = Neutralize(text);
+        do
+            Nonce = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8));
+        while (Content.Contains(Nonce, StringComparison.OrdinalIgnoreCase));
+    }
+    #endregion
+
+    #region Properties
+    public string Nonce { get; }
+
+    /// <summary>The text with every fence marker escaped: at most a quarter longer than it was.</summary>
+    public string Content { get; }
+
+    public string Open => $"<<<UNTRUSTED nonce={Nonce}>>>";
+
+    public string Close => $"<<<END UNTRUSTED nonce={Nonce}>>>";
+
+    /// <summary>The text block: the opening fence, the content and the closing fence, one per line.</summary>
+    public string Block => $"{Open}\n{Content}\n{Close}";
+    #endregion
+
+    #region Methods
+    /// <summary><paramref name="text"/> with the fence markers escaped, in any case.</summary>
+    public static string Neutralize(string text) => text
+        .Replace("<<<UNTRUSTED", @"<<\x3cUNTRUSTED", StringComparison.OrdinalIgnoreCase)
+        .Replace("<<<END UNTRUSTED", @"<<\x3cEND UNTRUSTED", StringComparison.OrdinalIgnoreCase);
     #endregion
 }

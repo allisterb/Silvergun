@@ -33,6 +33,9 @@ public static class JobProtocol
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
         WriteIndented = false,
     };
+
+    /// <summary>How every artifact is parsed back: a duplicate key at any depth is invalid JSON, never a later throw.</summary>
+    public static JsonDocumentOptions DocumentOptions { get; } = new() { AllowDuplicateProperties = false };
     #endregion
 
     #region Fields
@@ -52,7 +55,11 @@ public static class JobProtocol
     public const string ReportFile = "report.json";
     public const string GateFile = "gate.json";
     public const string SummaryFile = "summary.json";
-    public const string InventoryFile = "inventory.json";
+    /// <summary>The inventory, one row per line (<see cref="RowFile"/>), as are the finding and reachability lists.</summary>
+    public const string InventoryFile = "inventory.jsonl";
+    public const string ReachabilityFile = "reachability.jsonl";
+    /// <summary>Each row file's count and cut, and each finding kind's pass status: written last of the child's artifacts.</summary>
+    public const string IndexFile = "index.json";
     public const string JobFile = "job.json";
     #endregion
 }

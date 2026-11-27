@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading;
 
 using Silvergun.CodeAnalysis.IL;
@@ -71,8 +72,7 @@ public static class JobWorker
             JobArtifacts.WriteAtomic(request.JobDir, JobProtocol.GateFile, JsonSerializer.SerializeToUtf8Bytes(output.Gate, JobProtocol.JsonOptions));
             JobArtifacts.WriteAtomic(request.JobDir, JobProtocol.SummaryFile,
                 Encoding.UTF8.GetBytes(PackageSummary.Build(output.Report, output.Gate, request.Depth, output.GatingIndicators, hostPaths).ToJsonString(JobProtocol.JsonOptions)));
-            JobArtifacts.WriteAtomic(request.JobDir, JobProtocol.InventoryFile,
-                Encoding.UTF8.GetBytes(PackageInventory.Build(output.Report, files, nupkg, hostPaths).ToJsonString(JobProtocol.JsonOptions)));
+            WriteDrillDown(request.JobDir, output, files, nupkg, hostPaths);
             var (elapsed, stages) = clock.Finish();
             writer.Write(new JobDone(elapsed, stages));
             return JobProtocol.ExitDone;
@@ -81,6 +81,26 @@ public static class JobWorker
         {
             return writer.Fatal($"{ex.GetType().Name}: {ex.Message}");
         }
+    }
+
+    // The drill-down row files (task S2), then their index, last: the inventory first, so the findings name files as it does.
+    private static void WriteDrillDown(string jobDir, JobScanOutput output, string files, string nupkg, IReadOnlyList<(string Path, string Label)> hostPaths)
+    {
+        PackagePaths paths;
+        JsonObject inventory;
+        using (var rows = new RowWriter(jobDir, JobProtocol.InventoryFile, PackageInventory.MaxRows, PackageInventory.MaxChars))
+        {
+            paths = PackageInventory.Write(output.Report, files, nupkg, hostPaths, rows);
+            rows.Commit();
+            inventory = rows.Index();
+        }
+        var index = new JsonObject
+        {
+            ["files"] = inventory,
+            ["findings"] = PackageFindings.Write(jobDir, output.Report, output.GatingIndicators, paths, hostPaths),
+            ["reachability"] = ReachabilityRows.Write(jobDir, output.Report, hostPaths),
+        };
+        JobArtifacts.WriteAtomic(jobDir, JobProtocol.IndexFile, Encoding.UTF8.GetBytes(index.ToJsonString(JobProtocol.JsonOptions)));
     }
 
     // Why `line` is not a usable request, or null with `request` set.

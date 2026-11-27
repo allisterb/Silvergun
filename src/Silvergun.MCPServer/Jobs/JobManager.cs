@@ -280,7 +280,7 @@ public sealed class JobManager(McpServerSettings settings, JobLaunch launch)
                     return;
             }
 
-            if ((JobArtifacts.MissingArtifact(temp) ?? JobArtifacts.ReadGate(temp).Problem ?? JobArtifacts.ReadSummary(temp).Problem) is { } bad)
+            if ((JobArtifacts.MissingArtifact(temp) ?? JobArtifacts.ReadGate(temp).Problem ?? JobArtifacts.ReadSummary(temp).Problem ?? JobArtifacts.ReadIndex(temp).Problem) is { } bad)
             {
                 run.End(JobState.Failed, WithoutHostPaths($"the job's results failed their checks: {bad}"));
                 return;
@@ -424,7 +424,7 @@ public sealed class JobManager(McpServerSettings settings, JobLaunch launch)
     // The stages in the order they run; reachability last, and only when deep.
     private static readonly string?[] stageOrder = ["extract", "assemblies", "scripts", "yara", "write", "reachability"];
 
-    private static readonly Regex jobIdPattern = new("^([0-9a-f]{64})-(standard|deep)$", RegexOptions.CultureInvariant);
+    private static readonly Regex jobIdPattern = new(@"\A([0-9a-f]{64})-(standard|deep)\z", RegexOptions.CultureInvariant);
 
     private readonly SemaphoreSlim gate = new(settings.MaxJobs, settings.MaxJobs);
     private readonly SemaphoreSlim copies = new(MaxConcurrentCopies, MaxConcurrentCopies);

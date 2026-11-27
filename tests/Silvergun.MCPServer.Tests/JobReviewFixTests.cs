@@ -77,17 +77,24 @@ public sealed class JobReviewFixTests
         var view = await InProcess.RunToEndAsync(manager, package);
 
         Assert.True(view.State == JobState.Completed, $"{view.State} {view.Reason}");
-        using var inventory = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(view.EntryDir!, JobProtocol.InventoryFile)));
-        var truncated = inventory.RootElement.GetProperty("truncated");
+        // S2: one row per line (inventory.jsonl), the list's cut in index.json, and the path wrapped as {"untrusted": ...}.
+        var text = File.ReadAllText(Path.Combine(view.EntryDir!, JobProtocol.InventoryFile), Encoding.ASCII);
+        Assert.EndsWith("\n", text);
+        var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        using var index = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(view.EntryDir!, JobProtocol.IndexFile)));
+        var truncated = index.RootElement.GetProperty("files").GetProperty("truncated");
         Assert.Contains(truncated.ValueKind, new[] { JsonValueKind.True, JsonValueKind.False });
-        var rows = inventory.RootElement.GetProperty("rows").EnumerateArray().ToList();
+        Assert.Equal(lines.Length, index.RootElement.GetProperty("files").GetProperty("rows").GetInt32());
+        var rows = lines.Select(l => JsonDocument.Parse(l).RootElement).ToList();
         Assert.NotEmpty(rows);
         Assert.True(rows.Count <= entries.Count + 1, $"{rows.Count} rows for {entries.Count + 1} entries");
         if (truncated.ValueKind == JsonValueKind.False)
             Assert.True(rows.Count >= 2_000, $"only {rows.Count} rows, yet not truncated");
         foreach (var row in rows)
         {
-            var path = row.GetProperty("path").GetString()!;
+            var wrapped = row.GetProperty("path");
+            Assert.Single(wrapped.EnumerateObject());
+            var path = wrapped.GetProperty("untrusted").GetString()!;
             Assert.True(path.Length <= 560, $"a row path of {path.Length} chars");
             Assert.False(path.Any(char.IsSurrogate), $"a raw astral character in a row path: {path[..Math.Min(80, path.Length)]}");
             Assert.DoesNotContain(rlo, path);
@@ -101,8 +108,10 @@ public sealed class JobReviewFixTests
         var dup = Assert.Single(notExtracted);
         Assert.Equal("report", dup.GetProperty("pathForm").GetString());
         Assert.Equal(JsonValueKind.Null, dup.GetProperty("file").ValueKind);
+        Assert.False(dup.GetProperty("readable").GetBoolean());
+        Assert.False(string.IsNullOrEmpty(dup.GetProperty("note").GetProperty("untrusted").GetString()));
 
-        var lookalikes = rows.Select(r => r.GetProperty("path").GetString()!).Where(p => p.StartsWith("content/a", StringComparison.Ordinal) && p.EndsWith("b.txt", StringComparison.Ordinal)).ToList();
+        var lookalikes = rows.Select(r => r.GetProperty("path").GetProperty("untrusted").GetString()!).Where(p => p.StartsWith("content/a", StringComparison.Ordinal) && p.EndsWith("b.txt", StringComparison.Ordinal)).ToList();
         Assert.Equal(2, lookalikes.Count);
         Assert.Equal(2, lookalikes.Distinct(StringComparer.Ordinal).Count());
     }

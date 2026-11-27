@@ -67,6 +67,10 @@ public static class ToolNames
     public const string WaitForJob = "wait_for_job";
     public const string CancelJob = "cancel_job";
     public const string GetSummary = "get_summary";
+    public const string ListFiles = "list_files";
+    public const string ReadFile = "read_file";
+    public const string GetFindings = "get_findings";
+    public const string GetReachability = "get_reachability";
     #endregion
 }
 
@@ -75,6 +79,12 @@ public static class McpLimits
 {
     #region Fields
     public const int ResponseBudgetChars = 20_000;
+    /// <summary>The chars a page of rows may take: a result carries it twice (structured and text), with room for the envelope.</summary>
+    public const int PageBudgetChars = ResponseBudgetChars / 2 - 1_000;
+    /// <summary>The chars a fenced bulk text block may take (task D6.3): it is carried once, beside small metadata.</summary>
+    public const int BulkBudgetChars = 12_000;
+    /// <summary>The most bytes <c>read_file</c> reads in one call; what is returned is also cut to <see cref="BulkBudgetChars"/>.</summary>
+    public const int MaxReadBytes = 64 * 1024;
     public const int MaxQueuedJobs = 8;
     public const int DefaultWaitSeconds = 25;
     public const int MaxWaitSeconds = 55;

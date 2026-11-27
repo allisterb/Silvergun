@@ -57,8 +57,37 @@ public static class JobArtifacts
         var (record, problem) = Read<JobRecord>(Path.Combine(entryDir, JobProtocol.JobFile), MaxRecordBytes);
         return record is null ? (null, problem)
             : RecordProblem(record, sha256, depth, buildKey) is { } wrong ? (null, wrong)
-            : (MissingArtifact(entryDir) ?? ReadGate(entryDir).Problem ?? ReadSummary(entryDir).Problem) is { } bad ? (null, bad)
+            : (MissingArtifact(entryDir) ?? ReadGate(entryDir).Problem ?? ReadSummary(entryDir).Problem ?? ReadIndex(entryDir).Problem) is { } bad ? (null, bad)
             : (record, null);
+    }
+
+    /// <summary>
+    /// The row files' index a child wrote (task S2), or why it is not usable: every list's row count and cut, every finding
+    /// kind with its pass, and the reachability status.
+    /// </summary>
+    public static (JsonObject? Index, string? Problem) ReadIndex(string dir)
+    {
+        var (bytes, problem) = ReadBounded(Path.Combine(dir, JobProtocol.IndexFile), MaxIndexBytes);
+        if (bytes is null)
+            return (null, problem);
+        try
+        {
+            static bool List(JsonNode? node) =>
+                node is JsonObject list && list["rows"] is JsonValue rows && rows.TryGetValue<int>(out var n) && n >= 0
+                && list["truncated"] is JsonValue truncated && truncated.TryGetValue<bool>(out _);
+            return JsonNode.Parse(bytes, documentOptions: JobProtocol.DocumentOptions) is JsonObject index
+                    && List(index["files"])
+                    && index["findings"] is JsonObject findings
+                    && Enum.GetValues<FindingKind>().All(k => List(findings[PackageFindings.Name(k)]) && findings[PackageFindings.Name(k)]!["pass"] is JsonObject)
+                    && List(index["reachability"])
+                    && index["reachability"]!["status"] is JsonValue status && status.TryGetValue<string>(out var s) && s is "notRun" or "completed" or "incomplete"
+                ? (index, null)
+                : (null, "index.json does not have the expected shape");
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or ArgumentException)
+        {
+            return (null, "index.json is not valid JSON for its schema");
+        }
     }
 
     /// <summary>
@@ -72,12 +101,12 @@ public static class JobArtifacts
             return (null, problem);
         try
         {
-            return JsonNode.Parse(bytes) is JsonObject { } summary && summary["package"] is JsonObject && summary["gate"] is JsonObject
+            return JsonNode.Parse(bytes, documentOptions: JobProtocol.DocumentOptions) is JsonObject { } summary && summary["package"] is JsonObject && summary["gate"] is JsonObject
                     && bytes.Length <= PackageSummary.BudgetChars * 2
                 ? (summary, null)
                 : (null, "summary.json does not have the expected shape");
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or ArgumentException)
         {
             return (null, "summary.json is not valid JSON");
         }
@@ -160,13 +189,17 @@ public static class JobArtifacts
 
     #region Fields
     /// <summary>The artifact schema this build writes and reads. A cache entry of any other version is re-run, never half-read.</summary>
-    public const int SchemaVersion = 1;
+    /// <remarks>2: the drill-down row files and their index (task S2).</remarks>
+    public const int SchemaVersion = 2;
 
     public const long MaxRecordBytes = 64 * 1024;
     public const long MaxGateBytes = 256 * 1024;
     public const long MaxSummaryBytes = 1024 * 1024;
     public const long MaxReportBytes = 512L * 1024 * 1024;
     public const long MaxInventoryBytes = 128L * 1024 * 1024;
+    public const long MaxIndexBytes = 256 * 1024;
+    /// <summary>A finding or reachability row file: the writer's cap, with room.</summary>
+    public const long MaxRowFileBytes = RowWriter.DefaultMaxBytes + 16 * 1024 * 1024;
 
     private const int MaxStages = 16;
     private const int MaxCaveats = 64;
@@ -178,6 +211,9 @@ public static class JobArtifacts
         (JobProtocol.GateFile, MaxGateBytes),
         (JobProtocol.SummaryFile, MaxSummaryBytes),
         (JobProtocol.InventoryFile, MaxInventoryBytes),
+        (JobProtocol.ReachabilityFile, MaxRowFileBytes),
+        (JobProtocol.IndexFile, MaxIndexBytes),
+        .. Enum.GetValues<FindingKind>().Select(k => (PackageFindings.FileName(k), MaxRowFileBytes)),
     ];
 
     private static readonly Regex stageName = new("^[a-z]{1,16}$", RegexOptions.CultureInvariant);
