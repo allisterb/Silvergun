@@ -27,9 +27,10 @@ public sealed record JobView(string JobId, JobState State, string? Stage, int Do
 /// <see cref="McpLimits.MaxQueuedJobs"/> more wait. Each takes its entry's lock, so across every server process sharing
 /// the cache one key runs once; a process that finds the lock held waits for the holder's result instead. A completed job
 /// lives only on disk, so any process resolves any <c>jobId</c>; a failed or cancelled one lives only in the process that
-/// ran it. Nothing here runs before the first tool call.
+/// ran it. Nothing here runs before the first tool call. <paramref name="inspector"/> starts <c>disassemble</c>'s inspect
+/// children (task S3); by default it is <paramref name="launch"/>'s executable as the inspect worker.
 /// </summary>
-public sealed class JobManager(McpServerSettings settings, JobLaunch launch)
+public sealed class JobManager(McpServerSettings settings, JobLaunch launch, JobLaunch? inspector = null)
 {
     #region Properties
     public JobStore Store { get; } = new(settings.CacheDir, (long)settings.CacheMaxGb * 1024 * 1024 * 1024, settings.Network);
@@ -164,6 +165,39 @@ public sealed class JobManager(McpServerSettings settings, JobLaunch launch)
         var running = jobs.Values.Select(j => j.Task).OfType<Task>().ToArray();
         if (running.Length > 0)
             await Task.WhenAny(Task.WhenAll(running), Task.Delay(bound));
+    }
+
+    /// <summary>
+    /// Runs one inspect child for <paramref name="request"/> (task S3) under its budget and containment; at most
+    /// <see cref="McpLimits.MaxInspections"/> at once, and a call that cannot start within <see cref="InspectSlotWait"/> is
+    /// <see cref="ToolStatus.Busy"/>. Its reason is escaped and bounded, with host paths reduced.
+    /// </summary>
+    public async Task<(JobRunResult? Result, ToolStatus Status, string? Problem)> InspectAsync(InspectRequest request, CancellationToken ct)
+    {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, shutdown.Token);
+        if (!await inspections.WaitAsync(InspectSlotWait, linked.Token))
+            return (null, ToolStatus.Busy, $"{McpLimits.MaxInspections} inspections are already running; try again shortly");
+        try
+        {
+            var result = await Task.Factory.StartNew(
+                () => JobProcess.Run(inspector ?? launch.Inspector(), request, TimeSpan.FromSeconds(McpLimits.InspectBudgetSeconds), McpLimits.InspectMemoryBytes,
+                    McpLimits.InspectHeapBytes, _ => { }, linked.Token, InspectProtocol.MaxResultLineBytes),
+                CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+            // No default arm (task D10).
+#pragma warning disable CS8524
+            return result.Status switch
+            {
+                JobRunStatus.Completed => (result, ToolStatus.Succeeded, null),
+                JobRunStatus.Cancelled => (null, ToolStatus.Cancelled, "the call was cancelled; the inspect process was killed"),
+                JobRunStatus.TimedOut => (null, ToolStatus.Failed, $"listing the method ran past its {McpLimits.InspectBudgetSeconds} s budget, so it was stopped"),
+                JobRunStatus.Failed => (null, ToolStatus.Failed, WithoutHostPaths(result.Reason ?? "the inspect process failed")),
+            };
+#pragma warning restore CS8524
+        }
+        finally
+        {
+            inspections.Release();
+        }
     }
 
     public static string JobId(string sha256, JobDepth depth) => $"{sha256}-{JobStore.DepthName(depth)}";
@@ -417,6 +451,7 @@ public sealed class JobManager(McpServerSettings settings, JobLaunch launch)
 
     #region Fields
     private const int MaxConcurrentCopies = 2;
+    private static readonly TimeSpan InspectSlotWait = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan PeerPoll = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan CancelWait = TimeSpan.FromSeconds(10);
     private const int MaxCostSamples = 10_000;
@@ -428,6 +463,7 @@ public sealed class JobManager(McpServerSettings settings, JobLaunch launch)
 
     private readonly SemaphoreSlim gate = new(settings.MaxJobs, settings.MaxJobs);
     private readonly SemaphoreSlim copies = new(MaxConcurrentCopies, MaxConcurrentCopies);
+    private readonly SemaphoreSlim inspections = new(McpLimits.MaxInspections, McpLimits.MaxInspections);
     private readonly ConcurrentDictionary<string, JobRun> jobs = new(StringComparer.Ordinal);
     private readonly CancellationTokenSource shutdown = new();
     private readonly object sync = new();

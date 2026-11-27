@@ -71,6 +71,9 @@ public static class ToolNames
     public const string ReadFile = "read_file";
     public const string GetFindings = "get_findings";
     public const string GetReachability = "get_reachability";
+    public const string ListMembers = "list_members";
+    public const string Disassemble = "disassemble";
+    public const string SearchStrings = "search_strings";
     #endregion
 }
 
@@ -96,5 +99,10 @@ public static class McpLimits
     public const long DeepJobMemoryBytes = 8L * 1024 * 1024 * 1024;
     /// <summary>The job child's own GC heap hard limit, at either depth (the only memory bound on Linux).</summary>
     public const long JobHeapBytes = 3L * 1024 * 1024 * 1024;
+    /// <summary>One <c>disassemble</c> call's inspect child (task S3): its wall clock, process tree and GC heap.</summary>
+    public const int InspectBudgetSeconds = 30;
+    public const long InspectMemoryBytes = 2L * 1024 * 1024 * 1024;
+    public const long InspectHeapBytes = 1536L * 1024 * 1024;
+    public const int MaxInspections = 2;
     #endregion
 }

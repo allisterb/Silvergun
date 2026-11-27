@@ -83,7 +83,8 @@ public static class JobWorker
         }
     }
 
-    // The drill-down row files (task S2), then their index, last: the inventory first, so the findings name files as it does.
+    // The drill-down row files (tasks S2, S3), then their index, last: the inventory first, so the other lists name files as it
+    // does; the members before the findings, which carry the caller tokens the members walk found.
     private static void WriteDrillDown(string jobDir, JobScanOutput output, string files, string nupkg, IReadOnlyList<(string Path, string Label)> hostPaths)
     {
         PackagePaths paths;
@@ -94,11 +95,14 @@ public static class JobWorker
             rows.Commit();
             inventory = rows.Index();
         }
+        var members = MemberRows.Write(jobDir, output.Report, paths);
         var index = new JsonObject
         {
             ["files"] = inventory,
-            ["findings"] = PackageFindings.Write(jobDir, output.Report, output.GatingIndicators, paths, hostPaths),
+            ["findings"] = PackageFindings.Write(jobDir, output.Report, output.GatingIndicators, paths, hostPaths, members),
             ["reachability"] = ReachabilityRows.Write(jobDir, output.Report, hostPaths),
+            ["members"] = members.Members,
+            ["strings"] = members.Strings,
         };
         JobArtifacts.WriteAtomic(jobDir, JobProtocol.IndexFile, Encoding.UTF8.GetBytes(index.ToJsonString(JobProtocol.JsonOptions)));
     }
@@ -126,8 +130,9 @@ public static class JobWorker
     #endregion
 
     #region Types
-    // The stdout writer: one compact JSON record per line, never longer than the protocol allows. Thread-safe.
-    private sealed class Writer(Stream stdout)
+    // The stdout writer: one compact JSON record per line, never longer than the protocol allows. Thread-safe. Shared with
+    // the inspect worker, which speaks the same records.
+    internal sealed class Writer(Stream stdout)
     {
         public void Write(JobMessage message)
         {

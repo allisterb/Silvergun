@@ -41,10 +41,24 @@ public static class PackageFindings
 
     public static string FileName(FindingKind kind) => $"findings-{Name(kind)}.jsonl";
 
-    /// <summary>Writes every kind's rows into <paramref name="dir"/>; returns their index entries, by kind name.</summary>
+    /// <summary>
+    /// Writes every kind's rows into <paramref name="dir"/>; returns their index entries, by kind name. With
+    /// <paramref name="members"/>, the per-assembly kinds carry their caller tokens (task S3).
+    /// </summary>
     public static JsonObject Write(string dir, PackageCapabilityReport report, IReadOnlySet<IndicatorCategory> gating, PackagePaths paths,
-        IReadOnlyList<(string Path, string Label)> hostPaths)
+        IReadOnlyList<(string Path, string Label)> hostPaths, MemberRows? members = null)
     {
+        // The methods a finding may be in: one in the common case, all overloads the evidence leaves otherwise.
+        JsonObject Callers(JsonObject row, object finding)
+        {
+            // Absent, not empty, when the assembly was not walked for members (S3 review S3).
+            if (members?.CallerTokens(finding, MaxListItems) is not var (tokens, total))
+                return row;
+            row["callerTokens"] = tokens;
+            if (total > MaxListItems)
+                row["callerTokensTotal"] = total;
+            return row;
+        }
         JsonObject? R(string? reason) => reason is null ? null : U(HostPaths.Reduce(reason, hostPaths), ReasonChars);
         var files = report.Assemblies.Where(a => !a.NotInventoried).ToList();
         JsonObject Assemblies(Func<AssemblyScanResult, bool> analyzed, Func<AssemblyScanResult, bool>? truncated = null)
@@ -84,19 +98,19 @@ public static class PackageFindings
         Emit(FindingKind.Capabilities, capabilities,
             from a in report.Assemblies where a.Report is not null
             from f in a.Report!.Findings
-            select WithPath(new JsonObject
+            select WithPath(Callers(new JsonObject
             {
                 ["capability"] = EnumName(f.Capability),
                 ["kind"] = EnumName(f.Kind),
                 ["callerType"] = U(f.CallerType, NameChars),
                 ["callerMethod"] = U(f.CallerMethod, NameChars),
                 ["calledApi"] = U(f.CalledApi, NameChars),
-            }, "assembly", paths.OfFile(a.Assembly.FullPath), a.Assembly.RelativePath));
+            }, f), "assembly", paths.OfFile(a.Assembly.FullPath), a.Assembly.RelativePath));
 
         Emit(FindingKind.Indicators, Assemblies(a => a.Indicators is not null, a => a.Indicators?.Truncated == true),
             from a in report.Assemblies where a.Indicators is not null
             from f in a.Indicators!.Findings
-            select WithPath(new JsonObject
+            select WithPath(Callers(new JsonObject
             {
                 ["category"] = EnumName(f.Category),
                 ["gates"] = gating.Contains(f.Category),
@@ -105,12 +119,12 @@ public static class PackageFindings
                 ["callerType"] = U(f.CallerType, NameChars),
                 ["callerMethod"] = U(f.CallerMethod, NameChars),
                 ["occurrences"] = f.Occurrences,
-            }, "assembly", paths.OfFile(a.Assembly.FullPath), a.Assembly.RelativePath));
+            }, f), "assembly", paths.OfFile(a.Assembly.FullPath), a.Assembly.RelativePath));
 
         Emit(FindingKind.HiddenContent, Assemblies(a => a.Obfuscation is not null, a => a.Obfuscation?.Truncated == true),
             from a in report.Assemblies where a.Obfuscation is not null
             from f in a.Obfuscation!.Findings
-            select WithPath(new JsonObject
+            select WithPath(Callers(new JsonObject
             {
                 ["kind"] = EnumName(f.Kind),
                 ["detectedAs"] = U(f.DetectedAs, ShortChars),
@@ -119,7 +133,7 @@ public static class PackageFindings
                 ["callerMethod"] = U(f.CallerMethod, NameChars),
                 ["encodedLength"] = f.EncodedLength,
                 ["entropy"] = double.IsFinite(f.Entropy) ? Math.Round(f.Entropy, 3) : (double?)null,
-            }, "assembly", paths.OfFile(a.Assembly.FullPath), a.Assembly.RelativePath));
+            }, f), "assembly", paths.OfFile(a.Assembly.FullPath), a.Assembly.RelativePath));
 
         Emit(FindingKind.Scripts, Status(report.ScriptScanStatus, report.ScriptScanUnavailableReason, ("files", report.Scripts.Count)),
             report.ScriptFindings.Select(s => WithPath(new JsonObject
@@ -189,8 +203,11 @@ public static class PackageFindings
         return index;
     }
 
-    // `row` with the file it names put first, by its served path, or by the report's form (and said so) when unlisted.
-    private static JsonObject WithPath(JsonObject row, string key, string? served, string reported)
+    /// <summary>
+    /// <paramref name="row"/> with the file it names put first under <paramref name="key"/>: by its served path, or by the
+    /// report's form (and <c>pathForm: "report"</c>) when unlisted.
+    /// </summary>
+    internal static JsonObject WithPath(JsonObject row, string key, string? served, string reported)
     {
         var withPath = new JsonObject { [key] = served is not null ? new JsonObject { ["untrusted"] = served } : U(reported, PathChars) };
         if (served is null)

@@ -61,7 +61,28 @@ that was not resolved, and `arg N of the caller` is a parameter of the calling m
 
 ## Following a finding to IL
 
-To be written with the IL tools.
+A method is named by its metadata token, such as `0x06000012`. Tokens join findings, members, strings and IL.
+
+1. **Start from a finding.** A `capabilities`, `indicators` or `hidden-content` finding carries `callerTokens`, the
+   methods it is in.
+   - Usually there is one.
+   - When overloads share the caller's name and the IL does not tell them apart, all of them are listed: at most 8,
+     with `callerTokensTotal` beside them. On a package with a very large number of overloads, Silvergun stops telling
+     them apart, and every overload of the name is listed.
+   - An empty list means no method has it: the finding came from a resource or a field, or no method of that name was
+     found.
+   - No `callerTokens` at all means the assembly could not be read for members (see the members `pass`).
+2. **Read the method.** `disassemble` with the assembly and the token lists its CIL.
+   - A call into the package shows the callee's token, such as `call [0x06000034] Ns.Type.Method(...)`. A `0x06…` token
+     can be disassembled in turn. Other tokens name references outside the method table.
+   - A long method comes in pages: pass `next` back as `offset`.
+3. **Look around it.** `list_members` lists an assembly's methods with their tokens, flags and finding counts.
+   `typePattern` narrows the list to one type.
+4. **Find strings.** `search_strings` finds `ldstr` constants and the method that loads each (`callerToken`).
+
+A `special` flag is a fact about metadata, such as a type initializer or a finalizer. It is not the reachability root
+class, which `get_reachability` reports per folder. A `typeInitializer` of the type `<Module>` runs when the assembly
+loads.
 
 ## Traps
 
@@ -88,11 +109,23 @@ To be written with the IL tools.
   and invalid UTF-8 appears as U+FFFD. Use `as: "hex"` for the exact bytes.
 - The only real fence is the one whose nonce is the result's `content.fence`. Any other fence-like text inside the
   bytes belongs to the file.
+- A member's finding counts are present only when above 0. Members and strings cover only the assemblies their `pass`
+  counts as `read`. An assembly it did not read has no rows, which is not the same as having no methods.
+- A finding whose `callerTokens` lists several overloads counts toward each of them in `list_members`.
+- `handlersNotShown` on the last page of a listing counts the exception handlers it could not show: too many for one
+  page, or more than 64. Those regions exist in the IL even though the listing doesn't show them.
+- In an IL listing, names and strings are escaped as in structured results. A backslash is doubled, so
+  `search_strings` with `contains` must double it too.
+- The listing shows CCI's view of the IL. Multi-dimensional array accessors are shown as the calls they stand for
+  (`call T[,]::Get`).
+- `readerAssertions` above 0 means the IL reader's internal checks failed while it read the assembly, so the listing
+  may be degraded.
 
 ## What Silvergun does not see
 
 - Nothing is executed. Silvergun has no dynamic analysis.
-- Strings built at run time, decrypted, or downloaded do not appear in string searches.
+- Strings built at run time, decrypted, or downloaded do not appear in `search_strings`, which reads `ldstr` constants
+  only.
 - Native code is only YARA-scanned and identified by its headers.
 - Reflection and `dynamic` targets are unresolved unless value-flow analysis recovered a constant.
 - An `<Exec>` command in a build file is a fact about text, not a record of what it would do when run.

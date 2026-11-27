@@ -391,16 +391,23 @@ public sealed class JobProcessTests
         AssertGone(pid);
     }
 
+    /// <summary>
+    /// The budget's clock starts when <see cref="JobProcess.Run"/> starts the child, so it also covers the fake's own start-up.
+    /// Under full-suite load a PowerShell fake once took over 3 s to write its pid file, and a 3 s budget killed it first. The
+    /// budget is 15 s, far above any start-up seen; the run must end by the budget (no sooner) and promptly after it.
+    /// </summary>
     [Fact]
     public void Run_AChildSilentPastTheBudget_TimesOut_AndIsKilled()
     {
         using var dirs = new TestDirs();
+        var budget = TimeSpan.FromSeconds(15);
         var clock = Stopwatch.StartNew();
 
-        var (result, pid) = RunFake(dirs, [Ready], exitCode: 0, sleep: true, budget: TimeSpan.FromSeconds(3));
+        var (result, pid) = RunFake(dirs, [Ready], exitCode: 0, sleep: true, budget: budget);
 
         Assert.True(result.Status == JobRunStatus.TimedOut, $"{result.Status}: {result.Reason}");
-        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(30), $"took {clock.Elapsed}");
+        Assert.True(clock.Elapsed >= budget, $"timed out after {clock.Elapsed}, inside its {budget} budget");
+        Assert.True(clock.Elapsed < budget + TimeSpan.FromSeconds(27), $"took {clock.Elapsed}");
         AssertGone(pid);
     }
 

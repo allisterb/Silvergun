@@ -185,8 +185,11 @@ public sealed class DrillToolsTests(DrillFixture fixture)
     [Fact]
     public void Bounds_EveryRowIsWithinTheRowBound_AndTheWidestWasFitted()
     {
+        // The inventory, reachability, the eight finding kinds, and (since S3) members and strings.
         var files = Directory.GetFiles(fixture.EntryDir, "*.jsonl");
-        Assert.Equal(10, files.Length);
+        Assert.Equal(12, files.Length);
+        Assert.Contains(Path.Combine(fixture.EntryDir, JobProtocol.MembersFile), files);
+        Assert.Contains(Path.Combine(fixture.EntryDir, JobProtocol.StringsFile), files);
         var widest = 0;
         foreach (var file in files)
             foreach (var line in File.ReadAllLines(file, Encoding.ASCII))

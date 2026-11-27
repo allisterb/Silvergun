@@ -83,6 +83,8 @@ public static class SilvergunMcpServer
         + "To check a package: analyze_package, then wait_for_job until it completes, then get_summary.\n"
         + "Then drill down: list_files and read_file for the package's files, get_findings for each kind of finding, and "
         + "get_reachability for a deep job. Lists are paged: while truncated is true, pass next back as cursor.\n"
+        + "To follow a finding into code: its callerTokens name the method; disassemble lists its IL, list_members lists an "
+        + "assembly's methods, and search_strings finds string constants with the method that loads each.\n"
         + "Read the resource " + GuideResource.Uri + " before investigating a package.";
 
     private const string SdkLogCategory = "ModelContextProtocol";

@@ -26,14 +26,20 @@ public sealed record JobLaunch(string? Executable, string? Problem, IReadOnlyLis
         var (path, problem) = GraphWorkerLaunch.Resolve(Environment.ProcessPath, AppContext.BaseDirectory);
         return new(path, problem is null ? null : "there is no Silvergun CLI executable to run the job in", JobProtocol.Arguments);
     }
+
+    /// <summary>The same executable, started as the inspect worker (task S3).</summary>
+    public JobLaunch Inspector() => this with { Arguments = InspectProtocol.Arguments };
     #endregion
 }
 
 /// <summary>How a job run ended.</summary>
 public enum JobRunStatus { Completed, Failed, TimedOut, Cancelled }
 
-/// <summary>A job run's end: its status, why it is not <see cref="JobRunStatus.Completed"/> (escaped, bounded), and the child's <c>done</c>.</summary>
-public sealed record JobRunResult(JobRunStatus Status, string? Reason, JobDone? Done);
+/// <summary>
+/// A run's end: its status, why it is not <see cref="JobRunStatus.Completed"/> (escaped, bounded), and the child's
+/// <c>done</c> (a job) or <c>inspected</c> (an inspect request).
+/// </summary>
+public sealed record JobRunResult(JobRunStatus Status, string? Reason, JobDone? Done, JobInspected? Inspected = null);
 
 /// <summary>
 /// Runs one job child over one request (task S1, D2). The child is contained before it is sent anything: a kill-on-close
@@ -47,10 +53,11 @@ public static class JobProcess
     /// <summary>
     /// Runs one child. <paramref name="memoryLimitBytes"/> caps the whole tree (Windows; 0 for none);
     /// <paramref name="heapLimitBytes"/> is the child's own GC heap hard limit (0 for none), kept below the tree's so its
-    /// own workers (YARA-X, graph) have room under the same Job Object.
+    /// own workers (YARA-X, graph) have room under the same Job Object. An <see cref="InspectRequest"/> ends with
+    /// <c>inspected</c>, any other request with <c>done</c>; <paramref name="maxRecordBytes"/> caps each record line.
     /// </summary>
-    public static JobRunResult Run(JobLaunch launch, JobRequest request, TimeSpan budget, long memoryLimitBytes, long heapLimitBytes,
-        Action<JobProgress> onProgress, CancellationToken ct)
+    public static JobRunResult Run<TRequest>(JobLaunch launch, TRequest request, TimeSpan budget, long memoryLimitBytes, long heapLimitBytes,
+        Action<JobProgress> onProgress, CancellationToken ct, int maxRecordBytes = JobProtocol.MaxRecordLineBytes) where TRequest : class
     {
         if (launch.Executable is null || !Path.IsPathFullyQualified(launch.Executable))
             return Failed(launch.Problem ?? "the job executable's path is unknown or not absolute");
@@ -80,9 +87,9 @@ public static class JobProcess
             [
                 Background(() => Send(process, request)),
                 Background(() => RelayStderr(process.StandardError.BaseStream)),
-                Background(() => Pump(new WorkerLineReader(process.StandardOutput.BaseStream, JobProtocol.MaxRecordLineBytes), lines, stop.Token)),
+                Background(() => Pump(new WorkerLineReader(process.StandardOutput.BaseStream, maxRecordBytes), lines, stop.Token)),
             ];
-            return Read(process, lines, deadline, onProgress, ct);
+            return Read(process, lines, deadline, onProgress, request is InspectRequest, maxRecordBytes, ct);
         }
         finally
         {
@@ -95,7 +102,8 @@ public static class JobProcess
     }
 
     // ready, then progress records, then done (and a clean exit) or fatal. Every wait is bounded.
-    private static JobRunResult Read(Process process, BlockingCollection<(WorkerLineStatus Status, byte[] Bytes)> lines, long deadline, Action<JobProgress> onProgress, CancellationToken ct)
+    private static JobRunResult Read(Process process, BlockingCollection<(WorkerLineStatus Status, byte[] Bytes)> lines, long deadline, Action<JobProgress> onProgress,
+        bool inspect, int maxRecordBytes, CancellationToken ct)
     {
         var ready = false;
         var started = Stopwatch.GetTimestamp();
@@ -128,7 +136,7 @@ public static class JobProcess
             }
 
             if (line.Status != WorkerLineStatus.Line)
-                return Failed($"the job worker stopped: {Ending(line.Status)}{ExitNote(process)}");
+                return Failed($"the job worker stopped: {Ending(line.Status, maxRecordBytes)}{ExitNote(process)}");
             var (message, problem) = Parse(line.Bytes);
             switch (message)
             {
@@ -142,15 +150,21 @@ public static class JobProcess
                 case JobProgress progress when ready && stageName.IsMatch(progress.Stage ?? "") && progress.Done >= 0 && progress.Total >= 0:
                     onProgress(progress);
                     break;
-                case JobDone done when ready && DoneProblem(done) is null:
-                    return !process.WaitForExit(ExitTimeout) ? Failed($"the job worker did not exit within {ExitTimeout.TotalSeconds:0} s of 'done'")
-                        : process.ExitCode != JobProtocol.ExitDone ? Failed($"the job worker exited with {GraphWorkerProcess.DescribeExit(process.ExitCode)} after 'done'")
-                        : new(JobRunStatus.Completed, null, done);
+                case JobDone done when ready && !inspect && DoneProblem(done) is null:
+                    return ExitProblem(process, "done") ?? new(JobRunStatus.Completed, null, done);
+                case JobInspected inspected when ready && inspect:
+                    return ExitProblem(process, "inspected") ?? new(JobRunStatus.Completed, null, null, inspected);
                 default:
                     return Failed($"the job worker broke protocol v{JobProtocol.Version}: an unexpected or malformed '{message.GetType().Name}' record");
             }
         }
     }
+
+    // The child must exit cleanly, and soon, after its last record.
+    private static JobRunResult? ExitProblem(Process process, string record) =>
+        !process.WaitForExit(ExitTimeout) ? Failed($"the job worker did not exit within {ExitTimeout.TotalSeconds:0} s of '{record}'")
+        : process.ExitCode != JobProtocol.ExitDone ? Failed($"the job worker exited with {GraphWorkerProcess.DescribeExit(process.ExitCode)} after '{record}'")
+        : null;
 
     private static string? DoneProblem(JobDone done) =>
         done.ElapsedMs < 0 || done.Stages is null || done.Stages.Count > MaxStages
@@ -211,7 +225,7 @@ public static class JobProcess
 #endif
     }
 
-    private static void Send(Process process, JobRequest request)
+    private static void Send<TRequest>(Process process, TRequest request)
     {
         try
         {
@@ -308,11 +322,11 @@ public static class JobProcess
         }
     }
 
-    private static string Ending(WorkerLineStatus status) => status switch
+    private static string Ending(WorkerLineStatus status, int maxRecordBytes) => status switch
     {
         WorkerLineStatus.Eof => "its output ended",
         WorkerLineStatus.Truncated => "its output ended part-way through a record",
-        WorkerLineStatus.TooLong => $"it sent a record over {JobProtocol.MaxRecordLineBytes} bytes",
+        WorkerLineStatus.TooLong => $"it sent a record over {maxRecordBytes} bytes",
         WorkerLineStatus.InvalidUtf8 => "it sent a record that is not UTF-8",
         _ => "its output pipe broke",
     };

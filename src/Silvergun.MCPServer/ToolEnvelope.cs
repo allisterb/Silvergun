@@ -66,8 +66,42 @@ public static class ToolEnvelope
         };
     }
 
-    /// <summary><c>{"untrusted": "&lt;escaped&gt;"}</c>: the one form package- or agent-derived text takes in structured output (task D6.2).</summary>
-    public static JsonObject Untrusted(string text, int maxChars) => new() { ["untrusted"] = UntrustedText.EscapeBounded(text, maxChars) };
+    /// <summary>
+    /// <c>{"untrusted": "&lt;escaped&gt;"}</c>: the one form package- or agent-derived text takes in structured output (task
+    /// D6.2). Escaped losslessly, then the invisible code points <see cref="UntrustedText"/> lets through too (S2 review W5,
+    /// closed for MCP output at S3), and cut at an escape boundary.
+    /// </summary>
+    public static JsonObject Untrusted(string text, int maxChars) => new() { ["untrusted"] = Escaped(text, maxChars) };
+
+    /// <summary>
+    /// The text of <see cref="Untrusted"/>: <see cref="UntrustedText.EscapeBounded(string, int)"/>'s form, with the invisible
+    /// code points escaped too, within <paramref name="maxChars"/> and, when cut, its suffix for the whole input (ADR 0037 a5).
+    /// </summary>
+    public static string Escaped(string text, int maxChars)
+    {
+        var escaped = UntrustedText.EscapeBounded(text, maxChars);
+        // The common case: nothing EscapeBounded kept is invisible, so its own cut and suffix stand (S3 review W1).
+        if (ReferenceEquals(Jobs.ExtractedFile.Displayable(escaped), escaped))
+            return escaped;
+
+        // Otherwise piece by piece, as EscapeBounded goes, each piece made displayable before it is counted.
+        var sb = new System.Text.StringBuilder(Math.Min(text.Length, maxChars) + 8);
+        var i = 0;
+        while (i < text.Length)
+        {
+            // EscapeBounded's own pieces, without its per-call hash (S3 review round 2, W1): the one hash is the suffix's.
+            var c = text[i];
+            var n = char.IsHighSurrogate(c) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]) ? 2 : 1;
+            var piece = c == '\\' ? @"\\"
+                : n == 1 && char.IsSurrogate(c) ? "\\u" + ((int)c).ToString("X4")
+                : Jobs.ExtractedFile.Displayable(UntrustedText.Escape(text.Substring(i, n)));
+            if (sb.Length + piece.Length > maxChars)
+                break;
+            sb.Append(piece);
+            i += n;
+        }
+        return i < text.Length ? sb.Append(UntrustedText.CutSuffix(text, text.Length - i)).ToString() : sb.ToString();
+    }
 
     // No default arm (task D10): a new member must be mapped here or the build warns (CS8509), and an unnamed value
     // throws SwitchExpressionException at the boundary rather than picking an answer.

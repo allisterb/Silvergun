@@ -62,8 +62,8 @@ public static class JobArtifacts
     }
 
     /// <summary>
-    /// The row files' index a child wrote (task S2), or why it is not usable: every list's row count and cut, every finding
-    /// kind with its pass, and the reachability status.
+    /// The row files' index a child wrote (tasks S2, S3), or why it is not usable: every list's row count and cut, every finding
+    /// kind with its pass, the reachability status, and the members and strings lists with their pass.
     /// </summary>
     public static (JsonObject? Index, string? Problem) ReadIndex(string dir)
     {
@@ -81,6 +81,7 @@ public static class JobArtifacts
                     && Enum.GetValues<FindingKind>().All(k => List(findings[PackageFindings.Name(k)]) && findings[PackageFindings.Name(k)]!["pass"] is JsonObject)
                     && List(index["reachability"])
                     && index["reachability"]!["status"] is JsonValue status && status.TryGetValue<string>(out var s) && s is "notRun" or "completed" or "incomplete"
+                    && new[] { "members", "strings" }.All(k => List(index[k]) && index[k]!["pass"] is JsonObject)
                 ? (index, null)
                 : (null, "index.json does not have the expected shape");
         }
@@ -189,8 +190,8 @@ public static class JobArtifacts
 
     #region Fields
     /// <summary>The artifact schema this build writes and reads. A cache entry of any other version is re-run, never half-read.</summary>
-    /// <remarks>2: the drill-down row files and their index (task S2).</remarks>
-    public const int SchemaVersion = 2;
+    /// <remarks>2: the drill-down row files and their index (task S2). 3: the member and string lists, and caller tokens (S3).</remarks>
+    public const int SchemaVersion = 3;
 
     public const long MaxRecordBytes = 64 * 1024;
     public const long MaxGateBytes = 256 * 1024;
@@ -212,6 +213,8 @@ public static class JobArtifacts
         (JobProtocol.SummaryFile, MaxSummaryBytes),
         (JobProtocol.InventoryFile, MaxInventoryBytes),
         (JobProtocol.ReachabilityFile, MaxRowFileBytes),
+        (JobProtocol.MembersFile, MaxRowFileBytes),
+        (JobProtocol.StringsFile, MaxRowFileBytes),
         (JobProtocol.IndexFile, MaxIndexBytes),
         .. Enum.GetValues<FindingKind>().Select(k => (PackageFindings.FileName(k), MaxRowFileBytes)),
     ];

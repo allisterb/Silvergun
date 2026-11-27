@@ -22,4 +22,10 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Shared with Silvergun.CodeAnalysis.IL.Tests and Silvergun.CLI.Tests (linked): the S3 fixture corrupts one method
+         body exactly as they do. See tests/Shared/FatHeaderPatcher.cs. -->
+    <Compile Include="..\Shared\FatHeaderPatcher.cs" Link="Shared\FatHeaderPatcher.cs" />
+  </ItemGroup>
+
 </Project>

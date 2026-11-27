@@ -146,6 +146,38 @@ public static class ExtractedFile
         return (sb.ToString().TrimEnd('\n'), used);
     }
 
+    /// <summary>
+    /// <paramref name="escaped"/> (an escaper's output) with the invisible code points <see cref="UntrustedText.Escape"/> lets
+    /// through escaped too, so it is safe in a bulk block (task S3: names and strings in an IL listing).
+    /// </summary>
+    public static string Displayable(string escaped)
+    {
+        if (!escaped.EnumerateRunes().Any(r => Invisible(r.Value)))
+            return escaped;
+        var sb = new StringBuilder(escaped.Length + 16);
+        foreach (var rune in escaped.EnumerateRunes())
+            sb.Append(Invisible(rune.Value) ? (rune.IsBmp ? $"\\u{rune.Value:x4}" : $"\\U{rune.Value:X8}") : rune.ToString());
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Whether <paramref name="text"/> holds, but for newlines, nothing <see cref="UntrustedText.Escape"/> or
+    /// <see cref="Displayable"/> would escape, and no lone surrogate: the check the server makes of a child's bulk text.
+    /// </summary>
+    public static bool IsDisplayable(string text)
+    {
+        var span = text.AsSpan();
+        while (!span.IsEmpty)
+        {
+            if (System.Text.Rune.DecodeFromUtf16(span, out var rune, out var consumed) != System.Buffers.OperationStatus.Done)
+                return false;
+            if (rune.Value != '\n' && (Invisible(rune.Value) || UntrustedText.Escape(rune.ToString()).Length != consumed))
+                return false;
+            span = span[consumed..];
+        }
+        return true;
+    }
+
     // Default_Ignorable_Code_Point and Bidi_Control code points that UntrustedText.Escape lets through (S2 review W5): the
     // bulk block is not JSON-encoded, so they would reach the agent raw. Escape's own set is left to an ADR (it is shared).
     private static bool Invisible(int cp) =>

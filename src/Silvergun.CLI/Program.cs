@@ -339,9 +339,20 @@ internal static class Program
             jobProtocolOption
         };
         workerJobCommand.SetAction(parse => RunJobWorker(parse.GetValue(jobProtocolOption)));
+        // `__worker inspect --protocol 1` lists one method's IL for the MCP server's disassemble tool (mcp-server.md S3). The
+        // same string-typed --protocol posture.
+        var inspectProtocolOption = new Option<string?>("--protocol")
+        {
+            Description = $"Worker protocol version (only {InspectProtocol.Version} is supported)."
+        };
+        var workerInspectCommand = new Command("inspect", "Internal: one MCP server disassembly request.")
+        {
+            inspectProtocolOption
+        };
+        workerInspectCommand.SetAction(parse => RunInspectWorker(parse.GetValue(inspectProtocolOption)));
         var workerCommand = new Command("__worker", "Internal: worker processes started by Silvergun itself.")
         {
-            workerYaraCommand, workerGraphCommand, workerJobCommand
+            workerYaraCommand, workerGraphCommand, workerJobCommand, workerInspectCommand
         };
         workerCommand.Hidden = true;
 
@@ -413,12 +424,14 @@ internal static class Program
         if (inWorker)
             WorkerErrorReporting.OptOut();
         return !inWorker || ReferenceEquals(parse.Action, workerYaraCommand.Action) || ReferenceEquals(parse.Action, workerGraphCommand.Action)
-                || ReferenceEquals(parse.Action, workerJobCommand.Action)
+                || ReferenceEquals(parse.Action, workerJobCommand.Action) || ReferenceEquals(parse.Action, workerInspectCommand.Action)
             ? parse.Invoke()
             : IsWithin(parse.CommandResult, workerGraphCommand) || (args is [_, var worker, ..] && worker == workerGraphCommand.Name)
             ? RunGraphWorkerArgumentError(parse.Errors.Count)
             : IsWithin(parse.CommandResult, workerJobCommand) || (args is [_, var job, ..] && job == workerJobCommand.Name)
             ? RunJobWorkerArgumentError(parse.Errors.Count)
+            : IsWithin(parse.CommandResult, workerInspectCommand) || (args is [_, var inspect, ..] && inspect == workerInspectCommand.Name)
+            ? RunInspectWorkerArgumentError(parse.Errors.Count)
             : RunYaraWorkerArgumentError(parse.Errors.Count);
     }
 
@@ -1203,6 +1216,27 @@ internal static class Program
         Console.SetOut(TextWriter.Null);
         return JobWorker.Refuse(stdout, (errors > 0 ? $"the worker's arguments did not parse ({errors} error(s))" : "the worker's arguments asked for something other than a worker session")
             + $"; expected __worker job --protocol {JobProtocol.Version}");
+    }
+
+    // The hidden `__worker inspect` verb (ADR 0039 S3): the job worker's posture. stdin is not disposed, for the same reason.
+    private static int RunInspectWorker(string? protocol)
+    {
+        Runtime.WithStderrLogging("Silvergun", "worker-inspect");
+        WorkerParentWatch.Start();
+        var stdin = Console.OpenStandardInput();
+        using var stdout = Console.OpenStandardOutput();
+        Console.SetOut(TextWriter.Null);
+        return InspectWorker.Run(protocol, stdin, stdout);
+    }
+
+    // A `__worker inspect` command line that did not parse: one `fatal`, exit 3, with fixed text.
+    private static int RunInspectWorkerArgumentError(int errors)
+    {
+        Runtime.WithStderrLogging("Silvergun", "worker-inspect");
+        using var stdout = Console.OpenStandardOutput();
+        Console.SetOut(TextWriter.Null);
+        return InspectWorker.Refuse(stdout, (errors > 0 ? $"the worker's arguments did not parse ({errors} error(s))" : "the worker's arguments asked for something other than a worker session")
+            + $"; expected __worker inspect --protocol {InspectProtocol.Version}");
     }
 
     // One MCP job's analysis (ADR 0039 S1): scan-package's passes into the job's extraction directory, OSV only when the

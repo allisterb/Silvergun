@@ -19,7 +19,7 @@ using Silvergun.MCPServer.Jobs;
 /// inventory names (D2).
 /// </summary>
 [McpServerToolType]
-public sealed class DrillTools(JobManager jobs)
+public sealed partial class DrillTools(JobManager jobs)
 {
     #region Methods
     [McpServerTool(Name = ToolNames.ListFiles, Title = "List an analysed package's files", ReadOnly = true, Idempotent = true, Destructive = false, OpenWorld = false)]
@@ -238,7 +238,8 @@ public sealed class DrillTools(JobManager jobs)
         // and never less than one row's worth.
         // Read charges each row its separator too, hence the + 1.
         var budget = Math.Max(RowWriter.MaxRowChars + 1, McpLimits.PageBudgetChars - RowFile.Chars(data) - PageFieldsChars);
-        var page = RowFile.Read(Path.Combine(entry.Dir, file), offset, keep, budget, MaxPageRows, MaxScanRows);
+        // A kept row is projected before it is measured, so the page is charged for what is served.
+        var page = RowFile.Read(Path.Combine(entry.Dir, file), offset, row => keep(row) && Project(row, project), budget, MaxPageRows, MaxScanRows);
         if (page.Problem != RowProblem.None)
             return Unusable(tool, entry, elapsed, page.Problem, page.Why);
 
@@ -246,10 +247,7 @@ public sealed class DrillTools(JobManager jobs)
         var known = HostPaths.ForServer(jobs.Store.Root);
         var rows = new JsonArray();
         foreach (var row in page.Rows)
-        {
-            project?.Invoke(row);
             rows.Add(HostPaths.ReduceReasons(row, known));
-        }
         data["total"] = list["rows"]!.DeepClone();
         if (list["truncated"] is JsonValue cut && cut.TryGetValue<bool>(out var truncated) && truncated)
             data["listTruncated"] = true;
@@ -288,6 +286,12 @@ public sealed class DrillTools(JobManager jobs)
             discarded = false;
         }
         return (discarded ? "it was discarded, and " : "") + "calling analyze_package again re-runs the job";
+    }
+
+    private static bool Project(JsonObject row, Action<JsonObject>? project)
+    {
+        project?.Invoke(row);
+        return true;
     }
 
     private static JsonObject Data(Entry entry) => new() { ["jobId"] = entry.View.JobId };

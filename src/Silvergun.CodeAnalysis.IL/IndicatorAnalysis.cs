@@ -118,6 +118,12 @@ public sealed class IndicatorAnalysis(AssemblyAnalyzer assembly, int? maxDistinc
         }
     }
 
+    /// <summary>
+    /// The indicator values <see cref="Analyze"/> would find in one string constant, as <see cref="IndicatorFinding.Value"/>
+    /// names them (MCP task S3: which overload of a method holds a finding's value). Never throws.
+    /// </summary>
+    public static IEnumerable<string> ValuesIn(string text) => Classify(text, string.Empty, string.Empty).Select(r => r.Value);
+
     // Classifies a single string constant against every category. Materializes into a List (rather than
     // yield-returning) because a try/catch with a catch clause cannot wrap a yield return — the per-constant
     // failure guard below requires eager evaluation here, so each match loop below self-limits at

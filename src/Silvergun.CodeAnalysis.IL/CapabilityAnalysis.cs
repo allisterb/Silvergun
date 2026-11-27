@@ -297,7 +297,7 @@ public sealed class CapabilityAnalysis(AssemblyAnalyzer assembly)
     // crafted metadata. Treat an unreadable attribute as "not a match" so its siblings are still examined. The
     // Dummy.TypeReference guard is load-bearing: CCI returns exactly that sentinel (ext/analysis-net/cci
     // Attributes.cs:289-296) when the attribute constructor's containing type is null.
-    private static bool IsUnmanagedCallersOnly(ICustomAttribute attribute)
+    internal static bool IsUnmanagedCallersOnly(ICustomAttribute attribute)
     {
         try
         {
@@ -346,8 +346,9 @@ public sealed class CapabilityAnalysis(AssemblyAnalyzer assembly)
     }
 
     // Maps a CCI operation to the referenced method, its call kind, and the CalledApi string, or null if the
-    // operation is not a capability-bearing call site. Value casts follow CCIProvider/CodeProvider.cs.
-    private static (IMethodReference Method, ApiCallKind Kind, string Api)? Callee(IOperation op) =>
+    // operation is not a capability-bearing call site. Value casts follow CCIProvider/CodeProvider.cs. Internal so
+    // AssemblyMembers names a method's calls exactly as findings do (MCP task S3).
+    internal static (IMethodReference Method, ApiCallKind Kind, string Api)? Callee(IOperation op) =>
         op.OperationCode switch
         {
             OperationCode.Call or OperationCode.Callvirt when op.Value is IMethodReference m =>
