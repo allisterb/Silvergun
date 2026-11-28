@@ -44,6 +44,8 @@
     <!-- Silvergun-owned rulesets (see Resources/SilvergunRules/README.md), loaded at runtime by ScriptRuleScanner. -->
     <EmbeddedResource Include="Resources\SilvergunRules\*.json" />
     <EmbeddedResource Include="Resources\SilvergunRules\README.md" />
+    <!-- Agent-configuration paths with their provenance (see Resources/AgentConfig/README.md), read by MsBuild/AgentConfigPaths. -->
+    <EmbeddedResource Include="Resources\AgentConfig\agent_config_paths.json" />
   </ItemGroup>
 
   <ItemGroup>

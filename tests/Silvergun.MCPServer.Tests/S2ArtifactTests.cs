@@ -11,15 +11,18 @@ using Silvergun.MCPServer.Jobs;
 /// <summary>
 /// The S2 artifact checks: <see cref="JobArtifacts.ReadIndex"/> accepts only the shape the child writes (every list's row
 /// count and cut, every finding kind with its pass, a known reachability status, and since S3 the members and strings lists
-/// with their pass); <see cref="HostPaths.ReduceReasons"/>
+/// with their pass, and since S4 the MSBuild list with its pass); <see cref="HostPaths.ReduceReasons"/>
 /// now also rewrites <c>reasons</c>, <c>note</c> and <c>notes</c>, and still never package evidence.
 /// </summary>
 public sealed class S2ArtifactTests : IDisposable
 {
     #region Methods
-    /// <summary>3 since task S3 (the member and string lists, and caller tokens): an S2 entry is re-run, never half-read.</summary>
+    /// <summary>
+    /// 4 since task S4 (the MSBuild list, <c>msbuild.jsonl</c>, and its index entry); 3 was S3's member and string lists. An
+    /// entry of an older schema is re-run, never half-read.
+    /// </summary>
     [Fact]
-    public void SchemaVersion_IsThree() => Assert.Equal(3, JobArtifacts.SchemaVersion);
+    public void SchemaVersion_IsFour() => Assert.Equal(4, JobArtifacts.SchemaVersion);
 
     [Fact]
     public void ReadIndex_AcceptsTheChildsShape()
@@ -32,6 +35,7 @@ public sealed class S2ArtifactTests : IDisposable
         Assert.Equal(3, index!["files"]!["rows"]!.GetValue<int>());
         Assert.Equal(7, index["members"]!["rows"]!.GetValue<int>());
         Assert.Equal(2, index["strings"]!["pass"]!["read"]!.GetValue<int>());
+        Assert.Equal("completed", index["msbuild"]!["pass"]!["status"]!.GetValue<string>());
     }
 
     public static TheoryData<string> BadIndexes() =>
@@ -39,7 +43,8 @@ public sealed class S2ArtifactTests : IDisposable
         "not JSON", "an array", "no files", "files without truncated", "negative rows", "rows not a number", "a finding kind missing",
         "a kind without its pass", "no reachability", "an unknown reachability status", "over its size cap", "missing",
         "no members", "no strings", "members without its pass", "strings without its pass", "a members pass that is not an object",
-        "members without truncated", "strings with negative rows",
+        "members without truncated", "strings with negative rows", "no msbuild", "msbuild without its pass", "an msbuild pass that is not an object",
+        "msbuild without truncated",
     ];
 
     [Theory]
@@ -68,6 +73,10 @@ public sealed class S2ArtifactTests : IDisposable
             "a members pass that is not an object" => Without(index, i => i["members"]!["pass"] = new JsonArray()),
             "members without truncated" => Without(index, i => i["members"]!.AsObject().Remove("truncated")),
             "strings with negative rows" => Without(index, i => i["strings"]!["rows"] = -2),
+            "no msbuild" => Without(index, i => i.Remove("msbuild")),
+            "msbuild without its pass" => Without(index, i => i["msbuild"]!.AsObject().Remove("pass")),
+            "an msbuild pass that is not an object" => Without(index, i => i["msbuild"]!["pass"] = "completed"),
+            "msbuild without truncated" => Without(index, i => i["msbuild"]!.AsObject().Remove("truncated")),
             _ => throw new ArgumentException(what),
         };
         if (text is not null)
@@ -128,7 +137,10 @@ public sealed class S2ArtifactTests : IDisposable
             list["pass"] = new JsonObject { ["assemblies"] = 2, ["read"] = 2, ["notRead"] = 0, ["methodsUnreadable"] = 0 };
             return list;
         }
-        return new JsonObject { ["files"] = List(3), ["findings"] = findings, ["reachability"] = reachability, ["members"] = Walked(7), ["strings"] = Walked(4) };
+        // The S4 list, with its pass, as MsBuildRows.Write gives it.
+        var msbuild = List(0);
+        msbuild["pass"] = new JsonObject { ["status"] = "completed", ["files"] = 0, ["parsed"] = 0, ["notParsed"] = 0, ["notProject"] = 0, ["expansionBudgetSpent"] = false };
+        return new JsonObject { ["files"] = List(3), ["findings"] = findings, ["reachability"] = reachability, ["members"] = Walked(7), ["strings"] = Walked(4), ["msbuild"] = msbuild };
     }
 
     private static string Without(JsonObject index, Action<JsonObject> change)

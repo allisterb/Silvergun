@@ -85,6 +85,7 @@ public static class SilvergunMcpServer
         + "get_reachability for a deep job. Lists are paged: while truncated is true, pass next back as cursor.\n"
         + "To follow a finding into code: its callerTokens name the method; disassemble lists its IL, list_members lists an "
         + "assembly's methods, and search_strings finds string constants with the method that loads each.\n"
+        + "get_build_integration shows what the package's .targets and .props files do in a consumer's build.\n"
         + "Read the resource " + GuideResource.Uri + " before investigating a package.";
 
     private const string SdkLogCategory = "ModelContextProtocol";

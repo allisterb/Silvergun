@@ -550,8 +550,33 @@ internal sealed class FakeChild
 
     public string PidFile { get; }
 
-    /// <summary>The pids of every run so far.</summary>
-    public IReadOnlyList<int> Pids => File.Exists(PidFile) ? [.. File.ReadAllLines(PidFile).Where(l => l.Trim().Length > 0).Select(l => int.Parse(l.Trim()))] : [];
+    /// <summary>
+    /// The pids of every run so far. Read sharing writes, and retried while a run is appending: a plain ReadAllLines both
+    /// failed on a child's open handle and could make a concurrent child's append fail.
+    /// </summary>
+    public IReadOnlyList<int> Pids
+    {
+        get
+        {
+            for (var attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    if (!File.Exists(PidFile))
+                        return [];
+                    using var stream = new FileStream(PidFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                    using var reader = new StreamReader(stream);
+                    // A line still being written has no newline yet: only whole lines count.
+                    var text = reader.ReadToEnd();
+                    return [.. text.Split('\n').SkipLast(1).Select(l => l.Trim()).Where(l => l.Length > 0).Select(int.Parse)];
+                }
+                catch (IOException) when (attempt < 200)
+                {
+                    Thread.Sleep(25);
+                }
+            }
+        }
+    }
     #endregion
 
     #region Methods

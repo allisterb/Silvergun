@@ -61,6 +61,8 @@ public static class JobProtocol
     /// <summary>Every method of every assembly the capability pass read, and their string constants (task S3).</summary>
     public const string MembersFile = "members.jsonl";
     public const string StringsFile = "strings.jsonl";
+    /// <summary>The package's MSBuild integration facts (task S4).</summary>
+    public const string MsBuildFile = "msbuild.jsonl";
     /// <summary>Each row file's count and cut, and each finding kind's pass status: written last of the child's artifacts.</summary>
     public const string IndexFile = "index.json";
     public const string JobFile = "job.json";

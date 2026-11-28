@@ -84,6 +84,37 @@ A `special` flag is a fact about metadata, such as a type initializer or a final
 class, which `get_reachability` reports per folder. A `typeInitializer` of the type `<Module>` runs when the assembly
 loads.
 
+## Build integration
+
+`get_build_integration` lists what the package's `.targets` and `.props` files do in a consumer's build.
+
+- **`load`** on a file row says how the file comes into the build:
+  - `auto`: NuGet imports it, because it is `build/`, `buildTransitive/` or `buildMultiTargeting/` and named for the package;
+  - `imported`: an `Import` in a loaded file reaches it;
+  - `none`: nothing Silvergun saw loads it.
+- **A target** runs when its `AfterTargets`, `BeforeTargets` or `DependsOnTargets` names a target that runs, such as
+  `Build`. `outputsWritten: false` means no task in the target itself writes its `Outputs`. Unless a target it depends on
+  writes them, its up-to-date check never passes and it runs on every build.
+- **`totals`**, beside the pass, count over every file, the writes to agent-configuration paths, the writes outside the build
+  output, the writes whose destination could be anywhere (`unknownDestinationWrites`), the `Exec` tasks that name a
+  package file, and the inline tasks; `loaded` counts those in files a build loads.
+  They hold even when the row list is cut.
+- **An `exec` row** carries the command, its first word (`program`), and `packageFiles`: the package's own files the
+  command names. A command that runs `dotnet` on a package DLL runs that DLL's code at build time.
+- **A `write` row** gives each destination as an anchor and a path, such as `{project}/../.claude/skills`.
+  - `outsideOutput: true` means the task writes outside `bin/` and `obj/`; `null` means a part of the destination is
+    unresolved, so it could be anywhere.
+  - `agentConfig` lists the agent-configuration paths it writes to, such as `.mcp.json`, `.claude/` or `AGENTS.md`.
+    Writing there at build time can give an AI agent instructions or tools.
+- **A `usingTask` row** with `inline: true` carries task code compiled and run at build time (`body`).
+- Values are expanded across the package's own files. `unresolved: true` means part of a value came from somewhere
+  Silvergun cannot see, such as the consumer's project, item metadata like `%(Filename)` or a property function, or that
+  the value was too long or had too many definitions to expand whole. A property defined under a condition
+  counts as if the condition held.
+- `anyPropertySet: true` in the pass means a task or item metadata in the package sets properties Silvergun cannot
+  name, for example `AdditionalProperties` on a `ProjectReference`. It can redirect where the consumer's own projects
+  build, and every write that uses a settable property reads as unknown.
+
 ## Traps
 
 - A list is complete only when all three hold:
@@ -129,3 +160,5 @@ loads.
 - Native code is only YARA-scanned and identified by its headers.
 - Reflection and `dynamic` targets are unresolved unless value-flow analysis recovered a constant.
 - An `<Exec>` command in a build file is a fact about text, not a record of what it would do when run.
+- MSBuild facts come from the package's own files. The consumer's project and SDK may set or override any property, and
+  a build file Silvergun could not parse (`notParsed` in the pass) may still load in a real build.

@@ -74,6 +74,7 @@ public static class ToolNames
     public const string ListMembers = "list_members";
     public const string Disassemble = "disassemble";
     public const string SearchStrings = "search_strings";
+    public const string GetBuildIntegration = "get_build_integration";
     #endregion
 }
 

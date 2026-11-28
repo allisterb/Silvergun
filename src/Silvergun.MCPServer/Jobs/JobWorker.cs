@@ -72,7 +72,7 @@ public static class JobWorker
             JobArtifacts.WriteAtomic(request.JobDir, JobProtocol.GateFile, JsonSerializer.SerializeToUtf8Bytes(output.Gate, JobProtocol.JsonOptions));
             JobArtifacts.WriteAtomic(request.JobDir, JobProtocol.SummaryFile,
                 Encoding.UTF8.GetBytes(PackageSummary.Build(output.Report, output.Gate, request.Depth, output.GatingIndicators, hostPaths).ToJsonString(JobProtocol.JsonOptions)));
-            WriteDrillDown(request.JobDir, output, files, nupkg, hostPaths);
+            WriteDrillDown(request.JobDir, output, files, nupkg, hostPaths, clock);
             var (elapsed, stages) = clock.Finish();
             writer.Write(new JobDone(elapsed, stages));
             return JobProtocol.ExitDone;
@@ -83,9 +83,10 @@ public static class JobWorker
         }
     }
 
-    // The drill-down row files (tasks S2, S3), then their index, last: the inventory first, so the other lists name files as it
-    // does; the members before the findings, which carry the caller tokens the members walk found.
-    private static void WriteDrillDown(string jobDir, JobScanOutput output, string files, string nupkg, IReadOnlyList<(string Path, string Label)> hostPaths)
+    // The drill-down row files (tasks S2, S3, S4), then their index, last: the inventory first, so the other lists name files as
+    // it does; the members before the findings, which carry the caller tokens the members walk found.
+    private static void WriteDrillDown(string jobDir, JobScanOutput output, string files, string nupkg, IReadOnlyList<(string Path, string Label)> hostPaths,
+        StageClock clock)
     {
         PackagePaths paths;
         JsonObject inventory;
@@ -96,6 +97,13 @@ public static class JobWorker
             inventory = rows.Index();
         }
         var members = MemberRows.Write(jobDir, output.Report, paths);
+        clock.Enter("msbuild");
+        var contentRoot = Directory.Exists(files) ? NuGetPackage.ContentRootOf(files, nupkg) : files;
+        var packageFiles = Directory.Exists(contentRoot)
+            ? Directory.EnumerateFiles(contentRoot, "*", new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = 0, IgnoreInaccessible = true })
+            : [];
+        var msbuild = MsBuildRows.Write(jobDir, output.Report, contentRoot, packageFiles, paths);
+        clock.Enter("write");
         var index = new JsonObject
         {
             ["files"] = inventory,
@@ -103,6 +111,7 @@ public static class JobWorker
             ["reachability"] = ReachabilityRows.Write(jobDir, output.Report, hostPaths),
             ["members"] = members.Members,
             ["strings"] = members.Strings,
+            ["msbuild"] = msbuild,
         };
         JobArtifacts.WriteAtomic(jobDir, JobProtocol.IndexFile, Encoding.UTF8.GetBytes(index.ToJsonString(JobProtocol.JsonOptions)));
     }

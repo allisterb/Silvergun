@@ -55,7 +55,7 @@ public sealed class S3CacheTests(CompletedEntryFixture fixture) : IClassFixture<
             Assert.Equal("NotFound", Drill.Status(Drill.Checked(await result)));
 
         await AssertReRun(jobTools, manager, package);
-        Assert.Equal(3, JsonNode.Parse(File.ReadAllText(jobFile))!["schemaVersion"]!.GetValue<int>());
+        Assert.Equal(JobArtifacts.SchemaVersion, JsonNode.Parse(File.ReadAllText(jobFile))!["schemaVersion"]!.GetValue<int>());
         Assert.Equal("Succeeded", Drill.Status(Drill.Checked(tools.ListMembers(fixture.JobId, Dll))));
     }
 
