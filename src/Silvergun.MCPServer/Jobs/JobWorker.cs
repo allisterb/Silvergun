@@ -1,19 +1,25 @@
 namespace Silvergun.MCPServer.Jobs;
 
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading;
 
 using Silvergun.CodeAnalysis.IL;
+using Silvergun.Intel;
 using Silvergun.PackageAnalysis.NuGet;
 using Silvergun.PackageAnalysis.NuGet.Yara.Worker;
 
-/// <summary>One job's analysis, supplied by the CLI so the report is exactly <c>scan-package --json</c>'s projection.</summary>
-public delegate Result<JobScanOutput> JobScan(string nupkgPath, string extractionDir, JobDepth depth, bool network, IProgress<PackageScanProgress> progress);
+/// <summary>
+/// One job's analysis, supplied by the CLI so the report is exactly <c>scan-package --json</c>'s projection. <paramref name="network"/>
+/// is the job's one polite client (task S5), or null when the job may not use the network: OSV must go through it.
+/// </summary>
+public delegate Result<JobScanOutput> JobScan(string nupkgPath, string extractionDir, JobDepth depth, HttpClient? network, IProgress<PackageScanProgress> progress);
 
 /// <summary>
 /// What <see cref="JobScan"/> produced: the typed report, its <c>--json</c> text, the gate, and which indicator categories
@@ -36,8 +42,11 @@ public static class JobWorker
     /// <summary>One <c>fatal</c> record for a command line that never reached <see cref="Run(string?, Stream, Stream, JobScan)"/>; returns its exit code.</summary>
     public static int Refuse(Stream stdout, string reason) => new Writer(stdout).Fatal(reason);
 
-    /// <summary><see cref="Run(string?, Stream, Stream, JobScan)"/> with the parent-gone action as a test seam.</summary>
-    public static int Run(string? protocol, Stream stdin, Stream stdout, JobScan scan, Action parentGone)
+    /// <summary>
+    /// <see cref="Run(string?, Stream, Stream, JobScan)"/> with the parent-gone action and the network handler factory as test
+    /// seams. The factory is called only for a request with <c>network</c> (task S5).
+    /// </summary>
+    public static int Run(string? protocol, Stream stdin, Stream stdout, JobScan scan, Action parentGone, Func<HttpMessageHandler>? network = null)
     {
         var writer = new Writer(stdout);
         if (protocol != JobProtocol.Version.ToString())
@@ -55,17 +64,38 @@ public static class JobWorker
             { IsBackground = true, Name = "job-worker-stdin-watch" }.Start();
 
         var clock = new StageClock(writer);
+        // One polite client for the whole job, OSV included, seeded with the hosts the server already saw refuse (S5 review C1, W4).
+        PoliteHttpHandler? polite = null;
+        HttpClient? http = null;
+        if (request!.Network)
+        {
+            var stops = new ConcurrentDictionary<string, string>(StringComparer.Ordinal);
+            foreach (var host in request.StoppedHosts ?? [])
+                stops.TryAdd(host.ToLowerInvariant(), "earlier");
+            polite = new PoliteHttpHandler((network ?? NetworkAccess.DefaultHandler)(), TimeSpan.FromMilliseconds(request.MinIntervalMs), stops);
+            http = new HttpClient(polite) { Timeout = NetworkAccess.RequestTimeout };
+        }
         try
         {
             writer.Write(new JobReady(JobProtocol.Version));
-            var nupkg = Path.Combine(request!.JobDir, JobProtocol.PackageFile);
+            var nupkg = Path.Combine(request.JobDir, JobProtocol.PackageFile);
             var files = Path.Combine(request.JobDir, JobProtocol.FilesDir);
-            var result = scan(nupkg, files, request.Depth, request.Network, clock);
+            var result = scan(nupkg, files, request.Depth, http, clock);
             if (!result.IsSuccess)
                 return writer.Fatal(result.Message ?? "the scan failed");
 
-            clock.Enter("write");
             var output = result.Value;
+            JsonObject intel;
+            if (http is not null)
+            {
+                clock.Enter("intel");
+                intel = JobIntel.Gather(output.Report, http, polite!, request.StoppedHosts ?? [], Environment.GetEnvironmentVariable(GitHubTokenVariable));
+            }
+            else
+                intel = JobIntel.NotChecked();
+
+            clock.Enter("write");
+            JobArtifacts.WriteAtomic(request.JobDir, JobProtocol.IntelFile, Encoding.UTF8.GetBytes(intel.ToJsonString(JobProtocol.JsonOptions)));
             // What agents read never names a host directory (D6.5): the job's own, then the machine's.
             var hostPaths = HostPaths.ForJob(request.JobDir, files, Directory.Exists(files) ? NuGetPackage.ContentRootOf(files, nupkg) : null);
             JobArtifacts.WriteAtomic(request.JobDir, JobProtocol.ReportFile, Encoding.UTF8.GetBytes(output.ReportJson));
@@ -80,6 +110,10 @@ public static class JobWorker
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             return writer.Fatal($"{ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            http?.Dispose();
         }
     }
 
@@ -134,8 +168,18 @@ public static class JobWorker
             : !File.Exists(Path.Combine(request.JobDir, JobProtocol.PackageFile)) ? "the job directory holds no package"
             : Path.Exists(Path.Combine(request.JobDir, JobProtocol.FilesDir)) ? "the job directory already has extracted files"
             : !Enum.IsDefined(request.Depth) ? "the depth is not known"
+            : request.MinIntervalMs is < 0 or > MaxIntervalMs ? "the request spacing is out of range"
+            : request.StoppedHosts is { } hosts && (hosts.Count > NetworkAccess.MaxStops || hosts.Any(h => h is null || h.Length is 0 or > 253))
+                ? "the stopped hosts are not usable"
             : null;
     }
+    #endregion
+
+    #region Fields
+    /// <summary>The optional GitHub token for project health, inherited from the server's environment; never logged.</summary>
+    public const string GitHubTokenVariable = "SILVERGUN_GITHUB_TOKEN";
+
+    private const int MaxIntervalMs = 60_000;
     #endregion
 
     #region Types

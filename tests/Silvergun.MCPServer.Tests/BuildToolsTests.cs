@@ -447,7 +447,8 @@ public sealed class BuildCacheTests(CompletedEntryFixture fixture) : IClassFixtu
         Assert.Equal("NotFound", Drill.Status(Drill.Checked(tools.GetBuildIntegration(fixture.JobId))));
 
         await AssertReRun(jobTools, manager, package);
-        Assert.Equal(4, JsonNode.Parse(File.ReadAllText(jobFile))!["schemaVersion"]!.GetValue<int>());
+        // The re-run writes this build's schema (5 since S5; S2ArtifactTests pins the number).
+        Assert.Equal(JobArtifacts.SchemaVersion, JsonNode.Parse(File.ReadAllText(jobFile))!["schemaVersion"]!.GetValue<int>());
         Assert.Equal("Succeeded", Drill.Status(Drill.Checked(tools.GetBuildIntegration(fixture.JobId))));
     }
 

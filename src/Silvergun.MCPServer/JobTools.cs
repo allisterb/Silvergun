@@ -19,20 +19,30 @@ using Silvergun.MCPServer.Jobs;
 public sealed class JobTools(JobManager jobs, ServerState state)
 {
     #region Methods
-    [McpServerTool(Name = ToolNames.AnalyzePackage, Title = "Analyze a NuGet package", ReadOnly = true, Idempotent = true, Destructive = false, OpenWorld = false)]
-    [Description("Starts the analysis of a .nupkg file that lies under one of the server's roots, and returns a jobId at once. "
-        + "Then call wait_for_job until it completes, and get_summary. Results are kept on disk and survive server restarts: "
-        + "calling this again with the same file returns the same jobId, and a completed result is served from the cache "
-        + "(to servers started with the same network setting). "
+    // Open world: with id and version it downloads from nuget.org (task S5).
+    [McpServerTool(Name = ToolNames.AnalyzePackage, Title = "Analyze a NuGet package", ReadOnly = true, Idempotent = true, Destructive = false, OpenWorld = true)]
+    [Description("Starts the analysis of a package and returns a jobId at once: either a .nupkg file that lies under one of the "
+        + "server's roots (path), or a package on nuget.org (id and version), which the server downloads first (only when it "
+        + "runs with network access). Then call wait_for_job until it completes, and get_summary. Results are kept on disk and "
+        + "survive server restarts: calling this again with the same file or id and version returns the same jobId, and a "
+        + "completed result is served from the cache (to servers started with the same network setting). "
         + "Nothing in the package is executed. " + UntrustedReason)]
     public async Task<CallToolResult> AnalyzePackage(
-        [Description("Path of the .nupkg file. It must lie under a root the server was started with.")] string path,
+        [Description("Path of the .nupkg file. It must lie under a root the server was started with. Omit it when giving id and version.")] string? path = null,
         [Description("\"standard\" (the scan-package passes) or \"deep\" (also call-graph reachability and SSA argument values; much slower).")] string depth = "standard",
+        [Description("A nuget.org package id, e.g. \"Newtonsoft.Json\", with version; instead of path.")] string? id = null,
+        [Description("The package version, e.g. \"13.0.3\", with id.")] string? version = null,
         CancellationToken ct = default)
     {
         var elapsed = Stopwatch.StartNew();
         if (ParseDepth(depth) is not { } parsed)
             return ToolEnvelope.Create(ToolNames.AnalyzePackage, ToolStatus.InvalidArgument, elapsed, message: "depth must be \"standard\" or \"deep\"");
+        if (id is not null || version is not null)
+            return path is not null
+                ? ToolEnvelope.Create(ToolNames.AnalyzePackage, ToolStatus.InvalidArgument, elapsed, message: "give either path, or id and version, not both")
+                : await FromNuGet(id, version, parsed, elapsed, ct);
+        if (path is null)
+            return ToolEnvelope.Create(ToolNames.AnalyzePackage, ToolStatus.InvalidArgument, elapsed, message: "give path, or id and version");
         var (full, status, problem) = PackageInput.Check(path, state.Settings.Roots);
         if (full is null)
             return ToolEnvelope.Create(ToolNames.AnalyzePackage, status, elapsed, message: problem);
@@ -105,6 +115,32 @@ public sealed class JobTools(JobManager jobs, ServerState state)
         // The child already removed host paths; this is the backstop for the server's own (D6.5), on free text only.
         data["summary"] = HostPaths.ReduceReasons(summary, HostPaths.ForServer(jobs.Store.Root));
         return ToolEnvelope.Create(ToolNames.GetSummary, ToolStatus.Succeeded, elapsed, data);
+    }
+
+    // analyze_package {id, version} (task S5): refused without the network before anything is checked or sent.
+    private async Task<CallToolResult> FromNuGet(string? id, string? version, JobDepth depth, Stopwatch elapsed, CancellationToken ct)
+    {
+        if (!jobs.Network.Enabled)
+            return ToolEnvelope.Create(ToolNames.AnalyzePackage, ToolStatus.NotPermitted, elapsed, message: JobManager.NetworkOff);
+        var (lowerId, lowerVersion, invalid) = NuGetDownload.Check(id, version);
+        if (invalid is not null)
+            return ToolEnvelope.Create(ToolNames.AnalyzePackage, ToolStatus.InvalidArgument, elapsed, message: invalid);
+
+        var (view, source, downloaded, status, problem) = await jobs.SubmitPackageAsync(lowerId!, lowerVersion!, depth, ct);
+        if (view is null)
+            return ToolEnvelope.Create(ToolNames.AnalyzePackage, status, elapsed, message: problem);
+        var data = Job(view);
+        data["source"] = new JsonObject
+        {
+            ["registry"] = "nuget.org",
+            ["id"] = source!.Id,
+            ["version"] = source.Version,
+            ["url"] = ToolEnvelope.Untrusted(source.Url, 512),
+            ["fetchedAt"] = source.FetchedAt.UtcDateTime.ToString("O"),
+        };
+        if (downloaded)
+            data["downloaded"] = true;
+        return Respond(ToolNames.AnalyzePackage, view, elapsed, data);
     }
 
     // The envelope for a job's view: its state as the status, a Failed or Cancelled job's reason wrapped as untrusted.

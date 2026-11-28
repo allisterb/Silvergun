@@ -18,11 +18,11 @@ public sealed class S2ArtifactTests : IDisposable
 {
     #region Methods
     /// <summary>
-    /// 4 since task S4 (the MSBuild list, <c>msbuild.jsonl</c>, and its index entry); 3 was S3's member and string lists. An
-    /// entry of an older schema is re-run, never half-read.
+    /// 5 since task S5 (the required <c>intel.json</c>); 4 was S4's MSBuild list, 3 S3's member and string lists. An entry of
+    /// an older schema is re-run, never half-read.
     /// </summary>
     [Fact]
-    public void SchemaVersion_IsFour() => Assert.Equal(4, JobArtifacts.SchemaVersion);
+    public void SchemaVersion_IsFive() => Assert.Equal(5, JobArtifacts.SchemaVersion);
 
     [Fact]
     public void ReadIndex_AcceptsTheChildsShape()

@@ -142,7 +142,7 @@ public sealed class JobLifetimeTests
     {
         using var dirs = new TestDirs();
         var cache = Path.Combine(dirs.Base, "cache-not-yet");
-        using var rpc = await McpRpc.StartAsync(["mcp", "--root", dirs.Root, "--cache-dir", cache, "--log-dir", dirs.Logs], dirs.Root);
+        using var rpc = await McpRpc.StartAsync(["mcp", "--root", dirs.Root, "--cache-dir", cache, "--log-dir", dirs.Logs, "--no-network"], dirs.Root);
         using var watch = new TreeWatcher(rpc.Child.Id);
 
         rpc.Child.Send("""{"jsonrpc":"2.0","id":2,"method":"tools/list"}""");

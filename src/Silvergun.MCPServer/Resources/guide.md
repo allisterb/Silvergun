@@ -33,7 +33,7 @@ what it could not analyse, and what Silvergun's own deterministic gate decides. 
 - `native`: native binaries, identified by their headers.
 - `anomalies`: hostile entry names in the package's zip, such as control characters, bidi overrides, path traversal and
   case-only collisions.
-- `vulnerabilities`: known vulnerabilities from OSV, checked only when the server runs with network access.
+- `vulnerabilities`: known vulnerabilities from OSV, checked only when the server runs with network access (the default).
 
 `get_reachability` (deep jobs only) says who can make the package's code run, by root class:
 
@@ -115,6 +115,31 @@ loads.
   name, for example `AdditionalProperties` on a `ProjectReference`. It can redirect where the consumer's own projects
   build, and every write that uses a settable property reads as unknown.
 
+## Network intel
+
+The server uses the network unless it was started with `--no-network`. Then `get_intel`, and `analyze_package` with
+an id and version, refuse with `NotPermitted`.
+
+- `analyze_package` with `id` and `version` downloads the package from nuget.org.
+  - `source` gives the URL and `fetchedAt`.
+  - `downloaded: true` appears only when it was downloaded now.
+  - A repeat request whose result is cached sends nothing.
+- `get_intel` reports what was found when the job ran (`fetchedAt`). Each part has a `status`, and its numbers mean
+  something only when it is `checked`.
+  - `vulnerabilities`: the OSV check's status and count. The findings themselves come from `get_findings` with kind
+    `vulnerabilities`.
+  - `health`: the source project on GitHub, found from the package's repository or project URL.
+    - `noRepository` means the package names no GitHub repository.
+    - The package chooses that URL, so the repository may not be the package's real source.
+    - Scores and `band` are Silvergun's. `redFlags` are Silvergun's tokens.
+  - `squat`: nuget.org packages whose ids are near this one and far more downloaded. A finding is a package this one may
+    imitate.
+    - The check scores the results of one search (`searched`).
+    - A near id outside those results is not seen, so an empty list is not proof that there is no squat.
+    - `targetListed: false` means nuget.org's search does not list this id at all.
+- `refusals` lists hosts that answered 429, 403 or a bot challenge. Silvergun then sent them nothing more, so the parts
+  that needed them read `refused`.
+
 ## Traps
 
 - A list is complete only when all three hold:
@@ -160,5 +185,7 @@ loads.
 - Native code is only YARA-scanned and identified by its headers.
 - Reflection and `dynamic` targets are unresolved unless value-flow analysis recovered a constant.
 - An `<Exec>` command in a build file is a fact about text, not a record of what it would do when run.
+- Network intel is a snapshot from when the job ran. A vulnerability published later, or a squat registered later, is
+  not in it.
 - MSBuild facts come from the package's own files. The consumer's project and SDK may set or override any property, and
   a build file Silvergun could not parse (`notParsed` in the pass) may still load in a real build.

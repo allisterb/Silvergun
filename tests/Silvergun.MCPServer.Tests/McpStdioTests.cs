@@ -167,7 +167,7 @@ public sealed class McpStdioTests
         var file = Path.Combine(dirs.Base, "not-a-dir");
         File.WriteAllText(file, "x");
         var logDir = what == "an existing file" ? file : Path.Combine(file, "logs");
-        using var child = McpChildProcess.Start(["mcp", "--root", dirs.Root, "--cache-dir", dirs.Cache, "--log-dir", logDir], dirs.Root);
+        using var child = McpChildProcess.Start(["mcp", "--root", dirs.Root, "--cache-dir", dirs.Cache, "--log-dir", logDir, "--no-network"], dirs.Root);
 
         var exit = await child.CloseStdinAndWaitForExitAsync();
 
@@ -264,7 +264,7 @@ public sealed class McpParserOutputTests
     {
         using var dirs = new TestDirs();
         var args = extra.Select(a => a == NonexistentMarker ? Path.Combine(dirs.Base, "no-such-root") : a).ToArray();
-        using var child = McpChildProcess.Start(["mcp", .. args, "--cache-dir", dirs.Cache, "--log-dir", dirs.Logs], dirs.Root);
+        using var child = McpChildProcess.Start(["mcp", .. args, "--cache-dir", dirs.Cache, "--log-dir", dirs.Logs, "--no-network"], dirs.Root);
 
         var exit = await child.CloseStdinAndWaitForExitAsync();
 

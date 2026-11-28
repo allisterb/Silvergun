@@ -38,6 +38,18 @@ public sealed class CompletedEntryFixture : IAsyncLifetime
         var view = await InProcess.RunToEndAsync(InProcess.Manager(dirs), Package);
         Assert.True(view.State == JobState.Completed, $"the fixture job did not complete: {view.State} {view.Reason}");
         Record = view.Record!;
+
+        // The run releases the entry's lock just after it reports Completed; a copy taken before then fails on the open .lock.
+        var store = new JobStore(dirs.Cache, long.MaxValue);
+        var clock = Stopwatch.StartNew();
+        while (true)
+        {
+            using (var held = store.TryLock(Sha256, JobDepth.Standard))
+                if (held is not null)
+                    break;
+            Assert.True(clock.Elapsed < TimeSpan.FromSeconds(30), "the fixture job's lock was never released");
+            await Task.Delay(50);
+        }
     }
 
     /// <summary>A fresh cache holding a copy of the completed entry, and the package under <paramref name="dirs"/>' root.</summary>

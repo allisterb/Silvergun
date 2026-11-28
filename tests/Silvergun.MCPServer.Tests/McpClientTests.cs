@@ -52,7 +52,7 @@ public sealed class McpClientTests
 
         var tools = await client.ListToolsAsync(cancellationToken: cts.Token);
 
-        foreach (var name in new[] { ToolNames.AnalyzePackage, ToolNames.WaitForJob, ToolNames.CancelJob, ToolNames.GetSummary })
+        foreach (var name in new[] { ToolNames.WaitForJob, ToolNames.CancelJob, ToolNames.GetSummary })
         {
             var annotations = Assert.Single(tools, t => t.Name == name).ProtocolTool.Annotations;
             Assert.NotNull(annotations);
@@ -61,6 +61,33 @@ public sealed class McpClientTests
             Assert.False(annotations.DestructiveHint, $"{name}: destructiveHint");
             Assert.False(annotations.OpenWorldHint, $"{name}: openWorldHint");
         }
+    }
+
+    /// <summary>
+    /// S5: <c>analyze_package</c> (which downloads from nuget.org given an id and version) and <c>get_intel</c> are the
+    /// open-world tools; both are still read-only, idempotent and not destructive. Every other tool stays closed-world.
+    /// </summary>
+    [Fact]
+    public async Task ToolsList_OnlyTheS5Tools_AreOpenWorld()
+    {
+        using var dirs = new TestDirs();
+        using var cts = new CancellationTokenSource(McpCli.Timeout);
+        var stderr = new List<string>();
+        await using var client = await ConnectAsync(McpCli.Args(dirs), dirs, stderr, cts.Token);
+
+        var tools = await client.ListToolsAsync(cancellationToken: cts.Token);
+
+        foreach (var name in new[] { ToolNames.AnalyzePackage, ToolNames.GetIntel })
+        {
+            var annotations = Assert.Single(tools, t => t.Name == name).ProtocolTool.Annotations;
+            Assert.NotNull(annotations);
+            Assert.True(annotations.ReadOnlyHint, $"{name}: readOnlyHint");
+            Assert.True(annotations.IdempotentHint, $"{name}: idempotentHint");
+            Assert.False(annotations.DestructiveHint, $"{name}: destructiveHint");
+            Assert.True(annotations.OpenWorldHint, $"{name}: openWorldHint");
+        }
+        Assert.Equal(new[] { ToolNames.AnalyzePackage, ToolNames.GetIntel }.Order(),
+            tools.Where(t => t.ProtocolTool.Annotations?.OpenWorldHint != false).Select(t => t.Name).Order());
     }
 
     [Fact]

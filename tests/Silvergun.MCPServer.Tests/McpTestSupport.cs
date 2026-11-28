@@ -25,9 +25,12 @@ internal static class ApphostPath
 internal static class McpCli
 {
     #region Methods
-    /// <summary><c>mcp</c> with this run's isolated root, cache and log directories, then <paramref name="extra"/>.</summary>
+    /// <summary>
+    /// <c>mcp</c> with this run's isolated root, cache and log directories and <c>--no-network</c> (the network is on by
+    /// default since S5, and no test may reach a real host), then <paramref name="extra"/>.
+    /// </summary>
     public static string[] Args(TestDirs dirs, params string[] extra) =>
-        ["mcp", "--root", dirs.Root, "--cache-dir", dirs.Cache, "--log-dir", dirs.Logs, .. extra];
+        ["mcp", "--root", dirs.Root, "--cache-dir", dirs.Cache, "--log-dir", dirs.Logs, "--no-network", .. extra];
     #endregion
 
     #region Fields

@@ -1,6 +1,7 @@
 namespace Silvergun.Intel;
 
 using System;
+using System.Text.RegularExpressions;
 
 /// <summary>
 /// A resolved source-repository reference. <paramref name="Host"/> is <c>"github"</c> in v1 (the only host
@@ -70,7 +71,8 @@ public static class GitHubRepoUrl
         if (name.EndsWith(GitSuffix, StringComparison.OrdinalIgnoreCase))
             name = name.Substring(0, name.Length - GitSuffix.Length);
 
-        if (owner.Length == 0 || name.Length == 0)
+        // GitHub's own name rules, so a segment can never be "." or ".." and redirect an API path (S5 review W1).
+        if (!ownerPattern.IsMatch(owner) || !repoPattern.IsMatch(name) || name is "." or "..")
             return false;
 
         repo = new RepositoryRef(GitHubHost, owner, name);
@@ -87,5 +89,8 @@ public static class GitHubRepoUrl
     private const string SshPrefix = "git@";
     private const string GitPlusPrefix = "git+";
     private const string GitSuffix = ".git";
+
+    private static readonly Regex ownerPattern = new(@"\A[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\z", RegexOptions.CultureInvariant);
+    private static readonly Regex repoPattern = new(@"\A[A-Za-z0-9._-]{1,100}\z", RegexOptions.CultureInvariant);
     #endregion
 }

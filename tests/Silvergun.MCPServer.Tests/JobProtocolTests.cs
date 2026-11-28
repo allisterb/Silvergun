@@ -86,7 +86,7 @@ public sealed class JobWorkerTests
         (string Nupkg, string Files, JobDepth Depth, bool Network)? seen = null;
         JobScan scan = (nupkg, files, depth, network, progress) =>
         {
-            seen = (nupkg, files, depth, network);
+            seen = (nupkg, files, depth, network is not null);   // since S5 review round 1 the scan gets the job's client, or null
             progress.Report(new PackageScanProgress(PackageScanStage.Extract, 0, 1));
             progress.Report(new PackageScanProgress(PackageScanStage.Assemblies, 1, 3));
             return Result.Failure<JobScanOutput>("bad" + (char)10 + "[ERR] forged" + rlo + " package");
@@ -193,7 +193,8 @@ public sealed class JobWorkerTests
     {
         using var stdin = new MemoryStream(Encoding.UTF8.GetBytes(stdinText));
         using var stdout = new MemoryStream();
-        var exit = JobWorker.Run(protocol, stdin, stdout, scan, parentGone ?? (() => { }));
+        // A request with network gets a client over this handler, never the real transport: nothing here may reach a host.
+        var exit = JobWorker.Run(protocol, stdin, stdout, scan, parentGone ?? (() => { }), () => new FakeHttp(r => throw new InvalidOperationException($"no request may be sent ({r.RequestUri})")));
         var raw = stdout.ToArray();
         return new WorkerRun(exit, Records(raw), raw);
     }

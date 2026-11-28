@@ -6,10 +6,12 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Silvergun.Intel;
 using Silvergun.PackageAnalysis.NuGet.Yara.Worker;
 
 /// <summary>Where a job is, as the tools report it.</summary>
@@ -30,10 +32,19 @@ public sealed record JobView(string JobId, JobState State, string? Stage, int Do
 /// ran it. Nothing here runs before the first tool call. <paramref name="inspector"/> starts <c>disassemble</c>'s inspect
 /// children (task S3); by default it is <paramref name="launch"/>'s executable as the inspect worker.
 /// </summary>
-public sealed class JobManager(McpServerSettings settings, JobLaunch launch, JobLaunch? inspector = null)
+public sealed class JobManager(McpServerSettings settings, JobLaunch launch, JobLaunch? inspector = null, NetworkAccess? network = null)
 {
     #region Properties
     public JobStore Store { get; } = new(settings.CacheDir, (long)settings.CacheMaxGb * 1024 * 1024 * 1024, settings.Network);
+
+    /// <summary>The server's network access (task S5); off with <c>--no-network</c>.</summary>
+    // Spaced like each job child, so the server and its jobs together keep about one request a second per host (S5 review S-A).
+    public NetworkAccess Network { get; } = network is null ? new(settings.Network, minInterval: TimeSpan.FromMilliseconds(SpacingMs(settings.MaxJobs)))
+        : network.Enabled == settings.Network ? network
+        : throw new ArgumentException("the network access must agree with the settings' network choice", nameof(network));
+
+    /// <summary>The nuget.org service index downloads start from; null for the public one (a test seam).</summary>
+    public string? ServiceIndexUrl { get; init; }
     #endregion
 
     #region Methods
@@ -60,11 +71,82 @@ public sealed class JobManager(McpServerSettings settings, JobLaunch launch, Job
         {
             copies.Release();
         }
-        if (sha is null)
-            return (null, ToolStatus.Failed, problem);
+        return sha is null ? (null, ToolStatus.Failed, problem) : Submit(incoming, sha, bytes, depth);
+    }
 
+    /// <summary>
+    /// Downloads <paramref name="id"/> <paramref name="version"/> (checked by <see cref="NuGetDownload.Check"/>) from nuget.org into the
+    /// cache, then serves it from disk or queues a job for it (task S5). A recorded download whose entry is complete sends nothing.
+    /// Only with the network on. The source, when there is a view.
+    /// </summary>
+    public async Task<(JobView? View, NuGetSource? Source, bool Downloaded, ToolStatus Status, string? Problem)> SubmitPackageAsync(string id, string version, JobDepth depth, CancellationToken ct)
+    {
+        if (!Network.Enabled)
+            return (null, null, false, ToolStatus.NotPermitted, NetworkOff);
+        if (Prepared() is { Length: > 0 } unusable)
+            return (null, null, false, ToolStatus.Failed, unusable);
+        if (NuGetDownload.Recorded(Store.Root, id, version) is { } known)
+        {
+            foreach (var served in Served(depth))
+                if (Store.Completed(known.Sha256, served) is ({ } record, null))
+                {
+                    Store.Touch(known.Sha256, served);
+                    return (CompletedView(JobId(known.Sha256, served), record, Store.EntryDir(known.Sha256, served), cached: true), known, false, ToolStatus.Succeeded, null);
+                }
+            // A run of this download still in flight here: join it rather than download again.
+            if (jobs.TryGetValue(JobId(known.Sha256, depth), out var running) && !running.Terminal)
+                return (running.View(), known, false, ToolStatus.Succeeded, null);
+        }
+        if (QueueFull())
+            return (null, null, false, ToolStatus.Busy, $"{McpLimits.MaxQueuedJobs} jobs are already queued; wait for one to finish");
+        // One download per package at a time: a second request waits for the first's record rather than fetch it again (S5 review S4).
+        var key = id + "/" + version;
+        if (!downloading.TryAdd(key, 0))
+            return (null, null, false, ToolStatus.Busy, "this package is already being downloaded; call again shortly");
+        NuGetSource? source;
+        ToolStatus status;
+        string? problem;
+        string incoming;
+        try
+        {
+            if (!await downloads.WaitAsync(TimeSpan.Zero, ct))
+                return (null, null, false, ToolStatus.Busy, $"{MaxConcurrentDownloads} downloads are already in progress; try again shortly");
+            try
+            {
+                try
+                {
+                    incoming = Store.IncomingPath();
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    return (null, null, false, ToolStatus.Failed, $"the cache's incoming directory is not usable ({ex.GetType().Name})");
+                }
+                var http = Network.Client();
+                index ??= new NuGetSearchClient(http, ServiceIndexUrl);
+                (source, status, problem) = await NuGetDownload.FetchAsync(http, Network.Polite, id, version, incoming, ct, ServiceIndexUrl, index);
+            }
+            finally
+            {
+                downloads.Release();
+            }
+            if (source is not null)
+                NuGetDownload.Record(Store.Root, source);
+        }
+        finally
+        {
+            downloading.TryRemove(key, out _);
+        }
+        if (source is null)
+            return (null, null, false, status, problem);
+        var (view, submitted, why) = Submit(incoming, source.Sha256, source.Bytes, depth);
+        return (view, view is null ? null : source, view is not null, submitted, why);
+    }
+
+    // A hashed copy in incoming/: served from disk, joined to the run already in flight, or queued.
+    private (JobView? View, ToolStatus Status, string? Problem) Submit(string incoming, string sha, long bytes, JobDepth depth)
+    {
         // A deep entry serves a standard request too.
-        foreach (var served in depth == JobDepth.Standard ? new[] { JobDepth.Standard, JobDepth.Deep } : [JobDepth.Deep])
+        foreach (var served in Served(depth))
             if (Store.Completed(sha, served) is ({ } record, null))
             {
                 Discard(incoming);
@@ -300,7 +382,7 @@ public sealed class JobManager(McpServerSettings settings, JobLaunch launch, Job
             var memory = deep ? McpLimits.DeepJobMemoryBytes : McpLimits.JobMemoryBytes;
             var startedAt = DateTimeOffset.UtcNow;
             var result = await Task.Factory.StartNew(
-                () => JobProcess.Run(launch, new JobRequest(JobProtocol.Version, temp, run.Depth, settings.Network), budget, memory, McpLimits.JobHeapBytes,
+                () => JobProcess.Run(launch, Request(temp, run.Depth), budget, memory, McpLimits.JobHeapBytes,
                     p => run.Update(p.Stage, p.Done, p.Total), ct),
                 CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
 
@@ -314,11 +396,13 @@ public sealed class JobManager(McpServerSettings settings, JobLaunch launch, Job
                     return;
             }
 
-            if ((JobArtifacts.MissingArtifact(temp) ?? JobArtifacts.ReadGate(temp).Problem ?? JobArtifacts.ReadSummary(temp).Problem ?? JobArtifacts.ReadIndex(temp).Problem) is { } bad)
+            if ((JobArtifacts.MissingArtifact(temp) ?? JobArtifacts.ReadGate(temp).Problem ?? JobArtifacts.ReadSummary(temp).Problem ?? JobArtifacts.ReadIndex(temp).Problem
+                ?? JobArtifacts.ReadIntel(temp).Problem) is { } bad)
             {
                 run.End(JobState.Failed, WithoutHostPaths($"the job's results failed their checks: {bad}"));
                 return;
             }
+            LearnStops(temp);
             var record = new JobRecord(JobArtifacts.SchemaVersion, run.Sha256, run.Depth, BuildIdentity.BuildKey, ServerState.SilvergunVersion,
                 BuildIdentity.RulesHash, settings.Network, (int)budget.TotalSeconds, memory, startedAt, DateTimeOffset.UtcNow,
                 result.Done!.ElapsedMs, result.Done.Stages, run.PackageBytes, 0);
@@ -341,6 +425,26 @@ public sealed class JobManager(McpServerSettings settings, JobLaunch launch, Job
                 try { Directory.Delete(temp, recursive: true); }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* an orphan; the next touch of the key deletes it */ }
         }
+    }
+
+    // The child's request. With the network on, it carries the hosts the server will not ask again, and a spacing scaled so this
+    // server's jobs and its own downloads together keep about one request a second per host (S5 review W4).
+    private JobRequest Request(string temp, JobDepth depth) =>
+        settings.Network
+            ? new JobRequest(JobProtocol.Version, temp, depth, true, Network.StoppedHosts, MinIntervalMs: SpacingMs(settings.MaxJobs))
+            : new JobRequest(JobProtocol.Version, temp, depth, false);
+
+    // Per-host spacing for each of the server's at most maxJobs + 1 senders (its jobs and itself).
+    private static int SpacingMs(int maxJobs) => 1000 * (maxJobs + 1);
+
+    // Adds the hosts a finished job saw refuse to the server's stop set, so no later job or download asks them (S5 review W4).
+    private void LearnStops(string dir)
+    {
+        if (JobArtifacts.ReadIntel(dir).Intel?["refusals"] is not JsonArray refusals)
+            return;
+        foreach (var refusal in refusals.OfType<JsonObject>())
+            if (refusal["host"] is JsonValue host && host.TryGetValue<string>(out var h) && refusal["why"] is JsonValue why && why.TryGetValue<string>(out var w))
+                Network.Stop(h, w);
     }
 
     // A job this process does not hold: a completed entry, another process's run, or nothing.
@@ -403,6 +507,9 @@ public sealed class JobManager(McpServerSettings settings, JobLaunch launch, Job
         return probe is not null;
     }
 
+    // The depths whose entry serves a request at `depth`: a deep entry serves a standard request too.
+    private static JobDepth[] Served(JobDepth depth) => depth == JobDepth.Standard ? [JobDepth.Standard, JobDepth.Deep] : [JobDepth.Deep];
+
     private bool QueueFull() => jobs.Values.Count(j => j.State == JobState.Queued) >= McpLimits.MaxQueuedJobs;
 
     // How long a run waits on another process's lock before giving up: that run's own budget, plus a margin.
@@ -450,19 +557,27 @@ public sealed class JobManager(McpServerSettings settings, JobLaunch launch, Job
     #endregion
 
     #region Fields
+    /// <summary>Why a network tool refuses under <c>--no-network</c>.</summary>
+    public const string NetworkOff = "the server was started with --no-network; only the person who started it can allow network access";
+
     private const int MaxConcurrentCopies = 2;
+    private const int MaxConcurrentDownloads = 2;
     private static readonly TimeSpan InspectSlotWait = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan PeerPoll = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan CancelWait = TimeSpan.FromSeconds(10);
     private const int MaxCostSamples = 10_000;
 
     // The stages in the order they run; reachability last, and only when deep.
-    private static readonly string?[] stageOrder = ["extract", "assemblies", "scripts", "yara", "write", "reachability"];
+    private static readonly string?[] stageOrder = ["extract", "assemblies", "scripts", "yara", "intel", "write", "reachability"];
 
     private static readonly Regex jobIdPattern = new(@"\A([0-9a-f]{64})-(standard|deep)\z", RegexOptions.CultureInvariant);
 
     private readonly SemaphoreSlim gate = new(settings.MaxJobs, settings.MaxJobs);
     private readonly SemaphoreSlim copies = new(MaxConcurrentCopies, MaxConcurrentCopies);
+    private readonly SemaphoreSlim downloads = new(MaxConcurrentDownloads, MaxConcurrentDownloads);
+    private readonly ConcurrentDictionary<string, byte> downloading = new(StringComparer.Ordinal);
+    // The service index, read once per server (S5 review S4).
+    private NuGetSearchClient? index;
     private readonly SemaphoreSlim inspections = new(McpLimits.MaxInspections, McpLimits.MaxInspections);
     private readonly ConcurrentDictionary<string, JobRun> jobs = new(StringComparer.Ordinal);
     private readonly CancellationTokenSource shutdown = new();

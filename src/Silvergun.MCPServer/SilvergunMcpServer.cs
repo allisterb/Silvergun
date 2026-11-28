@@ -32,8 +32,11 @@ public static class SilvergunMcpServer
     public static async Task RunAsync(McpServerSettings settings, Stream input, Stream output, CancellationToken ct = default) =>
         await RunAsync(settings, input, output, JobLaunch.Cli(), ct);
 
-    /// <summary><see cref="RunAsync(McpServerSettings, Stream, Stream, CancellationToken)"/> with the job child's launch as a test seam.</summary>
-    public static async Task RunAsync(McpServerSettings settings, Stream input, Stream output, JobLaunch launch, CancellationToken ct = default)
+    /// <summary>
+    /// <see cref="RunAsync(McpServerSettings, Stream, Stream, CancellationToken)"/> with the job child's launch and the server's network
+    /// access (task S5) as test seams.
+    /// </summary>
+    public static async Task RunAsync(McpServerSettings settings, Stream input, Stream output, JobLaunch launch, CancellationToken ct = default, NetworkAccess? network = null)
     {
         var builder = Host.CreateEmptyApplicationBuilder(null);
         builder.Logging
@@ -46,7 +49,7 @@ public static class SilvergunMcpServer
         // No "Press Ctrl+C" or content-root host path in the log.
         builder.Services.Configure<ConsoleLifetimeOptions>(o => o.SuppressStatusMessages = true);
         var state = new ServerState(settings);
-        var jobs = new JobManager(settings, launch);
+        var jobs = new JobManager(settings, launch, network: network);
         builder.Services.AddSingleton(state);
         builder.Services.AddSingleton(jobs);
         builder.Services
@@ -86,6 +89,8 @@ public static class SilvergunMcpServer
         + "To follow a finding into code: its callerTokens name the method; disassemble lists its IL, list_members lists an "
         + "assembly's methods, and search_strings finds string constants with the method that loads each.\n"
         + "get_build_integration shows what the package's .targets and .props files do in a consumer's build.\n"
+        + "With network access, analyze_package also takes a nuget.org id and version, and get_intel gives the source project's "
+        + "health, a squat check and the vulnerability check's status.\n"
         + "Read the resource " + GuideResource.Uri + " before investigating a package.";
 
     private const string SdkLogCategory = "ModelContextProtocol";

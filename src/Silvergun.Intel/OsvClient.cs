@@ -24,10 +24,18 @@ public sealed class OsvClient : IVulnerabilitySource
     /// Creates a client. <paramref name="httpClient"/> and <paramref name="baseUrl"/> are injectable for testing (no
     /// real network in unit tests); they default to a fresh <see cref="HttpClient"/> against the public OSV.dev API.
     /// </summary>
-    public OsvClient(HttpClient? httpClient = null, string? baseUrl = null)
+    /// <remarks>
+    /// <paramref name="maxDetails"/> bounds the <c>/v1/vulns/{id}</c> lookups; ids past it are id-only findings, so a package
+    /// declaring hundreds of vulnerable dependencies cannot make one query send hundreds of requests (MCP task S5 review C1).
+    /// <paramref name="budget"/>, when set, bounds a whole <see cref="QueryAsync"/>: run out during the batches, the result is not
+    /// queried, with no findings; run out during the details, every remaining id is an id-only finding and nothing more is sent.
+    /// </remarks>
+    public OsvClient(HttpClient? httpClient = null, string? baseUrl = null, int maxDetails = int.MaxValue, TimeSpan? budget = null)
     {
         http = httpClient ?? new HttpClient();
         this.baseUrl = (baseUrl ?? DefaultBaseUrl).TrimEnd('/');
+        this.maxDetails = maxDetails;
+        this.budget = budget;
     }
     #endregion
 
@@ -45,7 +53,65 @@ public sealed class OsvClient : IVulnerabilitySource
         if (queries is null || queries.Count == 0)
             return new OsvQueryResult(true, Array.Empty<VulnerabilityFinding>());
 
-        // vuln id → the input query indices it was returned for (an id can match multiple packages).
+        // The client's own wall clock (MCP task S5 review W-A, round 3 W-B): a budget that runs out during the batches makes the
+        // check not queried; one that runs out during the details only makes the remaining ids id-only, never drops them.
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        if (budget is { } b)
+            limit.CancelAfter(b);
+        Dictionary<string, List<int>> idToQueries;
+        bool queried;
+        try
+        {
+            (idToQueries, queried) = await BatchesAsync(queries, limit.Token);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return new OsvQueryResult(false, Array.Empty<VulnerabilityFinding>());
+        }
+
+        var findings = new List<VulnerabilityFinding>();
+        var details = 0;
+        foreach (var (id, indices) in idToQueries)
+        {
+            // null ⇒ id-only finding (never dropped): past maxDetails, past the budget, or a failed lookup.
+            var detail = details++ < maxDetails && !limit.IsCancellationRequested ? await DetailWithinAsync(id, limit.Token, ct) : null;
+            findings.AddRange(indices.Select(idx =>
+            {
+                var q = queries[idx];
+                return new VulnerabilityFinding(
+                    id,
+                    detail?.Aliases ?? Array.Empty<string>(),
+                    detail?.Summary,
+                    detail?.Severity,
+                    q.PackageId,
+                    q.Version,
+                    q.IsDependency,
+                    detail?.References ?? Array.Empty<string>());
+            }));
+        }
+
+        // A caller's cancellation between lookups is still a cancellation, not a result.
+        ct.ThrowIfCancellationRequested();
+        return new OsvQueryResult(queried, findings);
+    }
+
+    // One detail lookup under the budget: the budget running out is a failed lookup (null); the caller's cancellation propagates.
+    private async Task<VulnDetail?> DetailWithinAsync(string id, CancellationToken limit, CancellationToken caller)
+    {
+        try
+        {
+            return await FetchDetailAsync(id, limit);
+        }
+        catch (OperationCanceledException) when (!caller.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
+    // Every querybatch chunk: vuln id → the input query indices it was returned for (an id can match multiple packages),
+    // and whether every chunk completed.
+    private async Task<(Dictionary<string, List<int>> IdToQueries, bool Queried)> BatchesAsync(IReadOnlyList<OsvQuery> queries, CancellationToken ct)
+    {
         var idToQueries = new Dictionary<string, List<int>>(StringComparer.Ordinal);
         var queried = true;   // stays true only if EVERY querybatch chunk completes successfully.
 
@@ -70,30 +136,7 @@ public sealed class OsvClient : IVulnerabilitySource
                         ? idxs
                         : idToQueries[id] = new List<int>()).Add(offset + i);
         }
-
-        if (idToQueries.Count == 0)
-            return new OsvQueryResult(queried, Array.Empty<VulnerabilityFinding>());
-
-        var findings = new List<VulnerabilityFinding>();
-        foreach (var (id, indices) in idToQueries)
-        {
-            var detail = await FetchDetailAsync(id, ct);   // null ⇒ id-only finding (never dropped).
-            findings.AddRange(indices.Select(idx =>
-            {
-                var q = queries[idx];
-                return new VulnerabilityFinding(
-                    id,
-                    detail?.Aliases ?? Array.Empty<string>(),
-                    detail?.Summary,
-                    detail?.Severity,
-                    q.PackageId,
-                    q.Version,
-                    q.IsDependency,
-                    detail?.References ?? Array.Empty<string>());
-            }));
-        }
-
-        return new OsvQueryResult(queried, findings);
+        return (idToQueries, queried);
     }
 
     // POSTs a chunk to /v1/querybatch; returns the vuln IDs per query, aligned to chunk order. Returns null on any
@@ -262,6 +305,8 @@ public sealed class OsvClient : IVulnerabilitySource
 
     private readonly HttpClient http;
     private readonly string baseUrl;
+    private readonly int maxDetails;
+    private readonly TimeSpan? budget;
     #endregion
 
     #region Child types

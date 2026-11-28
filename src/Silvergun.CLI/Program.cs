@@ -6,6 +6,7 @@ namespace Silvergun.CLI;
 
 using System.CommandLine;
 using System.CommandLine.Parsing;
+using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -362,9 +363,14 @@ internal static class Program
         {
             Description = "A directory that packages given to the server must lie under. Repeatable. Default: the working directory."
         };
+        // Network intel is on by default (user, 2026-11-28); --network is kept so existing configs still parse.
         var mcpNetworkOption = new Option<bool>("--network")
         {
-            Description = "Allow network intel (OSV, project health, squat checks). Default off."
+            Description = "Allow network intel (OSV, project health, squat checks, nuget.org downloads). The default."
+        };
+        var mcpNoNetworkOption = new Option<bool>("--no-network")
+        {
+            Description = "Turn network intel off: the server sends nothing to any host."
         };
         var mcpMaxJobsOption = new Option<int>("--max-jobs")
         {
@@ -386,12 +392,17 @@ internal static class Program
         };
         var mcpCommand = new Command(McpVerb, "Run the Silvergun MCP server on stdin/stdout, for AI agents.")
         {
-            mcpRootOption, mcpNetworkOption, mcpMaxJobsOption, mcpCacheDirOption, mcpCacheMaxGbOption, mcpLogDirOption, debugOption
+            mcpRootOption, mcpNetworkOption, mcpNoNetworkOption, mcpMaxJobsOption, mcpCacheDirOption, mcpCacheMaxGbOption, mcpLogDirOption, debugOption
         };
+        mcpCommand.Validators.Add(result =>
+        {
+            if (result.GetValue(mcpNetworkOption) && result.GetValue(mcpNoNetworkOption))
+                result.AddError("--network and --no-network cannot both be given.");
+        });
         mcpCommand.SetAction(parse => RunMcp(
             mcpStdout ??= Console.OpenStandardOutput(),
             parse.GetValue(mcpRootOption) ?? [],
-            parse.GetValue(mcpNetworkOption),
+            !parse.GetValue(mcpNoNetworkOption),
             parse.GetValue(mcpMaxJobsOption),
             parse.GetValue(mcpCacheDirOption),
             parse.GetValue(mcpCacheMaxGbOption),
@@ -695,7 +706,7 @@ internal static class Program
     // mapped to a status and a single concise stderr note distinguishing "unavailable" (could not reach OSV — NOT a
     // clean result) from "no known vulnerabilities" (the check ran and found none) — so stdout/JSON stay pure.
     private static (IReadOnlyList<VulnerabilityFinding> Findings, VulnerabilityScanStatus Status) ResolveVulnerabilities(
-        PackageIdentityInfo pkg, IReadOnlyList<ResolvedDependency> resolved)
+        PackageIdentityInfo pkg, IReadOnlyList<ResolvedDependency> resolved, HttpClient? http = null)
     {
         try
         {
@@ -704,7 +715,7 @@ internal static class Program
             var queries = resolved.Count > 0
                 ? OsvQueryBuilder.Build(pkg, resolved)
                 : OsvQueryBuilder.Build(pkg);
-            var result = new OsvClient().QueryAsync(queries).GetAwaiter().GetResult();
+            var result = (http is null ? new OsvClient() : new OsvClient(http, maxDetails: MaxJobOsvDetails, budget: JobOsvBudget)).QueryAsync(queries).GetAwaiter().GetResult();
             var status = result.Queried ? VulnerabilityScanStatus.Completed : VulnerabilityScanStatus.Unavailable;
             Console.Error.WriteLine(status == VulnerabilityScanStatus.Unavailable
                 ? "scan-package: known-vulnerability check UNAVAILABLE (could not reach OSV); package NOT verified against known CVEs."
@@ -1242,7 +1253,7 @@ internal static class Program
     // One MCP job's analysis (ADR 0039 S1): scan-package's passes into the job's extraction directory, OSV only when the
     // server allows the network, then exactly scan-package --json's projection (the completeness splice included) and the
     // gate its exit-code seam decides. A deep job adds reachability and SSA, as --reachability --ssa do.
-    private static Result<JobScanOutput> ScanForJob(string nupkgPath, string extractionDir, JobDepth depth, bool network, IProgress<PackageScanProgress> progress)
+    private static Result<JobScanOutput> ScanForJob(string nupkgPath, string extractionDir, JobDepth depth, HttpClient? network, IProgress<PackageScanProgress> progress)
     {
         var deep = depth == JobDepth.Deep;
         var scan = PackageScanner.ScanInto(nupkgPath, extractionDir, progress, runReachability: deep, runSsa: deep);
@@ -1250,9 +1261,10 @@ internal static class Program
             return Result.Failure<JobScanOutput>(scan.Message ?? "the package could not be scanned", scan.Exception);
 
         var report = scan.Value;
-        if (network)
+        if (network is not null)
         {
-            var (findings, status) = ResolveVulnerabilities(report.Package, report.ResolvedDependencies);
+            // Through the job's polite client: spaced, stopped on a refusal, capped (MCP task S5 review C1).
+            var (findings, status) = ResolveVulnerabilities(report.Package, report.ResolvedDependencies, network);
             report = report with { Vulnerabilities = findings, VulnerabilitiesStatus = status };
         }
 
@@ -1346,6 +1358,10 @@ internal static class Program
 
     // gate.json's caveat bounds (JobArtifacts checks them on reading): a caveat can name many package paths.
     private const int MaxJobCaveats = 64;
+    // OSV detail lookups one MCP job may send; past it, findings are id-only (MCP task S5 review C1).
+    private const int MaxJobOsvDetails = 50;
+    // The OSV check's wall clock in an MCP job: past it the check is Unavailable with what it found, and the job keeps its static findings (S5 review W-A).
+    private static readonly TimeSpan JobOsvBudget = TimeSpan.FromSeconds(120);
     private const int MaxJobCaveatChars = 2000;
 
     // Env var carrying the libraries.io API key; presence auto-selects the libraries.io source. Never emitted.

@@ -261,7 +261,7 @@ public sealed class JobStore(string root, long maxBytes, bool network = false)
     }
 
     // Creates `dir` (and missing parents) private to the user: owner-only and inherited on Windows, 0700 elsewhere.
-    private static void CreatePrivate(string dir)
+    internal static void CreatePrivate(string dir)
     {
         if (Directory.Exists(dir))
             return;

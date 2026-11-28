@@ -57,7 +57,7 @@ public static class JobArtifacts
         var (record, problem) = Read<JobRecord>(Path.Combine(entryDir, JobProtocol.JobFile), MaxRecordBytes);
         return record is null ? (null, problem)
             : RecordProblem(record, sha256, depth, buildKey) is { } wrong ? (null, wrong)
-            : (MissingArtifact(entryDir) ?? ReadGate(entryDir).Problem ?? ReadSummary(entryDir).Problem ?? ReadIndex(entryDir).Problem) is { } bad ? (null, bad)
+            : (MissingArtifact(entryDir) ?? ReadGate(entryDir).Problem ?? ReadSummary(entryDir).Problem ?? ReadIndex(entryDir).Problem ?? ReadIntel(entryDir).Problem) is { } bad ? (null, bad)
             : (record, null);
     }
 
@@ -110,6 +110,30 @@ public static class JobArtifacts
         catch (Exception ex) when (ex is JsonException or ArgumentException)
         {
             return (null, "summary.json is not valid JSON");
+        }
+    }
+
+    /// <summary>
+    /// The intel a child wrote (task S5), or why it is not usable: <c>{"status": "notChecked"}</c>, or a checked object with
+    /// <c>vulnerabilities</c>, <c>health</c> and <c>squat</c> objects, each with a status.
+    /// </summary>
+    public static (JsonObject? Intel, string? Problem) ReadIntel(string dir)
+    {
+        var (bytes, problem) = ReadBounded(Path.Combine(dir, JobProtocol.IntelFile), MaxIntelBytes);
+        if (bytes is null)
+            return (null, problem);
+        try
+        {
+            static string? Status(JsonNode? node) => node is JsonObject o && o["status"] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
+            return JsonNode.Parse(bytes, documentOptions: JobProtocol.DocumentOptions) is JsonObject intel
+                    && (Status(intel) == "notChecked"
+                        || (Status(intel) == "checked" && new[] { "vulnerabilities", "health", "squat" }.All(k => Status(intel[k]) is not null)))
+                ? (intel, null)
+                : (null, "intel.json does not have the expected shape");
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or ArgumentException)
+        {
+            return (null, "intel.json is not valid JSON");
         }
     }
 
@@ -192,9 +216,9 @@ public static class JobArtifacts
     /// <summary>The artifact schema this build writes and reads. A cache entry of any other version is re-run, never half-read.</summary>
     /// <remarks>
     /// 2: the drill-down row files and their index (task S2). 3: the member and string lists, and caller tokens (S3). 4: the
-    /// MSBuild facts (S4).
+    /// MSBuild facts (S4). 5: network intel (S5).
     /// </remarks>
-    public const int SchemaVersion = 4;
+    public const int SchemaVersion = 5;
 
     public const long MaxRecordBytes = 64 * 1024;
     public const long MaxGateBytes = 256 * 1024;
@@ -202,6 +226,8 @@ public static class JobArtifacts
     public const long MaxReportBytes = 512L * 1024 * 1024;
     public const long MaxInventoryBytes = 128L * 1024 * 1024;
     public const long MaxIndexBytes = 256 * 1024;
+    /// <summary>intel.json's cap: what <see cref="JobIntel"/> writes is a few KiB by construction, and the tool serves it whole.</summary>
+    public const long MaxIntelBytes = 16 * 1024;
     /// <summary>A finding or reachability row file: the writer's cap, with room.</summary>
     public const long MaxRowFileBytes = RowWriter.DefaultMaxBytes + 16 * 1024 * 1024;
 
@@ -219,6 +245,7 @@ public static class JobArtifacts
         (JobProtocol.MembersFile, MaxRowFileBytes),
         (JobProtocol.StringsFile, MaxRowFileBytes),
         (JobProtocol.MsBuildFile, MaxRowFileBytes),
+        (JobProtocol.IntelFile, MaxIntelBytes),
         (JobProtocol.IndexFile, MaxIndexBytes),
         .. Enum.GetValues<FindingKind>().Select(k => (PackageFindings.FileName(k), MaxRowFileBytes)),
     ];

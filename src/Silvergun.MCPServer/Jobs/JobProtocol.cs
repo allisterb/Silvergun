@@ -63,6 +63,8 @@ public static class JobProtocol
     public const string StringsFile = "strings.jsonl";
     /// <summary>The package's MSBuild integration facts (task S4).</summary>
     public const string MsBuildFile = "msbuild.jsonl";
+    /// <summary>Network intel: project health, squat check, vulnerability status (task S5).</summary>
+    public const string IntelFile = "intel.json";
     /// <summary>Each row file's count and cut, and each finding kind's pass status: written last of the child's artifacts.</summary>
     public const string IndexFile = "index.json";
     public const string JobFile = "job.json";
@@ -90,8 +92,13 @@ public static class InspectProtocol
     #endregion
 }
 
-/// <summary>The one request line: the job directory (holding <see cref="JobProtocol.PackageFile"/>), the depth, and whether OSV may run.</summary>
-public sealed record JobRequest(int Protocol, string JobDir, JobDepth Depth, bool Network);
+/// <summary>
+/// The one request line: the job directory (holding <see cref="JobProtocol.PackageFile"/>), the depth, and whether the network may
+/// be used (task S5). <see cref="StoppedHosts"/> are hosts the server has already seen refuse, which the child never asks;
+/// <see cref="MinIntervalMs"/> is the child's spacing per host, scaled so all of the server's jobs together keep about one
+/// request a second.
+/// </summary>
+public sealed record JobRequest(int Protocol, string JobDir, JobDepth Depth, bool Network, IReadOnlyList<string>? StoppedHosts = null, int MinIntervalMs = 1000);
 
 /// <summary>An inspect request: list the method with MethodDef <see cref="Token"/> of <see cref="Assembly"/> (an absolute path) from IL offset <see cref="Offset"/>, in at most <see cref="MaxChars"/>.</summary>
 public sealed record InspectRequest(int Protocol, string Assembly, uint Token, uint Offset, int MaxChars);
